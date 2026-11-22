@@ -14,13 +14,15 @@
 
 ### [⬇ Download the latest release](https://github.com/icesucksatguitar/neutrino/releases/latest)
 
+Get the **`.msi` installer** (adds Start menu and desktop shortcuts), or the portable `.exe` if you'd rather not install anything.
+
 </div>
 
-> **Windows SmartScreen:** Neutrino isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
+> **Windows SmartScreen:** Neutrino isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. The installer also asks for administrator approval, because it installs to Program Files for all users. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
 
 ## Why Neutrino
 
-Arc stops working on **December 22, 2026**. Neutrino keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the download is a single ~10 MB executable. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
+Arc stops working on **December 22, 2026**. Neutrino keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
 
 ## Features
 
@@ -94,7 +96,7 @@ The endpoint is off by default and listens only on `127.0.0.1`. Every request ne
 - [x] Rust + Tauri v2 rewrite (the Electron prototype has been retired)
 - [x] Chrome Web Store extensions, download manager, MCP endpoint
 - [ ] Arc importer (Spaces, pinned tabs and folders)
-- [ ] Installer and Start-menu integration (releases are a portable `.exe` today)
+- [x] MSI installer with Start menu and desktop shortcuts
 - [ ] Auto-update
 - [ ] Code signing, to remove the SmartScreen warning
 - [ ] Password manager

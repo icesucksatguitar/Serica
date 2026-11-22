@@ -1,6 +1,6 @@
 {
   "name": "neutrino-rust",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Neutrino Browser - Rust + Tauri v2 implementation",
   "type": "module",
   "scripts": {
@@ -27,4 +27,3 @@
     "vite": "^6.1.0"
   }
 }
-
