@@ -7765,10 +7765,9 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
 }
 
 .macos-tabs-toggle-pill.active {
-  background: var(--theme-fg);
-  color: var(--theme-surface-solid);
-  border-color: var(--theme-fg);
-  box-shadow: var(--shadow-md);
+  background: var(--theme-surface);
+  color: var(--theme-fg);
+  border-color: var(--border-strong);
 }
 
 .macos-tabs-label {
@@ -7785,10 +7784,11 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
-  background: var(--bg-input);
-  color: var(--theme-fg-muted);
+  background: color-mix(in srgb, var(--theme-fg) 12%, transparent);
+  color: var(--theme-fg);
   font-size: 9.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .macos-tabs-space-dot {
@@ -7808,10 +7808,6 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   white-space: nowrap;
 }
 
-.macos-tabs-toggle-pill.active .macos-tabs-count {
-  background: var(--theme-accent-soft);
-  color: var(--theme-surface-solid);
-}
 
 .macos-tabs-toggle-pill.active .macos-tabs-space-name {
   color: inherit;
@@ -7831,22 +7827,7 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   color: var(--theme-fg);
 }
 
-[data-theme="light"] .macos-tabs-toggle-pill.active {
-  background: var(--theme-fg);
-  color: var(--theme-surface-solid);
-  border-color: var(--theme-fg);
-  box-shadow: var(--shadow-md);
-}
 
-[data-theme="light"] .macos-tabs-toggle-pill.active .macos-tabs-count {
-  background: var(--theme-surface-solid);
-  color: var(--theme-fg);
-}
-
-[data-theme="light"] .macos-tabs-count {
-  background: var(--bg-input);
-  color: var(--theme-fg-muted);
-}
 
 /* ==========================================================================
    ARC SIDEBAR PLACEMENT (App.tsx) & NOTIFICATION HAIRLINES
@@ -10948,4 +10929,94 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 .mcp-connect-note {
   font-size: 10.5px;
   color: var(--text-muted);
+}
+
+/* ==========================================================================
+   UI POLISH PASS
+   One visual language for the top bar: grouped capsules with borderless
+   buttons (matching the back/forward group), no hover "hop", and no inverted
+   white space pill.
+   ========================================================================== */
+.minimal-pill-btn:hover,
+.minimal-icon-btn:hover,
+.macos-tabs-toggle-pill:hover,
+.top-floating-url-pill:hover {
+  transform: none;
+}
+
+/* Space pill: icon dims when the sidebar is closed. */
+.macos-tabs-toggle-pill:not(.active) svg {
+  opacity: 0.6;
+}
+
+.macos-tabs-toggle-pill .macos-tabs-space-name {
+  font-weight: 600;
+}
+
+/* Right-hand tools: one capsule like the navigation group. */
+.minimal-top-right-cluster {
+  gap: 1px;
+  height: 32px;
+  padding: 0 3px;
+  border-radius: var(--radius-full);
+  background: var(--theme-surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-pill-btn,
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-icon-btn {
+  height: 26px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-full);
+}
+
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-pill-btn {
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-icon-btn {
+  width: 28px;
+}
+
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-pill-btn:hover,
+.floating-top-chrome-capsule .minimal-top-right-cluster > .minimal-icon-btn:hover {
+  background: color-mix(in srgb, var(--theme-fg) 10%, transparent);
+}
+
+/* Hairline between the status pills (VPN, Shields) and the tools. */
+.minimal-top-right-cluster > .minimal-pill-btn + .minimal-icon-btn {
+  position: relative;
+  margin-left: 6px;
+}
+
+.minimal-top-right-cluster > .minimal-pill-btn + .minimal-icon-btn::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+/* VPN state colors survive the borderless style. */
+.floating-top-chrome-capsule .minimal-top-right-cluster > .vpn-top-pill.vpn-connected {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.floating-top-chrome-capsule .minimal-top-right-cluster > .vpn-top-pill.vpn-error {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* Same height for every top-bar element. */
+.top-floating-url-pill {
+  height: 32px;
+  border-radius: var(--radius-full);
 }

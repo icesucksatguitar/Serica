@@ -22,7 +22,7 @@
   box-sizing: border-box;
   color: var(--nsb-fg);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 12%, transparent), transparent 220px),
+    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 6%, transparent), transparent 220px),
     var(--bg-sidebar-translucent, rgba(10, 10, 14, 0.48));
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -35,7 +35,7 @@
 
 [data-theme="light"] .nsb {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 12%, transparent), transparent 220px),
+    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 6%, transparent), transparent 220px),
     var(--bg-sidebar-translucent, rgba(250, 247, 242, 0.62));
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -295,9 +295,14 @@ body.sidebar-resizing-active .arc-viewport-container {
 }
 
 .nsb-tab.active {
-  background: color-mix(in srgb, var(--nsb-space-color) 16%, var(--surface-hover, rgba(255, 255, 255, 0.1)));
+  /* A light veil; the space-colored bar on the left carries the emphasis. */
+  background: var(--nsb-active, rgba(255, 255, 255, 0.09));
   color: var(--nsb-fg);
   font-weight: 500;
+}
+
+[data-theme="light"] .nsb-tab.active {
+  --nsb-active: rgba(0, 0, 0, 0.06);
 }
 
 .nsb-tab.active::before {
