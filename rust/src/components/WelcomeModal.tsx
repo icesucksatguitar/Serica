@@ -164,7 +164,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }
                     <input
                       id="user-name"
                       type="text"
-                      placeholder="How should Neutrino address you?"
+                      placeholder="How should Serica address you?"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="welcome-input"
@@ -326,7 +326,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }
                 className="welcome-primary-btn"
                 onClick={handleFinish}
               >
-                <span>Enter Neutrino</span>
+                <span>Enter Serica</span>
                 <Check size={16} />
               </button>
             </div>

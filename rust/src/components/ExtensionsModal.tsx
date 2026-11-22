@@ -30,12 +30,12 @@ export const ExtensionsModal: React.FC<ExtensionsModalProps> = ({ isOpen, onClos
   useEffect(() => {
     if (!isOpen) return;
     let alive = true;
-    void window.neutrino?.listExtensions?.().then((list) => {
+    void window.serica?.listExtensions?.().then((list) => {
       if (!alive) return;
       setExtensions(list ?? []);
       setLoaded(true);
     }).catch(() => setLoaded(true));
-    const unsub = window.neutrino?.onExtensionsUpdated?.((list) => setExtensions(list ?? []));
+    const unsub = window.serica?.onExtensionsUpdated?.((list) => setExtensions(list ?? []));
     return () => {
       alive = false;
       unsub?.();
@@ -75,7 +75,7 @@ export const ExtensionsModal: React.FC<ExtensionsModalProps> = ({ isOpen, onClos
     setInstalling(true);
     setMessage(null);
     try {
-      const rec = await window.neutrino?.installExtension?.(input);
+      const rec = await window.serica?.installExtension?.(input);
       if (rec) {
         setMessage({ kind: 'ok', text: `${rec.name} was added.` });
         setInstallInput('');
@@ -89,17 +89,17 @@ export const ExtensionsModal: React.FC<ExtensionsModalProps> = ({ isOpen, onClos
 
   const toggle = (x: ExtensionInfo) => {
     setExtensions((list) => list.map((e) => (e.id === x.id ? { ...e, enabled: !x.enabled } : e)));
-    void window.neutrino?.setExtensionEnabled?.(x.id, !x.enabled);
+    void window.serica?.setExtensionEnabled?.(x.id, !x.enabled);
   };
 
   const remove = (x: ExtensionInfo) => {
     setConfirmRemove(null);
     setExtensions((list) => list.filter((e) => e.id !== x.id));
-    void window.neutrino?.removeExtension?.(x.id);
+    void window.serica?.removeExtension?.(x.id);
   };
 
   const openPage = (x: ExtensionInfo, page: 'popup' | 'options') => {
-    void window.neutrino?.openExtensionPage?.(x.id, page);
+    void window.serica?.openExtensionPage?.(x.id, page);
     onClose();
   };
 
@@ -123,7 +123,7 @@ export const ExtensionsModal: React.FC<ExtensionsModalProps> = ({ isOpen, onClos
           <Store size={16} />
           <span className="extensions-store-cta-text">
             <strong>Browse the Chrome Web Store</strong>
-            <span>Open an extension and press “Add to Neutrino”.</span>
+            <span>Open an extension and press “Add to Serica”.</span>
           </span>
           <ExternalLink size={14} className="extensions-store-cta-arrow" />
         </button>

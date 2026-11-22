@@ -98,7 +98,7 @@ export const PasswordPrompt: React.FC = () => {
   const [queue, setQueue] = useState<PromptQueue>([]);
 
   useEffect(() => {
-    const api = window.neutrino;
+    const api = window.serica;
     const offPrompt = api?.onPasswordPrompt?.((prompt) => setQueue((q) => addPrompt(q, prompt)));
     const offClosed = api?.onPasswordPromptClosed?.((payload) => {
       if (payload && typeof payload.promptId === 'string') setQueue((q) => removePrompt(q, payload.promptId));
@@ -115,7 +115,7 @@ export const PasswordPrompt: React.FC = () => {
     setQueue((q) => markBusy(q, promptId));
     let result;
     try {
-      result = await window.neutrino?.respondToPasswordPrompt?.(promptId, action);
+      result = await window.serica?.respondToPasswordPrompt?.(promptId, action);
     } catch {
       result = undefined;
     }
@@ -126,7 +126,7 @@ export const PasswordPrompt: React.FC = () => {
     const { promptId } = target.info;
     if (closeNeedsDismiss(target)) {
       // Main drops the in-memory capture (R6.10); nothing to show on failure.
-      void window.neutrino?.respondToPasswordPrompt?.(promptId, 'dismiss')?.catch?.(() => {});
+      void window.serica?.respondToPasswordPrompt?.(promptId, 'dismiss')?.catch?.(() => {});
     }
     setQueue((q) => removePrompt(q, promptId));
   }, []);

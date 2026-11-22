@@ -24,7 +24,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   const [displayName, setDisplayName] = useState<string>(() => {
     if (userName) return userName;
     try {
-      const saved = localStorage.getItem('neutrino_user_profile');
+      const saved = (localStorage.getItem('serica_user_profile') || localStorage.getItem('neutrino_user_profile'));
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.name) return parsed.name;
@@ -117,7 +117,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
 
   return (
     <div
-      className={`neutrino-minimal-newtab ${isSearchFocused ? 'search-focused' : ''}`}
+      className={`serica-minimal-newtab neutrino-minimal-newtab ${isSearchFocused ? 'search-focused' : ''}`}
       onClick={() => {
         if (!isSearchRevealed) setIsSearchRevealed(true);
       }}

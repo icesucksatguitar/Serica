@@ -3,6 +3,6 @@
 
 fn main() {
     eprintln!(">>> MAIN ENTERED <<<");
-    neutrino_lib::run();
+    serica_lib::run();
 }
 

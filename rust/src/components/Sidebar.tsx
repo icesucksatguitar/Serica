@@ -1134,7 +1134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             role="menuitem"
             className="nsb-menu-item"
             onClick={() => {
-              const tabPromise = actions.createTab('neutrino://newtab', activeSpaceId);
+              const tabPromise = actions.createTab('serica://newtab', activeSpaceId);
               Promise.resolve(tabPromise).then((newTab: any) => {
                 if (newTab?.id) {
                   actions.moveTabToFolder?.(newTab.id, folderMenu.folder.id);

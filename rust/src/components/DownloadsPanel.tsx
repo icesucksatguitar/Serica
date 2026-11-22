@@ -89,7 +89,7 @@ export const DownloadsPanel: React.FC<DownloadsPanelProps> = ({ isOpen, onClose,
 
   const act = (d: DownloadItem, action: DownloadAction) => {
     setError(null);
-    window.neutrino?.downloadAction?.(d.id, action).catch((e) => setError(String(e)));
+    window.serica?.downloadAction?.(d.id, action).catch((e) => setError(String(e)));
     if (action === 'retry') onClose();
   };
 
@@ -105,10 +105,10 @@ export const DownloadsPanel: React.FC<DownloadsPanelProps> = ({ isOpen, onClose,
             {downloads.length > 0 && <span className="history-count-badge">{downloads.length}</span>}
           </div>
           <div className="downloads-header-actions">
-            <button type="button" className="history-clear-chip" onClick={() => void window.neutrino?.openDownloadsFolder?.()} title="Open the Downloads folder">
+            <button type="button" className="history-clear-chip" onClick={() => void window.serica?.openDownloadsFolder?.()} title="Open the Downloads folder">
               <FolderOpen size={12} /> Folder
             </button>
-            <button type="button" className="history-clear-chip" disabled={!hasFinished} onClick={() => void window.neutrino?.clearDownloads?.()} title="Clear finished downloads from the list (files are kept)">
+            <button type="button" className="history-clear-chip" disabled={!hasFinished} onClick={() => void window.serica?.clearDownloads?.()} title="Clear finished downloads from the list (files are kept)">
               Clear
             </button>
             <button className="close-btn" onClick={onClose} aria-label="Close downloads" title="Close (Esc)">

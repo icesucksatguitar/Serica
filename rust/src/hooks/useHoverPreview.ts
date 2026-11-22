@@ -30,7 +30,7 @@ export function useHoverPreview(suppressed: boolean): HoverPreview {
     ctrlRef.current = createHoverPreview({
       setTimer: (fn, ms) => window.setTimeout(fn, ms),
       clearTimer: (h) => window.clearTimeout(h as number),
-      load: (target) => loadPreview(target, window.neutrino),
+      load: (target) => loadPreview(target, window.serica),
       onChange: setState,
     });
   }

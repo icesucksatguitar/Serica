@@ -113,7 +113,7 @@ export function applySpaceThemeToRoot(rawTheme: SpaceTheme, osDark: boolean): Th
   style.setProperty('--theme-accent-soft', palette.accentSoft);
   style.setProperty('--theme-accent-glow', palette.accentGlow);
 
-  // Core Neutrino UI tokens harmonized with active Space palette
+  // Core Serica UI tokens harmonized with active Space palette
   style.setProperty('--bg', palette.bgApp);
   style.setProperty('--bg-app', palette.bgApp);
   style.setProperty('--bg-elevated', palette.surfaceSolid);

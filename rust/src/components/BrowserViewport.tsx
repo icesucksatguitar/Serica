@@ -80,13 +80,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const lastBounds = useRef('');
   const reportBounds = useCallback(() => {
     const el = pageAreaRef.current;
-    if (!el || !window.neutrino?.setViewport) return;
+    if (!el || !window.serica?.setViewport) return;
     const r = el.getBoundingClientRect();
     const b = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
     const key = b.join(',');
     if (key === lastBounds.current) return;
     lastBounds.current = key;
-    void window.neutrino.setViewport(b[0], b[1], b[2], b[3]);
+    void window.serica.setViewport(b[0], b[1], b[2], b[3]);
   }, []);
 
   useLayoutEffect(() => {
@@ -131,11 +131,11 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     try {
       while (freezeApplied.current !== wantFrozenRef.current) {
         if (wantFrozenRef.current) {
-          const img = (await window.neutrino?.freezeViewport?.().catch(() => null)) ?? null;
+          const img = (await window.serica?.freezeViewport?.().catch(() => null)) ?? null;
           freezeApplied.current = true;
           setFrozenImage(img);
         } else {
-          await window.neutrino?.thawViewport?.().catch(() => undefined);
+          await window.serica?.thawViewport?.().catch(() => undefined);
           freezeApplied.current = false;
           setFrozenImage(null);
         }
@@ -159,7 +159,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     setIsFindOpen(false);
     setFindQuery('');
     setFindState({ activeMatch: 0, totalMatches: 0 });
-    void window.neutrino?.findInPage?.(null);
+    void window.serica?.findInPage?.(null);
   }, []);
 
   useEffect(() => {
@@ -167,7 +167,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   }, [activeTab?.id, closeFindBar]);
 
   useEffect(() => {
-    return window.neutrino?.onFindResult?.((r) => {
+    return window.serica?.onFindResult?.((r) => {
       if (r.tabId === activeTabRef.current?.id) setFindState({ activeMatch: r.activeMatch, totalMatches: r.totalMatches });
     });
   }, []);
@@ -175,15 +175,15 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const handleFindQueryChange = useCallback((q: string) => {
     setFindQuery(q);
     if (!q) setFindState({ activeMatch: 0, totalMatches: 0 });
-    void window.neutrino?.findInPage?.(q || null);
+    void window.serica?.findInPage?.(q || null);
   }, []);
 
   const handleFindNext = useCallback(() => {
-    if (findQuery) void window.neutrino?.findInPage?.(findQuery, { forward: true, findNext: true });
+    if (findQuery) void window.serica?.findInPage?.(findQuery, { forward: true, findNext: true });
   }, [findQuery]);
 
   const handleFindPrev = useCallback(() => {
-    if (findQuery) void window.neutrino?.findInPage?.(findQuery, { forward: false, findNext: true });
+    if (findQuery) void window.serica?.findInPage?.(findQuery, { forward: false, findNext: true });
   }, [findQuery]);
 
   // ---- Site actions (toolbar, command bar, shortcuts pressed inside pages)
@@ -195,13 +195,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
         return;
       }
       if (action === 'home') closeFindBar();
-      void window.neutrino?.siteAction?.(action);
+      void window.serica?.siteAction?.(action);
     },
     [closeFindBar],
   );
 
   useEffect(() => {
-    const unsubIpc = window.neutrino?.onSiteAction?.((p) => {
+    const unsubIpc = window.serica?.onSiteAction?.((p) => {
       if (p?.action) executeSiteAction(p.action as SiteAction);
     });
     const onCustom = (e: Event) => {
@@ -212,9 +212,9 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
       const dir = (e as CustomEvent<'in' | 'out' | 'reset'>).detail;
       const current = activeTabRef.current?.zoomFactor ?? 1;
       const next = dir === 'reset' ? 1 : dir === 'in' ? Math.min(3, current + 0.1) : dir === 'out' ? Math.max(0.3, current - 0.1) : current;
-      void window.neutrino?.setZoomFactor?.(Math.round(next * 10) / 10);
+      void window.serica?.setZoomFactor?.(Math.round(next * 10) / 10);
     };
-    const unsubEsc = window.neutrino?.onEscapePressed?.(() => closeFindBar());
+    const unsubEsc = window.serica?.onEscapePressed?.(() => closeFindBar());
     window.addEventListener('neutrino:site-action', onCustom);
     window.addEventListener('neutrino:zoom-action', onZoom);
     return () => {
@@ -239,11 +239,11 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     }
   }, [activeTab?.id]);
   useEffect(() => {
-    const unsubColor = window.neutrino?.onPageColor?.((r) => {
+    const unsubColor = window.serica?.onPageColor?.((r) => {
       pageColors.current.set(r.tabId, r.themeColor);
       onPageColorRef.current?.(r.tabId, { themeColor: r.themeColor, sampled: null });
     });
-    const unsubFs = window.neutrino?.onHtmlFullscreen?.((fs) => onFullscreenRef.current?.(fs));
+    const unsubFs = window.serica?.onHtmlFullscreen?.((fs) => onFullscreenRef.current?.(fs));
     return () => {
       unsubColor?.();
       unsubFs?.();
@@ -264,7 +264,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     }
     let cancelled = false;
     const poll = async () => {
-      const res = await window.neutrino?.getMediaState?.(mediaTabId).catch(() => null);
+      const res = await window.serica?.getMediaState?.(mediaTabId).catch(() => null);
       if (cancelled) return;
       const tab = tabsRef.current.find((t) => t.id === mediaTabId);
       onMediaRef.current?.(
@@ -295,7 +295,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     if (!mediaCommand) return;
     const target = mediaCommand.tabId || mediaTabId || activeTabRef.current?.id;
     if (!target) return;
-    void window.neutrino?.mediaControl?.(mediaCommand.action, { tabId: target, value: mediaCommand.value });
+    void window.serica?.mediaControl?.(mediaCommand.action, { tabId: target, value: mediaCommand.value });
   }, [mediaCommand, mediaTabId]);
 
   if (!activeTab) {
@@ -355,11 +355,11 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
       {(showSleeping || showUnloaded) && (
         <div
           className="zen-sleeping-screen"
-          onClick={() => window.neutrino?.selectTab(activeTab.id)}
+          onClick={() => window.serica?.selectTab(activeTab.id)}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') window.neutrino?.selectTab(activeTab.id);
+            if (e.key === 'Enter' || e.key === ' ') window.serica?.selectTab(activeTab.id);
           }}
           title="Click anywhere to wake tab"
         >
@@ -390,7 +390,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
               className="zen-sleeping-wake-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                window.neutrino?.selectTab(activeTab.id);
+                window.serica?.selectTab(activeTab.id);
               }}
             >
               <Sparkles size={15} />

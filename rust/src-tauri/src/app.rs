@@ -97,7 +97,7 @@ pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
     if lower.starts_with("javascript:") || lower.starts_with("vbscript:") {
         return None;
     }
-    if lower.starts_with("neutrino://") || lower == "about:blank" {
+    if lower.starts_with("serica://") || lower.starts_with("serica://") || lower == "about:blank" {
         return Some(lower);
     }
     for scheme in ["http://", "https://", "chrome-extension://", "file://", "about:", "data:", "view-source:", "edge://", "mailto:"] {
@@ -148,7 +148,7 @@ impl App {
         });
         let worker = app.clone();
         std::thread::Builder::new()
-            .name("neutrino-sync".into())
+            .name("serica-sync".into())
             .spawn(move || worker.sync_loop(rx))
             .expect("sync thread");
         app.start_background_jobs();
@@ -187,21 +187,21 @@ impl App {
             if settings {
                 let s = self.store.lock().settings.clone();
                 self.shields.configure(s.adblock_enabled, &s.shield_whitelist);
-                ui_emit(&self.handle, "neutrino:settings-updated", s);
+                ui_emit(&self.handle, "serica:settings-updated", s);
                 crate::mcp_http::sync(&self);
             }
             if state || settings {
                 let snap = self.snapshot();
-                ui_emit(&self.handle, "neutrino:state-update", snap);
+                ui_emit(&self.handle, "serica:state-update", snap);
                 TabHost::reconcile(&self);
             }
             let blocked: Vec<BlockedTrackerItem> = std::mem::take(&mut *self.blocked_queue.lock());
             for item in blocked.into_iter().rev().take(30).rev() {
-                ui_emit(&self.handle, "neutrino:tracker-blocked", item);
+                ui_emit(&self.handle, "serica:tracker-blocked", item);
             }
             if history {
                 let recent = self.history.lock().recent(500);
-                ui_emit(&self.handle, "neutrino:history-updated", recent);
+                ui_emit(&self.handle, "serica:history-updated", recent);
             }
             if state || settings || history {
                 dirty_since.get_or_insert_with(Instant::now);
@@ -264,7 +264,7 @@ impl App {
                 }
                 if archived > 0 {
                     let list = app.store.lock().archive_list();
-                    ui_emit(&app.handle, "neutrino:archive-updated", list);
+                    ui_emit(&app.handle, "serica:archive-updated", list);
                 }
             }
         });
@@ -345,7 +345,7 @@ impl App {
                 }
                 TabEvent::Zoom(z) => {
                     tab.zoom_factor = Some((z * 100.0).round() / 100.0);
-                    ui_emit(&self.handle, "neutrino:zoom-updated", serde_json::json!({ "tabId": tab_id, "zoomFactor": tab.zoom_factor }));
+                    ui_emit(&self.handle, "serica:zoom-updated", serde_json::json!({ "tabId": tab_id, "zoomFactor": tab.zoom_factor }));
                 }
             }
             drop(s);
@@ -370,15 +370,15 @@ impl App {
     pub fn shortcut(self: &Arc<Self>, sc: Shortcut) {
         let h = &self.handle;
         match sc {
-            Shortcut::NewTab => ui_emit(h, "neutrino:open-command-bar", serde_json::json!({ "newTab": true })),
-            Shortcut::OpenCommandBar => ui_emit(h, "neutrino:open-command-bar", serde_json::json!({})),
-            Shortcut::ToggleSidebar => ui_emit(h, "neutrino:toggle-tabs", ()),
-            Shortcut::Find => ui_emit(h, "neutrino:site-action", serde_json::json!({ "action": "open-find", "source": "shortcut" })),
-            Shortcut::Home => ui_emit(h, "neutrino:site-action", serde_json::json!({ "action": "home", "source": "shortcut" })),
-            Shortcut::History => ui_emit(h, "neutrino:open-history", ()),
-            Shortcut::Downloads => ui_emit(h, "neutrino:open-downloads", ()),
-            Shortcut::Settings => ui_emit(h, "neutrino:open-settings", ()),
-            Shortcut::Escape => ui_emit(h, "neutrino:escape-pressed", ()),
+            Shortcut::NewTab => ui_emit(h, "serica:open-command-bar", serde_json::json!({ "newTab": true })),
+            Shortcut::OpenCommandBar => ui_emit(h, "serica:open-command-bar", serde_json::json!({})),
+            Shortcut::ToggleSidebar => ui_emit(h, "serica:toggle-tabs", ()),
+            Shortcut::Find => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "open-find", "source": "shortcut" })),
+            Shortcut::Home => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "home", "source": "shortcut" })),
+            Shortcut::History => ui_emit(h, "serica:open-history", ()),
+            Shortcut::Downloads => ui_emit(h, "serica:open-downloads", ()),
+            Shortcut::Settings => ui_emit(h, "serica:open-settings", ()),
+            Shortcut::Escape => ui_emit(h, "serica:escape-pressed", ()),
             Shortcut::CloseTab => {
                 self.mutate(|s| {
                     if let Some(id) = s.active_tab_id.clone() {
@@ -403,7 +403,7 @@ impl App {
                     s.space(&target).map(|sp| (sp.id.clone(), sp.name.clone()))
                 });
                 if let Some((id, name)) = switched {
-                    ui_emit(h, "neutrino:space-switched", serde_json::json!({ "spaceId": id, "spaceName": name }));
+                    ui_emit(h, "serica:space-switched", serde_json::json!({ "spaceId": id, "spaceName": name }));
                 }
             }
         }
@@ -434,6 +434,6 @@ mod tests {
         assert_eq!(normalize_input("v1.2", G).unwrap(), format!("{G}v1.2"));
         assert!(normalize_input("javascript:alert(1)", G).is_none());
         assert_eq!(normalize_input("192.168.1.1", G).unwrap(), "http://192.168.1.1");
-        assert_eq!(normalize_input("NEUTRINO://settings", G).unwrap(), "neutrino://settings");
+        assert_eq!(normalize_input("SERICA://settings", G).unwrap(), "serica://settings");
     }
 }

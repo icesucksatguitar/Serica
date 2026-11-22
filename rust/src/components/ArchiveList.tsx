@@ -129,7 +129,7 @@ export const ArchiveList: React.FC<ArchiveListProps> = ({ isOpen, onClose }) => 
 
   useEffect(() => {
     if (!isOpen) return;
-    const api = window.neutrino;
+    const api = window.serica;
     let cancelled = false;
     void api?.listArchive?.().then((list) => {
       if (!cancelled && Array.isArray(list)) setEntries(list);
@@ -144,7 +144,7 @@ export const ArchiveList: React.FC<ArchiveListProps> = ({ isOpen, onClose }) => 
   }, [isOpen]);
 
   const handleRestore = useCallback(async (entry: ArchiveListEntry) => {
-    const api = window.neutrino;
+    const api = window.serica;
     if (!api?.restoreArchivedTab) return;
     setRestoringId(entry.id);
     try {

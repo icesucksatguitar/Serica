@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-NEUTRINO BROWSER - BUILD & RELEASE SCRIPT
+SERICA BROWSER - BUILD & RELEASE SCRIPT
 ==============================================================================
 Builds, versions, and stages the Rust (Tauri v2) release:
 
   release/
-  ├── rust/            <- Standalone Windows executable (Neutrino.exe) + icons
+  ├── rust/            <- Standalone Windows executable (Serica.exe) + icons
   └── manifest.json    <- Current version, size and build time
 
 Usage:
@@ -190,7 +190,7 @@ def load_manifest() -> dict:
         except Exception:
             pass
     return {
-        "project": "Neutrino Browser",
+        "project": "Serica Browser",
         "last_updated": None,
         "releases": {}
     }
@@ -253,7 +253,7 @@ def build_rust(bump_type: str, clean: bool = False) -> bool:
         return False
 
     # 3. Locate compiled binary
-    exe_name = "neutrino-rust.exe" if os.name == "nt" else "neutrino-rust"
+    exe_name = "serica-rust.exe" if os.name == "nt" else "serica-rust"
     built_bin = RUST_DIR / "src-tauri" / "target" / "release" / exe_name
     if not built_bin.exists():
         log_error(f"Expected compiled binary not found at {built_bin}")
@@ -261,10 +261,10 @@ def build_rust(bump_type: str, clean: bool = False) -> bool:
 
     # 4. Stage into unified root release/rust
     RUST_RELEASE_DIR.mkdir(parents=True, exist_ok=True)
-    target_exe = RUST_RELEASE_DIR / "Neutrino.exe"
+    target_exe = RUST_RELEASE_DIR / "Serica.exe"
     shutil.copy2(built_bin, target_exe)
     
-    # Also copy as neutrino-rust.exe for explicit naming
+    # Also copy as serica-rust.exe for explicit naming
     target_named = RUST_RELEASE_DIR / exe_name
     if target_named != target_exe:
         shutil.copy2(built_bin, target_named)
@@ -332,7 +332,7 @@ def launch_release(env_name: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Neutrino Browser - build and stage the Rust (Tauri v2) release",
+        description="Serica Browser - build and stage the Rust (Tauri v2) release",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -361,7 +361,7 @@ Examples:
     args = parser.parse_args()
 
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
-    print(f"{BOLD}{MAGENTA}              NEUTRINO BROWSER - BUILD SYSTEM                   {RESET}")
+    print(f"{BOLD}{MAGENTA}              SERICA BROWSER - BUILD SYSTEM                   {RESET}")
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
     log_info(f"Version Bump Mode : {BOLD}{args.bump.upper()}{RESET}")
     log_info(f"Clean Build       : {BOLD}{args.clean}{RESET}")

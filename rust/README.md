@@ -1,4 +1,4 @@
-# Neutrino Browser (Rust + Tauri v2)
+# Serica Browser (Rust + Tauri v2)
 
 The browser backend is Rust. TypeScript is used only for the UI (React).
 
@@ -20,7 +20,7 @@ src-tauri/src/            Rust backend
   extensions.rs           Chrome Web Store extensions (CRX install, per-profile sync)
   downloads.rs            Download manager (WebView2 downloads, pause/resume, history)
   importer.rs             One-time read-only import of a profile from the old Electron build
-  commands.rs             IPC commands (the `window.neutrino` API)
+  commands.rs             IPC commands (the `window.serica` API)
 src/                      UI only
   adapter/tauriBridge.ts  Typed invoke/listen wrappers, no logic
   shared/                 Pure UI-side models (themes, sidebar layout, IPC types)
@@ -47,7 +47,7 @@ WebView2 data directory, so cookies and storage are separate per profile.
   and ids the page reports.
 - Lists: EasyList, EasyPrivacy, and the uBlock filters, privacy, unbreak and
   quick-fixes lists, plus Brave's scriptlet resources. They are downloaded in the
-  background, cached in `%APPDATA%\com.neutrino.browser\adblock`, and refreshed
+  background, cached in `%APPDATA%\com.serica.browser\adblock`, and refreshed
   every 4 days. Startup uses the serialized engine. A built-in rule set covers the
   first run and offline use.
 
@@ -66,7 +66,7 @@ tunnel is down. HTTPS (TLS) upstream proxies are not supported.
 `downloads.rs` takes over every download a tab starts (WebView2 `DownloadStarting`,
 marked handled, so Edge's own flyout never shows). Files go to the user's Downloads
 folder. The top bar shows a Downloads button with a progress ring, and a new download
-opens the panel (also Ctrl+J or `neutrino://downloads`). From the panel you can pause,
+opens the panel (also Ctrl+J or `serica://downloads`). From the panel you can pause,
 resume, cancel, retry, open a file, show it in its folder, and clear finished entries.
 The list is kept in `downloads.json`. Downloads that were still running when the
 browser closed are marked "Browser closed".
@@ -74,17 +74,17 @@ browser closed are marked "Browser closed".
 ### Extensions (Chrome Web Store)
 `extensions.rs` uses WebView2's browser-extension API (runtime 1.0.2420+).
 - Install: on any `chromewebstore.google.com/detail/...` page, tabs get an
-  **Add to Neutrino** button, because the store's own button needs Chrome. You
+  **Add to Serica** button, because the store's own button needs Chrome. You
   can also paste a store link or extension ID into the Extensions panel. The CRX
   comes from Google's update service. It is unpacked to
-  `%APPDATA%\com.neutrino.browser\extensions\<id>`, `_metadata` is removed, and
+  `%APPDATA%\com.serica.browser\extensions\<id>`, `_metadata` is removed, and
   the store public key is written to `manifest.json` so the extension keeps its
   store ID.
 - `extensions.json` is the source of truth. Each tab profile is synced against
   it the first time one of its tabs opens in a session, and again after any
   change. Missing extensions are added, enabled state is applied, and removed
   extensions are uninstalled.
-- Manage them in `neutrino://extensions`, the command bar (Manage Extensions),
+- Manage them in `serica://extensions`, the command bar (Manage Extensions),
   or Settings → Privacy. WebView2 has no toolbar, so an extension's popup and
   options pages open in a tab (`chrome-extension://<id>/...`).
 

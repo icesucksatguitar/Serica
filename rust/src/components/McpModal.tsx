@@ -39,7 +39,7 @@ const NativeAssistantFrame: React.FC<{ url: string }> = ({ url }) => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    void window.neutrino?.assistantOpen?.(url, r.left, r.top, r.width, r.height).then(() => {
+    void window.serica?.assistantOpen?.(url, r.left, r.top, r.width, r.height).then(() => {
       opened.current = true;
     });
   }, [url]);
@@ -53,7 +53,7 @@ const NativeAssistantFrame: React.FC<{ url: string }> = ({ url }) => {
         const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`;
         if (key !== last) {
           last = key;
-          void window.neutrino?.assistantBounds?.(r.left, r.top, r.width, r.height);
+          void window.serica?.assistantBounds?.(r.left, r.top, r.width, r.height);
         }
       }
       raf = requestAnimationFrame(track);
@@ -62,7 +62,7 @@ const NativeAssistantFrame: React.FC<{ url: string }> = ({ url }) => {
     return () => {
       cancelAnimationFrame(raf);
       opened.current = false;
-      void window.neutrino?.assistantClose?.();
+      void window.serica?.assistantClose?.();
     };
   }, []);
   return <div ref={ref} className="assistant-webview" style={{ width: '100%', height: '100%' }} />;
@@ -154,10 +154,10 @@ export const McpModal: React.FC<McpModalProps> = ({
     const hour = new Date().getHours();
     let name = 'Yash';
     try {
-      const stored = localStorage.getItem('neutrino_user_name');
+      const stored = (localStorage.getItem('serica_user_name') || localStorage.getItem('neutrino_user_name'));
       if (stored) name = stored;
       else {
-        const profile = localStorage.getItem('neutrino_user_profile');
+        const profile = (localStorage.getItem('serica_user_profile') || localStorage.getItem('neutrino_user_profile'));
         if (profile) {
           const parsed = JSON.parse(profile);
           if (parsed.name) name = parsed.name;
@@ -369,8 +369,8 @@ export const McpModal: React.FC<McpModalProps> = ({
   useEffect(() => {
     if (!isOpen || activeTabType !== 'tools') return;
     const fetchLogs = async () => {
-      if (window.neutrino?.getMcpLogs) {
-        const history = await window.neutrino.getMcpLogs();
+      if (window.serica?.getMcpLogs) {
+        const history = await window.serica.getMcpLogs();
         setLogs(history || []);
       }
     };
@@ -484,13 +484,13 @@ export const McpModal: React.FC<McpModalProps> = ({
     if (!activeTab?.url) return;
     const info = `Current Page: ${activeTab.title} (${activeTab.url})`;
     navigator.clipboard.writeText(info);
-    void window.neutrino?.assistantInsertText?.(info + '\n\n');
+    void window.serica?.assistantInsertText?.(info + '\n\n');
   };
 
   const handleTestTool = async (toolName: string, args: any) => {
-    if (!window.neutrino?.callMcp) return;
+    if (!window.serica?.callMcp) return;
     try {
-      const res = await window.neutrino.callMcp('tools/call', { name: toolName, arguments: args });
+      const res = await window.serica.callMcp('tools/call', { name: toolName, arguments: args });
       setTestResult(JSON.stringify(res, null, 2));
     } catch (err: any) {
       setTestResult(`Error: ${err.message}`);

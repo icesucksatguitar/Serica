@@ -1,4 +1,4 @@
-// Profile data model persisted in `userData/neutrino-data/profiles.json`.
+// Profile data model persisted in `userData/serica-data/profiles.json`.
 // Pure types: no Electron imports, so tests and pure modules can use them.
 //
 // App-wide UI preferences (sidebar expanded/auto-hide, RightPinsDock

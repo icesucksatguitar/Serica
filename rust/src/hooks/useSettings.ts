@@ -8,7 +8,7 @@ export interface UseSettingsResult {
   isLoaded: boolean;
 }
 
-const SETTINGS_CACHE_KEY = 'neutrino_settings_cache_v1';
+const SETTINGS_CACHE_KEY = 'serica_settings_cache_v1';
 
 function readCachedSettings(): BrowserSettings {
   try {
@@ -43,7 +43,7 @@ export function useSettings(): UseSettingsResult {
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
   useEffect(() => {
-    const api = window.neutrino;
+    const api = window.serica;
     let cancelled = false;
 
     if (!api?.getSettings) {
@@ -64,7 +64,7 @@ export function useSettings(): UseSettingsResult {
         }
       })
       .catch((err) => {
-        console.error('[Neutrino] Failed to load settings:', err);
+        console.error('[Serica] Failed to load settings:', err);
         if (!cancelled) setIsLoaded(true);
       });
 
@@ -97,7 +97,7 @@ export function useSettings(): UseSettingsResult {
       return next;
     });
 
-    const api = window.neutrino;
+    const api = window.serica;
     if (!api?.updateSettings) return;
     try {
       const saved = await api.updateSettings(patch);
@@ -107,7 +107,7 @@ export function useSettings(): UseSettingsResult {
         writeCachedSettings(normalized);
       }
     } catch (err) {
-      console.error('[Neutrino] Failed to update settings:', err);
+      console.error('[Serica] Failed to update settings:', err);
       // Re-sync with the main process so the panel never shows a value that was not saved.
       try {
         const current = await api.getSettings?.();

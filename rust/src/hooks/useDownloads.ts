@@ -9,7 +9,7 @@ export function useDownloads(onStarted?: (item: DownloadItem) => void) {
 
   useEffect(() => {
     let alive = true;
-    void window.neutrino?.listDownloads?.().then((list) => {
+    void window.serica?.listDownloads?.().then((list) => {
       if (alive && list) setDownloads(list);
     });
     const upsert = (item: DownloadItem) =>
@@ -21,12 +21,12 @@ export function useDownloads(onStarted?: (item: DownloadItem) => void) {
         return next;
       });
     const unsubs = [
-      window.neutrino?.onDownloadStarted?.((item) => {
+      window.serica?.onDownloadStarted?.((item) => {
         upsert(item);
         onStartedRef.current?.(item);
       }),
-      window.neutrino?.onDownloadUpdated?.(upsert),
-      window.neutrino?.onDownloadsChanged?.((list) => setDownloads(list ?? [])),
+      window.serica?.onDownloadUpdated?.(upsert),
+      window.serica?.onDownloadsChanged?.((list) => setDownloads(list ?? [])),
     ];
     return () => {
       alive = false;

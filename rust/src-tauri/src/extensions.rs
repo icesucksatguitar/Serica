@@ -448,7 +448,7 @@ fn record_from_manifest(dir: &Path, id: &str, m: &serde_json::Value) -> Extensio
 
 /// Broadcasts the list and re-syncs every profile that has a live tab.
 pub fn refresh(app: &Shared) {
-    ui_emit(&app.handle, "neutrino:extensions-updated", app.extensions.list());
+    ui_emit(&app.handle, "serica:extensions-updated", app.extensions.list());
     app.extensions.reset_sync();
     #[cfg(windows)]
     {
@@ -554,18 +554,18 @@ pub mod native {
 }
 
 /// Runs in every tab's top frame; only acts on Chrome Web Store detail pages,
-/// where it adds an "Add to Neutrino" button (the store's own button needs Chrome).
+/// where it adds an "Add to Serica" button (the store's own button needs Chrome).
 pub const WEBSTORE_SCRIPT: &str = r#"(() => {
-  if (window.top !== window || location.hostname !== 'chromewebstore.google.com' || window.__neutrinoStore) return;
-  const post = (m) => { try { window.chrome.webview.postMessage(JSON.stringify(Object.assign({ __neutrino: 1 }, m))); } catch (e) {} };
+  if (window.top !== window || location.hostname !== 'chromewebstore.google.com' || window.__sericaStore) return;
+  const post = (m) => { try { window.chrome.webview.postMessage(JSON.stringify(Object.assign({ __serica: 1 }, m))); } catch (e) {} };
   const states = {};
   const errors = {};
   let host = null, btn = null, note = null, current = null;
   const idFromPath = () => { const m = location.pathname.match(/\/detail\/(?:[^/]+\/)?([a-p]{32})(?:[/?#]|$)/); return m ? m[1] : null; };
-  const labels = { idle: 'Add to Neutrino', installing: 'Adding…', installed: 'Added to Neutrino', error: 'Try again' };
+  const labels = { idle: 'Add to Serica', installing: 'Adding…', installed: 'Added to Serica', error: 'Try again' };
   const ensure = () => {
     if (host && host.isConnected) return;
-    host = document.createElement('neutrino-store-button');
+    host = document.createElement('serica-store-button');
     host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:2147483647;';
     const root = host.attachShadow({ mode: 'closed' });
     // The store enforces Trusted Types: build nodes, never assign innerHTML.
@@ -610,7 +610,7 @@ pub const WEBSTORE_SCRIPT: &str = r#"(() => {
     if (id !== current) { current = id; if (id && !states[id]) post({ t: 'ext-query', id }); }
     render();
   };
-  Object.defineProperty(window, '__neutrinoStore', { value: { state(id, s, err) { states[id] = s; if (err) errors[id] = err; else delete errors[id]; render(); } } });
+  Object.defineProperty(window, '__sericaStore', { value: { state(id, s, err) { states[id] = s; if (err) errors[id] = err; else delete errors[id]; render(); } } });
   const start = () => { tick(); setInterval(tick, 500); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
@@ -619,7 +619,7 @@ pub const WEBSTORE_SCRIPT: &str = r#"(() => {
 /// JS that updates the Web Store button state in a tab.
 pub fn store_state_js(id: &str, state: &str, error: Option<&str>) -> String {
     let err = error.map(|e| serde_json::to_string(e).unwrap_or_default()).unwrap_or_else(|| "null".into());
-    format!("window.__neutrinoStore && window.__neutrinoStore.state({}, {}, {err});", serde_json::to_string(id).unwrap(), serde_json::to_string(state).unwrap())
+    format!("window.__sericaStore && window.__sericaStore.state({}, {}, {err});", serde_json::to_string(id).unwrap(), serde_json::to_string(state).unwrap())
 }
 
 #[cfg(test)]
@@ -651,13 +651,13 @@ mod tests {
         assert!(parse_crx(b"nope").is_err());
     }
 
-    /// `NEUTRINO_TEST_CRX=<path to ddkjiahejlhfcafbddmgiahcphecmpfh.crx> cargo test -- --ignored`
+    /// `SERICA_TEST_CRX=<path to ddkjiahejlhfcafbddmgiahcphecmpfh.crx> cargo test -- --ignored`
     #[test]
     #[ignore]
     fn unpacks_real_crx() {
         let id = "ddkjiahejlhfcafbddmgiahcphecmpfh";
-        let crx = std::fs::read(std::env::var("NEUTRINO_TEST_CRX").unwrap()).unwrap();
-        let dir = std::env::temp_dir().join("neutrino-ext-test");
+        let crx = std::fs::read(std::env::var("SERICA_TEST_CRX").unwrap()).unwrap();
+        let dir = std::env::temp_dir().join("serica-ext-test");
         let _ = std::fs::remove_dir_all(&dir);
         let rec = unpack(&dir, id, &crx).unwrap();
         let manifest = read_manifest(&dir.join(id)).unwrap();

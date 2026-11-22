@@ -359,7 +359,7 @@ impl Shields {
 
     async fn update_lists(self: &Arc<Self>) -> Result<(), String> {
         let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Neutrino/0.3")
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Serica/0.3")
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| e.to_string())?;
@@ -522,11 +522,11 @@ mod tests {
 
 #[cfg(test)]
 mod youtube_diag {
-    /// `NEUTRINO_ADBLOCK_DIR=<data>/adblock cargo test youtube_scriptlets -- --ignored --nocapture`
+    /// `SERICA_ADBLOCK_DIR=<data>/adblock cargo test youtube_scriptlets -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn youtube_scriptlets() {
-        let dir = std::path::PathBuf::from(std::env::var("NEUTRINO_ADBLOCK_DIR").unwrap());
+        let dir = std::path::PathBuf::from(std::env::var("SERICA_ADBLOCK_DIR").unwrap());
         let read = |f: &str| -> Vec<serde_json::Value> {
             std::fs::read_to_string(dir.join(f)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
         };

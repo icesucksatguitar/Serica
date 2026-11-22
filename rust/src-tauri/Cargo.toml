@@ -1,11 +1,11 @@
 [package]
-name = "neutrino-rust"
+name = "serica-rust"
 version = "0.4.1"
-description = "Neutrino Browser - Rust + Tauri v2 implementation"
+description = "Serica Browser - Rust + Tauri v2 implementation"
 edition = "2021"
 
 [lib]
-name = "neutrino_lib"
+name = "serica_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]

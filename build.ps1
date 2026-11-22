@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Convenience wrapper for the Neutrino Browser build script (build.py).
+    Convenience wrapper for the Serica Browser build script (build.py).
 
 .DESCRIPTION
     Builds, versions, and stages the Rust (Tauri v2) release into release/rust.

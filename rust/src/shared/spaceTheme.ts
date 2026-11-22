@@ -289,7 +289,7 @@ export const SPACE_THEME_PRESETS: SpaceThemePreset[] = [
   {
     id: 'evergreen-mist',
     name: 'Evergreen Mist',
-    description: 'Deep Neutrino pine & sage glow',
+    description: 'Deep Serica pine & sage glow',
     theme: {
       points: [makePoint('#0F6B4B'), makePoint('#22A06B'), makePoint('#083022')],
       intensity: 0.72,

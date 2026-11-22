@@ -31,7 +31,7 @@ export interface FloatingUrlPillProps {
     const isHttps = Boolean(url && url.startsWith('https://'));
 
     let displayDomain = 'new tab';
-    if (url && url !== 'neutrino://newtab' && url !== 'about:blank') {
+    if (url && url !== 'serica://newtab' && url !== 'neutrino://newtab' && url !== 'about:blank') {
       try {
         const parsed = new URL(url);
         displayDomain = parsed.hostname.replace(/^www\./, '');

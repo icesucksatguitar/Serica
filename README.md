@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="rust/src-tauri/icons/icon.png" alt="Neutrino logo" width="96" height="96">
+<img src="rust/src-tauri/icons/icon.png" alt="Serica logo" width="96" height="96">
 
-# Neutrino
+# Serica
 
 **An open-source, Arc-style browser for Windows.**
 
@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
-<img src="docs/screenshots/hero-homescreen.png" alt="Neutrino new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
+<img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
 
 ### [⬇ Download the latest release](https://github.com/icesucksatguitar/neutrino/releases/latest)
 
@@ -18,11 +18,11 @@ Get the **`.msi` installer** (adds Start menu and desktop shortcuts), or the por
 
 </div>
 
-> **Windows SmartScreen:** Neutrino isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. The installer also asks for administrator approval, because it installs to Program Files for all users. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
+> **Windows SmartScreen:** Serica isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. The installer also asks for administrator approval, because it installs to Program Files for all users. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
 
-## Why Neutrino
+## Why Serica
 
-Arc stops working on **December 22, 2026**. Neutrino keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
+Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
 
 ## Features
 
@@ -54,23 +54,23 @@ Background tabs that sit idle for 10 minutes are put to sleep to free memory, an
 ### Built-in MCP for AI agents
 <img src="docs/screenshots/mcp-connect.png" alt="MCP panel with the local endpoint enabled and ready-to-copy Claude configs" width="820">
 
-Neutrino can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Neutrino](#connect-claude-to-neutrino).
+Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Serica](#connect-claude-to-neutrino).
 
 ### Also included
-- **Chrome Web Store extensions.** Open an extension's store page and press **Add to Neutrino**, then manage extensions at `neutrino://extensions`.
+- **Chrome Web Store extensions.** Open an extension's store page and press **Add to Serica**, then manage extensions at `serica://extensions`.
 - **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel and retry.
 - **Privacy tunnel:** DNS-over-HTTPS, Tor (SOCKS5) or your own SOCKS5/HTTP proxy, with an optional kill switch.
 - **History** with search, find in page, zoom, and HTML fullscreen.
 
-## Connect Claude to Neutrino
+## Connect Claude to Serica
 
-1. In Neutrino, open **AI Assistants & Tools** (the sparkle button in the top bar) → **Tools**, and turn on **Connect an AI agent**.
+1. In Serica, open **AI Assistants & Tools** (the sparkle button in the top bar) → **Tools**, and turn on **Connect an AI agent**.
 2. The panel shows your endpoint (`http://127.0.0.1:7531/mcp`) and a private access token, with copy buttons for each config below.
 
 **Claude Code**
 
 ```bash
-claude mcp add --transport http neutrino http://127.0.0.1:7531/mcp --header "Authorization: Bearer <your-token>"
+claude mcp add --transport http serica http://127.0.0.1:7531/mcp --header "Authorization: Bearer <your-token>"
 ```
 
 **Claude Desktop** (`claude_desktop_config.json`, through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote); requires Node.js)
@@ -78,10 +78,10 @@ claude mcp add --transport http neutrino http://127.0.0.1:7531/mcp --header "Aut
 ```json
 {
   "mcpServers": {
-    "neutrino": {
+    "serica": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:7531/mcp", "--header", "Authorization:${NEUTRINO_AUTH}"],
-      "env": { "NEUTRINO_AUTH": "Bearer <your-token>" }
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:7531/mcp", "--header", "Authorization:${SERICA_AUTH}"],
+      "env": { "SERICA_AUTH": "Bearer <your-token>" }
     }
   }
 }
@@ -115,7 +115,7 @@ npm install
 npm run tauri dev        # run with hot reload
 ```
 
-Release build (stages `release/rust/Neutrino.exe`):
+Release build (stages `release/rust/Serica.exe`):
 
 ```bash
 cd neutrino
@@ -135,7 +135,7 @@ Architecture notes and module overview: [`rust/README.md`](rust/README.md).
 
 ## How this was built
 
-I designed and directed Neutrino. AI coding agents wrote much of the implementation, and I [FILL IN: what you debugged or wrote yourself].
+I designed and directed Serica. AI coding agents wrote much of the implementation, and I [FILL IN: what you debugged or wrote yourself].
 
 ## Contributing
 

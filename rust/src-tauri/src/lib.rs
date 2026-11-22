@@ -1,4 +1,4 @@
-//! Neutrino browser backend (Rust + Tauri v2 + WebView2).
+//! Serica browser backend (Rust + Tauri v2 + WebView2).
 
 mod app;
 mod commands;
@@ -33,7 +33,7 @@ pub fn run() {
             let data_dir = app
                 .path()
                 .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("com.neutrino.browser"));
+                .unwrap_or_else(|_| std::env::temp_dir().join("com.serica.browser"));
             if let Some(window) = app.get_webview_window("main") {
                 window_state::attach(&window, data_dir.join("window.json"));
             }
@@ -128,7 +128,7 @@ pub fn run() {
             commands::open_extension_page,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building neutrino browser");
+        .expect("error while building serica browser");
 
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {

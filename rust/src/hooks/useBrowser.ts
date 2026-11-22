@@ -13,7 +13,7 @@ const INITIAL_STATE: BrowserAppState = {
       id: 'tab-init',
       spaceId: 'space-study',
       title: 'New Tab',
-      url: 'neutrino://newtab',
+      url: 'serica://newtab',
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
@@ -46,7 +46,7 @@ export function useBrowser() {
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
 
   useEffect(() => {
-    if (!window.neutrino) return;
+    if (!window.serica) return;
 
     const applyIncomingState = (newState: BrowserAppState) => {
       // Spaces come from the ProfileStore as-is: legacy ids (DEFAULT/PLAN/MAX) are already
@@ -59,9 +59,9 @@ export function useBrowser() {
       });
     };
 
-    const unregState = window.neutrino.onStateUpdate(applyIncomingState);
+    const unregState = window.serica.onStateUpdate(applyIncomingState);
 
-    window.neutrino.getState?.().then((initial) => {
+    window.serica.getState?.().then((initial) => {
       if (initial && Array.isArray(initial.spaces)) {
         applyIncomingState(initial);
       }
@@ -70,7 +70,7 @@ export function useBrowser() {
     // A tab moved to another profile's space reloads in that profile's session (R1.12, R17.5).
     // The state-update that follows carries the same partition; applying it now lets the
     // webview remount without waiting for it.
-    const unregPartition = window.neutrino.onTabPartitionChanged?.(({ tabId, partition, url }) => {
+    const unregPartition = window.serica.onTabPartitionChanged?.(({ tabId, partition, url }) => {
       setState((prev) => ({
         ...prev,
         tabs: prev.tabs.map((t) => (t.id === tabId ? { ...t, partition, url } : t)),
@@ -94,8 +94,8 @@ export function useBrowser() {
 
       // Pull authoritative stats from the main engine rather than blindly adding deltas on top of
       // state-update snapshots (which otherwise double-counted bursts until the next state update).
-      if (window.neutrino?.getShieldStats) {
-        window.neutrino.getShieldStats().then((stats: any) => {
+      if (window.serica?.getShieldStats) {
+        window.serica.getShieldStats().then((stats: any) => {
           if (stats) {
             setState((prev) => ({
               ...prev,
@@ -132,7 +132,7 @@ export function useBrowser() {
       }));
     };
 
-    const unregTracker = window.neutrino.onTrackerBlocked?.((item) => {
+    const unregTracker = window.serica.onTrackerBlocked?.((item) => {
       trackerQueue.push(item);
       if (!trackerFlushTimer) {
         trackerFlushTimer = setTimeout(flushTrackerQueue, 250);
@@ -140,7 +140,7 @@ export function useBrowser() {
     });
 
     // Initial shield stats fetch
-    window.neutrino.getShieldStats?.().then((stats: any) => {
+    window.serica.getShieldStats?.().then((stats: any) => {
       if (stats) {
         setState((prev) => ({
           ...prev,
@@ -158,14 +158,14 @@ export function useBrowser() {
         }));
       }
     };
-    window.addEventListener('neutrino:mock-tabs', handleMockTabs);
+    window.addEventListener('serica:mock-tabs', handleMockTabs);
 
     return () => {
       if (trackerFlushTimer) clearTimeout(trackerFlushTimer);
       unregState?.();
       unregPartition?.();
       unregTracker?.();
-      window.removeEventListener('neutrino:mock-tabs', handleMockTabs);
+      window.removeEventListener('serica:mock-tabs', handleMockTabs);
     };
   }, []);
 
@@ -182,48 +182,48 @@ export function useBrowser() {
     if (typeof url === 'string') {
       const normalized = url.trim().toLowerCase();
       // neutrino://settings, neutrino://history, neutrino://vpn open panels without changing Active_Tab URL.
-      if (normalized === 'neutrino://settings') {
-        window.dispatchEvent(new CustomEvent('neutrino:open-settings'));
+      if (normalized === 'serica://settings' || normalized === 'neutrino://settings') {
+        window.dispatchEvent(new CustomEvent('serica:open-settings'));
         return;
       }
-      if (normalized === 'neutrino://history') {
-        window.dispatchEvent(new CustomEvent('neutrino:open-history'));
+      if (normalized === 'serica://history' || normalized === 'neutrino://history') {
+        window.dispatchEvent(new CustomEvent('serica:open-history'));
         return;
       }
-      if (normalized === 'neutrino://downloads') {
-        window.dispatchEvent(new CustomEvent('neutrino:open-downloads'));
+      if (normalized === 'serica://downloads' || normalized === 'neutrino://downloads') {
+        window.dispatchEvent(new CustomEvent('serica:open-downloads'));
         return;
       }
-      if (normalized === 'neutrino://extensions') {
-        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+      if (normalized === 'serica://extensions' || normalized === 'neutrino://extensions') {
+        window.dispatchEvent(new CustomEvent('serica:open-extensions'));
         return;
       }
-      if (normalized === 'neutrino://vpn') {
-        window.dispatchEvent(new CustomEvent('neutrino:open-vpn'));
+      if (normalized === 'serica://vpn' || normalized === 'neutrino://vpn') {
+        window.dispatchEvent(new CustomEvent('serica:open-vpn'));
         return;
       }
     }
-    window.neutrino?.navigate(url);
+    window.serica?.navigate(url);
   }, []);
 
   const createTab = useCallback((url?: string, spaceId?: string) => {
-    return window.neutrino?.createTab(url, spaceId);
+    return window.serica?.createTab(url, spaceId);
   }, []);
 
   const closeTab = useCallback((tabId: string) => {
-    window.neutrino?.closeTab(tabId);
+    window.serica?.closeTab(tabId);
   }, []);
 
   const reopenClosedTab = useCallback(() => {
-    return window.neutrino?.reopenClosedTab?.();
+    return window.serica?.reopenClosedTab?.();
   }, []);
 
   const cycleTab = useCallback((direction: 1 | -1) => {
-    return window.neutrino?.cycleTab?.(direction);
+    return window.serica?.cycleTab?.(direction);
   }, []);
 
   const selectTab = useCallback((tabId: string) => {
-    window.neutrino?.selectTab(tabId);
+    window.serica?.selectTab(tabId);
     setState((prev) => ({
       ...prev,
       activeTabId: tabId,
@@ -231,15 +231,15 @@ export function useBrowser() {
   }, []);
 
   const togglePinTab = useCallback((tabId: string) => {
-    window.neutrino?.togglePinTab(tabId);
+    window.serica?.togglePinTab(tabId);
   }, []);
 
   const toggleSleepTab = useCallback((tabId: string) => {
-    window.neutrino?.toggleSleepTab(tabId);
+    window.serica?.toggleSleepTab(tabId);
   }, []);
 
   const selectSpace = useCallback((spaceId: string): Promise<void> => {
-    const done = Promise.resolve(window.neutrino?.selectSpace(spaceId)).catch(() => undefined);
+    const done = Promise.resolve(window.serica?.selectSpace(spaceId)).catch(() => undefined);
     setState((prev) => {
       if (!prev.spaces.some((s) => s.id === spaceId)) return prev;
       const spaceTabs = prev.tabs.filter((t) => t.spaceId === spaceId);
@@ -259,8 +259,8 @@ export function useBrowser() {
     const trimmed = typeof name === 'string' ? name.trim() : '';
     if (!trimmed) return null;
 
-    if (window.neutrino?.createSpace) {
-      const created = await window.neutrino.createSpace(trimmed, color);
+    if (window.serica?.createSpace) {
+      const created = await window.serica.createSpace(trimmed, color);
       if (created) {
         setState((prev) => ({
           ...prev,
@@ -288,7 +288,7 @@ export function useBrowser() {
           id: newTabId,
           spaceId: newSpace.id,
           title: 'New Tab',
-          url: 'neutrino://newtab',
+          url: 'serica://newtab',
           isLoading: false,
           canGoBack: false,
           canGoForward: false,
@@ -303,73 +303,73 @@ export function useBrowser() {
   }, []);
 
   const deleteSpace = useCallback((spaceId: string) => {
-    return window.neutrino?.deleteSpace?.(spaceId);
+    return window.serica?.deleteSpace?.(spaceId);
   }, []);
 
   const updateSpace = useCallback((spaceId: string, patch: SpacePatch) => {
-    return window.neutrino?.updateSpace?.(spaceId, patch);
+    return window.serica?.updateSpace?.(spaceId, patch);
   }, []);
 
   const reorderSpace = useCallback((spaceId: string, toIndex: number) => {
-    return window.neutrino?.reorderSpace?.(spaceId, toIndex);
+    return window.serica?.reorderSpace?.(spaceId, toIndex);
   }, []);
 
   const moveTab = useCallback((op: MoveOp) => {
-    return window.neutrino?.moveTab?.(op);
+    return window.serica?.moveTab?.(op);
   }, []);
 
   const pinTab = useCallback((tabId: string) => {
-    return window.neutrino?.pinTab?.(tabId);
+    return window.serica?.pinTab?.(tabId);
   }, []);
 
   const unpinTab = useCallback((tabId: string) => {
-    return window.neutrino?.unpinTab?.(tabId);
+    return window.serica?.unpinTab?.(tabId);
   }, []);
 
   const addFavorite = useCallback((tabId: string) => {
-    return window.neutrino?.addFavorite?.(tabId);
+    return window.serica?.addFavorite?.(tabId);
   }, []);
 
   const removeFavorite = useCallback((favoriteId: string) => {
-    return window.neutrino?.removeFavorite?.(favoriteId);
+    return window.serica?.removeFavorite?.(favoriteId);
   }, []);
 
   const duplicateTab = useCallback((id: string, spaceId?: string) => {
-    return window.neutrino?.duplicateTab?.(id, spaceId);
+    return window.serica?.duplicateTab?.(id, spaceId);
   }, []);
 
   const createFolder = useCallback((spaceId: string, name: string) => {
-    return window.neutrino?.createFolder?.(spaceId, name);
+    return window.serica?.createFolder?.(spaceId, name);
   }, []);
 
   const updateFolder = useCallback((folderId: string, patch: any) => {
-    return window.neutrino?.updateFolder?.(folderId, patch);
+    return window.serica?.updateFolder?.(folderId, patch);
   }, []);
 
   const deleteFolder = useCallback((folderId: string) => {
-    return window.neutrino?.deleteFolder?.(folderId);
+    return window.serica?.deleteFolder?.(folderId);
   }, []);
 
   const moveTabToFolder = useCallback((tabId: string, folderId: string | null) => {
-    return window.neutrino?.moveTabToFolder?.(tabId, folderId);
+    return window.serica?.moveTabToFolder?.(tabId, folderId);
   }, []);
 
   const updateSidebarState = useCallback((patch: Partial<SidebarState>) => {
-    return window.neutrino?.updateSidebarState?.(patch);
+    return window.serica?.updateSidebarState?.(patch);
   }, []);
 
   const reorderTabs = useCallback((draggedTabId: string, targetTabId: string) => {
-    return window.neutrino?.reorderTabs?.(draggedTabId, targetTabId);
+    return window.serica?.reorderTabs?.(draggedTabId, targetTabId);
   }, []);
 
   const toggleShields = useCallback(() => {
-    return window.neutrino?.toggleShields();
+    return window.serica?.toggleShields();
   }, []);
 
   const resetShieldStats = useCallback(async () => {
     setBlockedTrackers([]);
-    if (window.neutrino?.resetShieldStats) {
-      const nextStats = await window.neutrino.resetShieldStats();
+    if (window.serica?.resetShieldStats) {
+      const nextStats = await window.serica.resetShieldStats();
       setState((prev) => ({ ...prev, shieldStats: nextStats }));
     } else {
       setState((prev) => ({
@@ -387,7 +387,7 @@ export function useBrowser() {
   }, []);
 
   const zenOptimize = useCallback(() => {
-    window.neutrino?.zenOptimize();
+    window.serica?.zenOptimize();
   }, []);
 
   const currentSpaceTabs = state.tabs.filter(

@@ -5,8 +5,8 @@ import type { AuthHandoffNotice as Notice } from '../types';
 type Phase = { kind: 'ask' } | { kind: 'busy' } | { kind: 'opened' } | { kind: 'copied' } | { kind: 'error'; message: string };
 
 /**
- * Shown when Google refuses a sign-in inside Neutrino. Offers to continue in the default browser
- * and says plainly that the user will be signed in there, not in Neutrino. Failures to open the
+ * Shown when Google refuses a sign-in inside Serica. Offers to continue in the default browser
+ * and says plainly that the user will be signed in there, not in Serica. Failures to open the
  * browser are shown with a "Copy link" fallback instead of failing silently.
  */
 export const AuthHandoffNotice: React.FC = () => {
@@ -14,7 +14,7 @@ export const AuthHandoffNotice: React.FC = () => {
   const [phase, setPhase] = useState<Phase>({ kind: 'ask' });
 
   useEffect(() => {
-    const unsubscribe = window.neutrino?.onAuthHandoffRequired?.((next) => {
+    const unsubscribe = window.serica?.onAuthHandoffRequired?.((next) => {
       setNotice(next);
       setPhase({ kind: 'ask' });
     });
@@ -33,20 +33,20 @@ export const AuthHandoffNotice: React.FC = () => {
 
   const openInBrowser = async () => {
     setPhase({ kind: 'busy' });
-    const result = await window.neutrino?.openAuthHandoff?.(handoffId);
+    const result = await window.serica?.openAuthHandoff?.(handoffId);
     if (result?.ok) setPhase({ kind: 'opened' });
     else setPhase({ kind: 'error', message: result?.error ?? 'Could not open your default browser.' });
   };
 
   const copyLink = async () => {
-    const result = await window.neutrino?.copyAuthHandoffLink?.(handoffId);
+    const result = await window.serica?.copyAuthHandoffLink?.(handoffId);
     if (result?.ok) setPhase({ kind: 'copied' });
     else setPhase({ kind: 'error', message: result?.error ?? 'Could not copy the link.' });
   };
 
   const dismiss = () => {
     if (phase.kind === 'ask' || phase.kind === 'error') {
-      void window.neutrino?.dismissAuthHandoff?.(handoffId);
+      void window.serica?.dismissAuthHandoff?.(handoffId);
     }
     setNotice(null);
   };
@@ -54,7 +54,7 @@ export const AuthHandoffNotice: React.FC = () => {
   const reasonText =
     notice.reason === 'disallowed-useragent'
       ? 'Google does not allow this sign-in inside an embedded browser.'
-      : 'Google blocked this sign-in in Neutrino ("This browser or app may not be secure").';
+      : 'Google blocked this sign-in in Serica ("This browser or app may not be secure").';
 
   return (
     <div className="auth-handoff-notice" role={phase.kind === 'error' ? 'alert' : 'status'} aria-live="polite">
@@ -71,7 +71,7 @@ export const AuthHandoffNotice: React.FC = () => {
           <>
             <p className="auth-handoff-title">Continue Google sign-in for {siteHost} in your browser?</p>
             <p className="auth-handoff-text">
-              {reasonText} You will be signed in to {siteHost} in your default browser, not in Neutrino.
+              {reasonText} You will be signed in to {siteHost} in your default browser, not in Serica.
             </p>
           </>
         )}

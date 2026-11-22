@@ -173,7 +173,7 @@ export interface ThemeConfig {
   fontSize?: number;
 }
 
-/** Sent when Google refuses a sign-in inside Neutrino (see src/main/authHandoff.ts). */
+/** Sent when Google refuses a sign-in inside Serica (see src/main/authHandoff.ts). */
 export interface AuthHandoffNotice {
   handoffId: string;
   provider: 'google';
@@ -238,179 +238,171 @@ export interface ExtensionInfo {
 
 export type SiteAction = 'back' | 'forward' | 'reload' | 'hard-reload' | 'stop' | 'home' | 'open-find';
 
+export interface SericaAPI {
+  isElectron: boolean;
+  isTauri?: boolean;
+  // Native tab viewport (Rust tab host)
+  siteAction?: (action: SiteAction) => Promise<void>;
+  setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
+  freezeViewport?: () => Promise<string | null>;
+  thawViewport?: () => Promise<void>;
+  findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
+  onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
+  onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
+  onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
+  getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
+  openDevtools?: () => Promise<void>;
+  historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
+  getShieldsInfo?: () => Promise<{ engine: string; lists: string[]; lastUpdated: number | null; updating: boolean; lastError: string | null }>;
+  updateFilterLists?: () => Promise<void>;
+  mcpServerStatus?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
+  mcpRegenerateToken?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
+  listDownloads?: () => Promise<DownloadItem[]>;
+  downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
+  clearDownloads?: () => Promise<DownloadItem[]>;
+  openDownloadsFolder?: () => Promise<void>;
+  onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
+  onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
+  onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;
+  onOpenDownloads?: (cb: () => void) => () => void;
+  listExtensions?: () => Promise<ExtensionInfo[]>;
+  installExtension?: (input: string) => Promise<ExtensionInfo>;
+  setExtensionEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
+  removeExtension?: (id: string) => Promise<boolean>;
+  openExtensionPage?: (id: string, page: 'popup' | 'options') => Promise<boolean>;
+  onExtensionsUpdated?: (cb: (list: ExtensionInfo[]) => void) => () => void;
+  onExtensionInstalled?: (cb: (ext: ExtensionInfo) => void) => () => void;
+  assistantOpen?: (url: string, x: number, y: number, width: number, height: number) => Promise<void>;
+  assistantBounds?: (x: number, y: number, width: number, height: number) => Promise<void>;
+  assistantClose?: () => Promise<void>;
+  assistantInsertText?: (text: string) => Promise<boolean>;
+  navigate: (url: string) => Promise<void>;
+  goBack: () => Promise<void>;
+  goForward: () => Promise<void>;
+  reload: () => Promise<void>;
+  hardReload?: () => Promise<void>;
+  stopLoading?: () => Promise<void>;
+  reopenClosedTab?: () => Promise<TabState | null>;
+  cycleTab?: (direction: 1 | -1) => Promise<TabState | null>;
+  openExternalUrl?: (url: string) => Promise<boolean>;
+  onSiteAction?: (cb: (payload: { action: SiteAction; source?: string }) => void) => () => void;
+  onSpaceSwitched?: (cb: (payload: { spaceId: string; spaceName: string }) => void) => () => void;
+  getState?: () => Promise<BrowserAppState>;
+  createTab: (url?: string, spaceId?: string) => Promise<TabState>;
+  updateTab?: (tabId: string, partial: Partial<TabState>) => Promise<void>;
+  closeTab: (tabId: string) => Promise<void>;
+  selectTab: (tabId: string) => Promise<void>;
+  togglePinTab: (tabId: string) => Promise<void>;
+  toggleSleepTab: (tabId: string) => Promise<void>;
+  selectSpace: (spaceId: string) => Promise<void>;
+  createSpace?: (name: string, color?: string, profileId?: string) => Promise<Space | null>;
+  deleteSpace?: (spaceId: string) => Promise<IpcResult>;
+  updateSpace?: (spaceId: string, patch: SpacePatch) => Promise<IpcResult<{ space: Space }>>;
+  reorderSpace?: (spaceId: string, toIndex: number) => Promise<IpcResult>;
+
+  listProfiles?: () => Promise<ProfileList>;
+  createProfile?: (name?: string) => Promise<IpcResult<{ profile: Profile; space: Space }>>;
+  renameProfile?: (profileId: string, name: string) => Promise<IpcResult<{ profile: Profile }>>;
+  deleteProfile?: (profileId: string) => Promise<IpcResult>;
+  onTabPartitionChanged?: (cb: (change: TabPartitionChange) => void) => () => void;
+
+  moveTab?: (op: MoveOp) => Promise<IpcResult<{ needsReload: boolean }>>;
+  pinTab?: (tabId: string) => Promise<IpcResult>;
+  unpinTab?: (tabId: string) => Promise<IpcResult>;
+  addFavorite?: (tabId: string) => Promise<IpcResult>;
+  removeFavorite?: (favoriteId: string) => Promise<IpcResult>;
+  duplicateTab?: (id: string, spaceId?: string) => Promise<IpcResult<{ tab: TabState }>>;
+
+  createFolder?: (spaceId: string, name: string) => Promise<IpcResult<{ folder: FolderRecord }>>;
+  updateFolder?: (folderId: string, patch: Partial<FolderRecord>) => Promise<IpcResult<{ folder: FolderRecord }>>;
+  deleteFolder?: (folderId: string) => Promise<IpcResult>;
+  moveTabToFolder?: (tabId: string, folderId: string | null) => Promise<IpcResult>;
+
+  updateSidebarState?: (patch: Partial<SidebarState>) => Promise<BrowserSettings>;
+  reorderTabs?: (draggedTabId: string, targetTabId: string) => Promise<void>;
+  setZoomFactor?: (factor: number) => Promise<void>;
+  onZoomUpdated?: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => () => void;
+  toggleShields: () => Promise<boolean>;
+  toggleSiteWhitelist?: (domainOrUrl: string) => Promise<{ domain: string; whitelisted: boolean; shieldWhitelist: string[] }>;
+  resetShieldStats?: () => Promise<ShieldStats>;
+  zenOptimize: () => Promise<{ memorySavedMb: number; sleepingCount: number }>;
+  getShieldStats: () => Promise<ShieldStats>;
+  callMcp: (method: string, params?: unknown) => Promise<any>;
+  getMcpLogs: () => Promise<any[]>;
+  mediaControl?: (action: string, params?: any) => Promise<any>;
+  captureTabPreview?: (tabUrl: string) => Promise<string | null>;
+  captureTabPreviewById?: (tabId: string) => Promise<string | null>;
+  getTabPreview?: (tabId: string) => Promise<string | null>;
+  registerTabWebview?: (tabId: string, webContentsId: number) => Promise<boolean>;
+  sampleTabTopColor?: (tabId: string) => Promise<{ r: number; g: number; b: number; a: number } | null>;
+  windowControl: (action: 'minimize' | 'maximize' | 'close') => Promise<void>;
+  setThemeMode?: (mode: 'dark' | 'light' | 'system') => Promise<{ success: boolean; isDark?: boolean }>;
+  getSettings?: () => Promise<BrowserSettings>;
+  getPerformanceStatus?: () => Promise<PerformanceStatus>;
+  updateSettings?: (patch: Partial<BrowserSettings>) => Promise<BrowserSettings>;
+  onSettingsUpdated?: (cb: (settings: BrowserSettings) => void) => () => void;
+  onPerformanceStatusUpdated?: (cb: (status: PerformanceStatus) => void) => () => void;
+  onOpenSettings?: (cb: () => void) => () => void;
+  onStateUpdate: (cb: (state: BrowserAppState) => void) => () => void;
+  onTrackerBlocked: (cb: (item: BlockedTrackerItem) => void) => () => void;
+  onCloseActiveTab?: (cb: () => void) => () => void;
+  onOpenCommandBar?: (cb: (opts?: { newTab?: boolean }) => void) => () => void;
+  onToggleTabs?: (cb: () => void) => () => void;
+  onEscapePressed?: (cb: () => void) => () => void;
+  onAuthHandoffRequired?: (cb: (notice: AuthHandoffNotice) => void) => () => void;
+  openAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
+  copyAuthHandoffLink?: (handoffId: string) => Promise<AuthHandoffResult>;
+  dismissAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
+  getHistory?: (options?: HistoryQueryOptions) => Promise<HistoryEntry[]>;
+  deleteHistoryEntry?: (target: { id?: string; url?: string; timestamp?: number }) => Promise<boolean>;
+  clearHistory?: (range?: HistoryClearRange) => Promise<number>;
+  onHistoryUpdated?: (cb: (entries: HistoryEntry[]) => void) => () => void;
+  onOpenHistory?: (cb: () => void) => () => void;
+  getVpnStatus?: () => Promise<VpnStatus>;
+  connectVpn?: (patch?: Partial<VpnConfig>) => Promise<VpnStatus>;
+  disconnectVpn?: () => Promise<VpnStatus>;
+  updateVpnConfig?: (patch: Partial<VpnConfig>) => Promise<VpnStatus>;
+  checkVpnIp?: () => Promise<VpnIpCheckResult | { error: string }>;
+  onVpnStatusUpdated?: (cb: (status: VpnStatus) => void) => () => void;
+
+  listArchive?: () => Promise<ArchiveListEntry[]>;
+  restoreArchivedTab?: (archivedId: string) => Promise<IpcResult<{ tab: TabState }>>;
+  onArchiveUpdated?: (cb: (entries: ArchiveListEntry[]) => void) => () => void;
+  getPasswordStatus?: () => Promise<PasswordStatusResult>;
+  listPasswords?: () => Promise<CredentialListItem[]>;
+  editPassword?: (
+    credentialId: string,
+    patch: { username?: string; password?: string },
+  ) => Promise<PasswordEditResult>;
+  deletePassword?: (credentialId: string) => Promise<PasswordSimpleResult>;
+  revealPassword?: (credentialId: string) => Promise<RevealResult | PasswordIpcErrorStatus>;
+  copyPassword?: (credentialId: string) => Promise<CopyResult | PasswordIpcErrorStatus>;
+  confirmPasswordAction?: (
+    confirmId: string,
+    accepted: boolean,
+  ) => Promise<RevealResult | CopyResult | PasswordIpcErrorStatus>;
+  getPasswordNeverList?: () => Promise<string[]>;
+  removeFromPasswordNeverList?: (origin: string) => Promise<string[]>;
+  importPasswordsCsv?: () => Promise<PasswordImportStartResult>;
+  importPasswordsFromBrowser?: () => Promise<PasswordImportStartResult>;
+  commitPasswordImport?: (
+    importId: string,
+    choices?: Record<number, ConflictChoice>,
+  ) => Promise<CommitImportResult | PasswordIpcError>;
+  cancelPasswordImport?: (importId: string) => Promise<PasswordSimpleResult>;
+  onPasswordPrompt?: (cb: (prompt: PromptInfo) => void) => () => void;
+  onPasswordPromptClosed?: (cb: (payload: { promptId: string }) => void) => () => void;
+  respondToPasswordPrompt?: (
+    promptId: string,
+    action: PromptAction,
+  ) => Promise<PromptResult | PasswordIpcError>;
+  [key: string]: any;
+}
+
 declare global {
   interface Window {
-    neutrino?: {
-      isElectron: boolean;
-      isTauri?: boolean;
-      // Native tab viewport (Rust tab host)
-      siteAction?: (action: SiteAction) => Promise<void>;
-      setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
-      freezeViewport?: () => Promise<string | null>;
-      thawViewport?: () => Promise<void>;
-      findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
-      onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
-      onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
-      onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
-      getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
-      openDevtools?: () => Promise<void>;
-      historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
-      getShieldsInfo?: () => Promise<{ engine: string; lists: string[]; lastUpdated: number | null; updating: boolean; lastError: string | null }>;
-      updateFilterLists?: () => Promise<void>;
-      mcpServerStatus?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
-      mcpRegenerateToken?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
-      listDownloads?: () => Promise<DownloadItem[]>;
-      downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
-      clearDownloads?: () => Promise<DownloadItem[]>;
-      openDownloadsFolder?: () => Promise<void>;
-      onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
-      onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
-      onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;
-      onOpenDownloads?: (cb: () => void) => () => void;
-      listExtensions?: () => Promise<ExtensionInfo[]>;
-      installExtension?: (input: string) => Promise<ExtensionInfo>;
-      setExtensionEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
-      removeExtension?: (id: string) => Promise<boolean>;
-      openExtensionPage?: (id: string, page: 'popup' | 'options') => Promise<boolean>;
-      onExtensionsUpdated?: (cb: (list: ExtensionInfo[]) => void) => () => void;
-      onExtensionInstalled?: (cb: (ext: ExtensionInfo) => void) => () => void;
-      assistantOpen?: (url: string, x: number, y: number, width: number, height: number) => Promise<void>;
-      assistantBounds?: (x: number, y: number, width: number, height: number) => Promise<void>;
-      assistantClose?: () => Promise<void>;
-      assistantInsertText?: (text: string) => Promise<boolean>;
-      navigate: (url: string) => Promise<void>;
-      goBack: () => Promise<void>;
-      goForward: () => Promise<void>;
-      reload: () => Promise<void>;
-      hardReload?: () => Promise<void>;
-      stopLoading?: () => Promise<void>;
-      reopenClosedTab?: () => Promise<TabState | null>;
-      cycleTab?: (direction: 1 | -1) => Promise<TabState | null>;
-      openExternalUrl?: (url: string) => Promise<boolean>;
-      onSiteAction?: (cb: (payload: { action: SiteAction; source?: string }) => void) => () => void;
-      onSpaceSwitched?: (cb: (payload: { spaceId: string; spaceName: string }) => void) => () => void;
-      getState?: () => Promise<BrowserAppState>;
-      createTab: (url?: string, spaceId?: string) => Promise<TabState>;
-      updateTab?: (tabId: string, partial: Partial<TabState>) => Promise<void>;
-      closeTab: (tabId: string) => Promise<void>;
-      selectTab: (tabId: string) => Promise<void>;
-      togglePinTab: (tabId: string) => Promise<void>;
-      toggleSleepTab: (tabId: string) => Promise<void>;
-      selectSpace: (spaceId: string) => Promise<void>;
-      /** `profileId` defaults to the active profile (R1.11). Resolves `null` for an unknown profile. */
-      createSpace?: (name: string, color?: string, profileId?: string) => Promise<Space | null>;
-      /** Rejects with `last-space` for a profile's only space (R13.9). */
-      deleteSpace?: (spaceId: string) => Promise<IpcResult>;
-      updateSpace?: (spaceId: string, patch: SpacePatch) => Promise<IpcResult<{ space: Space }>>;
-      reorderSpace?: (spaceId: string, toIndex: number) => Promise<IpcResult>;
-
-      // Profiles (R1.5, R1.6, R1.8, R1.9)
-      listProfiles?: () => Promise<ProfileList>;
-      createProfile?: (name?: string) => Promise<IpcResult<{ profile: Profile; space: Space }>>;
-      renameProfile?: (profileId: string, name: string) => Promise<IpcResult<{ profile: Profile }>>;
-      /** Errors: `unknown-profile`, `last-profile`, `erase-failed`. */
-      deleteProfile?: (profileId: string) => Promise<IpcResult>;
-      onTabPartitionChanged?: (cb: (change: TabPartitionChange) => void) => () => void;
-
-      // Sidebar layout (R14, R15, R17)
-      moveTab?: (op: MoveOp) => Promise<IpcResult<{ needsReload: boolean }>>;
-      pinTab?: (tabId: string) => Promise<IpcResult>;
-      unpinTab?: (tabId: string) => Promise<IpcResult>;
-      addFavorite?: (tabId: string) => Promise<IpcResult>;
-      removeFavorite?: (favoriteId: string) => Promise<IpcResult>;
-      duplicateTab?: (id: string, spaceId?: string) => Promise<IpcResult<{ tab: TabState }>>;
-
-      // Persistent Folders in Pinned section
-      createFolder?: (spaceId: string, name: string) => Promise<IpcResult<{ folder: FolderRecord }>>;
-      updateFolder?: (folderId: string, patch: Partial<FolderRecord>) => Promise<IpcResult<{ folder: FolderRecord }>>;
-      deleteFolder?: (folderId: string) => Promise<IpcResult>;
-      moveTabToFolder?: (tabId: string, folderId: string | null) => Promise<IpcResult>;
-
-      // Sidebar state, persisted through the settings IPC
-      updateSidebarState?: (patch: Partial<SidebarState>) => Promise<BrowserSettings>;
-      reorderTabs?: (draggedTabId: string, targetTabId: string) => Promise<void>;
-      setZoomFactor?: (factor: number) => Promise<void>;
-      onZoomUpdated?: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => () => void;
-      toggleShields: () => Promise<boolean>;
-      toggleSiteWhitelist?: (domainOrUrl: string) => Promise<{ domain: string; whitelisted: boolean; shieldWhitelist: string[] }>;
-      resetShieldStats?: () => Promise<ShieldStats>;
-      zenOptimize: () => Promise<{ memorySavedMb: number; sleepingCount: number }>;
-      getShieldStats: () => Promise<ShieldStats>;
-      callMcp: (method: string, params?: unknown) => Promise<any>;
-      getMcpLogs: () => Promise<any[]>;
-      mediaControl?: (action: string, params?: any) => Promise<any>;
-      captureTabPreview?: (tabUrl: string) => Promise<string | null>;
-      captureTabPreviewById?: (tabId: string) => Promise<string | null>;
-      getTabPreview?: (tabId: string) => Promise<string | null>;
-      registerTabWebview?: (tabId: string, webContentsId: number) => Promise<boolean>;
-      sampleTabTopColor?: (tabId: string) => Promise<{ r: number; g: number; b: number; a: number } | null>;
-      windowControl: (action: 'minimize' | 'maximize' | 'close') => Promise<void>;
-      setThemeMode?: (mode: 'dark' | 'light' | 'system') => Promise<{ success: boolean; isDark?: boolean }>;
-      getSettings?: () => Promise<BrowserSettings>;
-      getPerformanceStatus?: () => Promise<PerformanceStatus>;
-      updateSettings?: (patch: Partial<BrowserSettings>) => Promise<BrowserSettings>;
-      onSettingsUpdated?: (cb: (settings: BrowserSettings) => void) => () => void;
-      onPerformanceStatusUpdated?: (cb: (status: PerformanceStatus) => void) => () => void;
-      onOpenSettings?: (cb: () => void) => () => void;
-      onStateUpdate: (cb: (state: BrowserAppState) => void) => () => void;
-      onTrackerBlocked: (cb: (item: BlockedTrackerItem) => void) => () => void;
-      onCloseActiveTab?: (cb: () => void) => () => void;
-      onOpenCommandBar?: (cb: (opts?: { newTab?: boolean }) => void) => () => void;
-      onToggleTabs?: (cb: () => void) => () => void;
-      onEscapePressed?: (cb: () => void) => () => void;
-      onAuthHandoffRequired?: (cb: (notice: AuthHandoffNotice) => void) => () => void;
-      openAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
-      copyAuthHandoffLink?: (handoffId: string) => Promise<AuthHandoffResult>;
-      dismissAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
-      getHistory?: (options?: HistoryQueryOptions) => Promise<HistoryEntry[]>;
-      deleteHistoryEntry?: (target: { id?: string; url?: string; timestamp?: number }) => Promise<boolean>;
-      clearHistory?: (range?: HistoryClearRange) => Promise<number>;
-      onHistoryUpdated?: (cb: (entries: HistoryEntry[]) => void) => () => void;
-      onOpenHistory?: (cb: () => void) => () => void;
-      getVpnStatus?: () => Promise<VpnStatus>;
-      connectVpn?: (patch?: Partial<VpnConfig>) => Promise<VpnStatus>;
-      disconnectVpn?: () => Promise<VpnStatus>;
-      updateVpnConfig?: (patch: Partial<VpnConfig>) => Promise<VpnStatus>;
-      checkVpnIp?: () => Promise<VpnIpCheckResult | { error: string }>;
-      onVpnStatusUpdated?: (cb: (status: VpnStatus) => void) => () => void;
-
-      // Archive (R16.7, R16.8): the Active_Profile's archived tabs, newest first
-      listArchive?: () => Promise<ArchiveListEntry[]>;
-      /** Errors: `forbidden`, `unknown-archived-tab`, `restore-failed`. */
-      restoreArchivedTab?: (archivedId: string) => Promise<IpcResult<{ tab: TabState }>>;
-      onArchiveUpdated?: (cb: (entries: ArchiveListEntry[]) => void) => () => void;
-      // Password manager, Settings side (R9, R10, R11). Only revealPassword can carry plaintext.
-      getPasswordStatus?: () => Promise<PasswordStatusResult>;
-      listPasswords?: () => Promise<CredentialListItem[]>;
-      editPassword?: (
-        credentialId: string,
-        patch: { username?: string; password?: string },
-      ) => Promise<PasswordEditResult>;
-      deletePassword?: (credentialId: string) => Promise<PasswordSimpleResult>;
-      revealPassword?: (credentialId: string) => Promise<RevealResult | PasswordIpcErrorStatus>;
-      /** Main writes the clipboard; never returns plaintext. */
-      copyPassword?: (credentialId: string) => Promise<CopyResult | PasswordIpcErrorStatus>;
-      confirmPasswordAction?: (
-        confirmId: string,
-        accepted: boolean,
-      ) => Promise<RevealResult | CopyResult | PasswordIpcErrorStatus>;
-      getPasswordNeverList?: () => Promise<string[]>;
-      removeFromPasswordNeverList?: (origin: string) => Promise<string[]>;
-      importPasswordsCsv?: () => Promise<PasswordImportStartResult>;
-      importPasswordsFromBrowser?: () => Promise<PasswordImportStartResult>;
-      commitPasswordImport?: (
-        importId: string,
-        choices?: Record<number, ConflictChoice>,
-      ) => Promise<CommitImportResult | PasswordIpcError>;
-      cancelPasswordImport?: (importId: string) => Promise<PasswordSimpleResult>;
-      // Password save/update prompts (R6.2, R6.3, R7.2). Events carry origin and username only.
-      onPasswordPrompt?: (cb: (prompt: PromptInfo) => void) => () => void;
-      onPasswordPromptClosed?: (cb: (payload: { promptId: string }) => void) => () => void;
-      respondToPasswordPrompt?: (
-        promptId: string,
-        action: PromptAction,
-      ) => Promise<PromptResult | PasswordIpcError>;
-    };
+    serica?: SericaAPI;
+    neutrino?: SericaAPI;
   }
 }
 

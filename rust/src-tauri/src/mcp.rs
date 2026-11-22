@@ -114,9 +114,9 @@ pub async fn dispatch(app: &Shared, msg: &Value) -> Option<Value> {
             let version = PROTOCOL_VERSIONS.iter().find(|v| **v == asked).copied().unwrap_or(PROTOCOL_VERSIONS[0]);
             ok(json!({
                 "protocolVersion": version,
-                "serverInfo": { "name": "neutrino-browser", "title": "Neutrino Browser", "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": { "name": "serica-browser", "title": "Serica Browser", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": { "tools": { "listChanged": false } },
-                "instructions": "Controls the user's Neutrino browser: read status, list/open/close tabs, navigate, hibernate background tabs, control media and read ad-blocker stats. Tab ids come from browser_list_tabs."
+                "instructions": "Controls the user's Serica browser: read status, list/open/close tabs, navigate, hibernate background tabs, control media and read ad-blocker stats. Tab ids come from browser_list_tabs."
             }))
         }
         "tools/list" => ok(json!({ "tools": tools() })),

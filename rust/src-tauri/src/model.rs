@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const NEW_TAB_URL: &str = "neutrino://newtab";
+pub const NEW_TAB_URL: &str = "serica://newtab";
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 pub fn now_ms() -> i64 {
@@ -21,7 +21,7 @@ pub fn new_id(prefix: &str) -> String {
 /// True for URLs rendered by the app itself instead of a web page.
 pub fn is_internal_url(url: &str) -> bool {
     let u = url.trim();
-    u.is_empty() || u.starts_with("neutrino://") || u == "about:blank"
+    u.is_empty() || u.starts_with("serica://") || u.starts_with("neutrino://") || u == "about:blank"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -249,7 +249,7 @@ pub struct ResourceStats {
     pub sleeping_count: usize,
 }
 
-/// Snapshot sent to the UI on every `neutrino:state-update`.
+/// Snapshot sent to the UI on every `serica:state-update`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserAppState {

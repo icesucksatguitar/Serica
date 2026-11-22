@@ -1,4 +1,4 @@
-//! IPC commands exposed to the UI (`window.neutrino` in `src/adapter/tauriBridge.ts`).
+//! IPC commands exposed to the UI (`window.serica` in `src/adapter/tauriBridge.ts`).
 
 use crate::app::{normalize_input, ui_emit, Notice, Shared};
 use crate::history::{HistoryEntry, HistoryQuery};
@@ -561,7 +561,7 @@ pub async fn list_archive(app: State<'_, Shared>) -> R<Vec<Value>> {
 pub async fn restore_archived_tab(archived_id: String, app: State<'_, Shared>) -> R<Value> {
     let r = app.mutate(|s| s.restore_archived(&archived_id));
     let list = app.store.lock().archive_list();
-    ui_emit(&app.handle, "neutrino:archive-updated", list);
+    ui_emit(&app.handle, "serica:archive-updated", list);
     Ok(match r {
         Ok(tab) => json!({ "ok": true, "tab": tab }),
         Err(e) => err(e),
@@ -743,7 +743,7 @@ pub async fn clear_history(range: Option<String>, app: State<'_, Shared>) -> R<u
 // ------------------------------------------------------------------ VPN
 
 fn emit_vpn(app: &Shared, status: &crate::vpn::VpnStatus) {
-    ui_emit(&app.handle, "neutrino:vpn-status-updated", status.clone());
+    ui_emit(&app.handle, "serica:vpn-status-updated", status.clone());
 }
 
 #[tauri::command]
@@ -907,7 +907,7 @@ pub async fn open_extension_page(id: String, page: String, app: State<'_, Shared
     Ok(true)
 }
 
-/// Install requested by the "Add to Neutrino" button on a Chrome Web Store page.
+/// Install requested by the "Add to Serica" button on a Chrome Web Store page.
 pub fn spawn_store_install(app: &Shared, tab_id: &str, ext_id: &str) {
     let (app, tab_id, ext_id) = (app.clone(), tab_id.to_string(), ext_id.to_string());
     tauri::async_runtime::spawn(async move {
@@ -919,7 +919,7 @@ pub fn spawn_store_install(app: &Shared, tab_id: &str, ext_id: &str) {
         };
         if let Ok(rec) = &result {
             crate::extensions::refresh(&app);
-            ui_emit(&app.handle, "neutrino:extension-installed", rec.clone());
+            ui_emit(&app.handle, "serica:extension-installed", rec.clone());
         }
         if let Some(wv) = TabHost::webview(&app, &tab_id) {
             let _ = wv.eval(js);
@@ -978,7 +978,7 @@ pub async fn download_action(id: String, action: String, app: State<'_, Shared>)
         "remove" => {
             let removed = app.downloads.remove(&id);
             if removed {
-                ui_emit(&app.handle, "neutrino:downloads-changed", app.downloads.list());
+                ui_emit(&app.handle, "serica:downloads-changed", app.downloads.list());
             }
             Ok(removed)
         }
@@ -1000,7 +1000,7 @@ pub async fn download_action(id: String, action: String, app: State<'_, Shared>)
                 }
             }
             app.downloads.remove(&id);
-            ui_emit(&app.handle, "neutrino:downloads-changed", app.downloads.list());
+            ui_emit(&app.handle, "serica:downloads-changed", app.downloads.list());
             Ok(true)
         }
         _ => Err(format!("unknown action {action}")),
@@ -1011,7 +1011,7 @@ pub async fn download_action(id: String, action: String, app: State<'_, Shared>)
 pub async fn clear_downloads(app: State<'_, Shared>) -> R<Vec<crate::downloads::DownloadItem>> {
     app.downloads.clear_finished();
     let list = app.downloads.list();
-    ui_emit(&app.handle, "neutrino:downloads-changed", list.clone());
+    ui_emit(&app.handle, "serica:downloads-changed", list.clone());
     Ok(list)
 }
 

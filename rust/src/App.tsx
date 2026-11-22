@@ -210,7 +210,7 @@ export function App() {
   // User Profile & First Launch Welcome Screen State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
     try {
-      const saved = localStorage.getItem('neutrino_user_profile');
+      const saved = (localStorage.getItem('serica_user_profile') || localStorage.getItem('neutrino_user_profile'));
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -219,7 +219,7 @@ export function App() {
 
   const [isWelcomeOpen, setIsWelcomeOpen] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('neutrino_onboarding_completed') === null;
+      return (localStorage.getItem('serica_onboarding_completed') || localStorage.getItem('neutrino_onboarding_completed')) === null;
     } catch {
       return false;
     }
@@ -251,7 +251,7 @@ export function App() {
         };
         const next: UserProfile = { ...base, name: trimmed };
         try {
-          localStorage.setItem('neutrino_user_profile', JSON.stringify(next));
+          localStorage.setItem('serica_user_profile', JSON.stringify(next));
         } catch { }
         void updateSettings({ userProfile: next });
         return next;
@@ -263,10 +263,10 @@ export function App() {
   // Zen auto-sleep runs in the Rust backend (tabs idle for 10+ minutes); nothing to schedule here.
 
   useEffect(() => {
-    void window.neutrino?.getPerformanceStatus?.().then((status) => {
+    void window.serica?.getPerformanceStatus?.().then((status) => {
       if (status) setPerformanceStatus(status);
     });
-    const unsubPerf = window.neutrino?.onPerformanceStatusUpdated?.((status) => {
+    const unsubPerf = window.serica?.onPerformanceStatusUpdated?.((status) => {
       if (status) setPerformanceStatus(status);
     });
     const syncHidden = () => {
@@ -294,7 +294,7 @@ export function App() {
   // so window controls, tabs, and site navigation controls never collide.
   const isWebpage = Boolean(
     activeTab?.url &&
-    activeTab.url !== 'neutrino://newtab' &&
+    activeTab.url !== 'serica://newtab' && activeTab.url !== 'neutrino://newtab' &&
     activeTab.url !== 'about:blank' &&
     !activeTab.isSleeping
   );
@@ -357,7 +357,7 @@ export function App() {
   // Persistent Dark Theme state (kept in sync with active Space theme effective mode)
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem('neutrino_dark_theme');
+      const saved = (localStorage.getItem('serica_dark_theme') || localStorage.getItem('neutrino_dark_theme'));
       return saved === null ? true : saved === 'true';
     } catch {
       return true;
@@ -370,14 +370,14 @@ export function App() {
     const nextDark = palette.effectiveMode === 'dark';
     setIsDarkMode((prev) => (prev === nextDark ? prev : nextDark));
     try {
-      localStorage.setItem('neutrino_dark_theme', nextDark ? 'true' : 'false');
+      localStorage.setItem('serica_dark_theme', nextDark ? 'true' : 'false');
     } catch { }
 
     const desiredIpcMode: 'dark' | 'light' | 'system' =
       activeSpaceTheme.mode === 'auto' ? 'system' : nextDark ? 'dark' : 'light';
     if (lastIpcThemeModeRef.current !== desiredIpcMode) {
       lastIpcThemeModeRef.current = desiredIpcMode;
-      void window.neutrino?.setThemeMode?.(desiredIpcMode);
+      void window.serica?.setThemeMode?.(desiredIpcMode);
     }
   }, [activeSpaceTheme, osPrefersDark]);
 
@@ -423,7 +423,7 @@ export function App() {
       };
       applySpaceThemeToRoot(updatedTheme, osPrefersDark);
       setIsDarkMode(next);
-      void window.neutrino?.setThemeMode?.(next ? 'dark' : 'light');
+      void window.serica?.setThemeMode?.(next ? 'dark' : 'light');
       void updateSettings({
         theme: next ? 'dark' : 'light',
         spaceThemes: {
@@ -456,13 +456,13 @@ export function App() {
       setUserProfile(persistedProfile);
       setIsWelcomeOpen(false);
       try {
-        localStorage.setItem('neutrino_user_profile', JSON.stringify(persistedProfile));
-        localStorage.setItem('neutrino_onboarding_completed', 'true');
+        localStorage.setItem('serica_user_profile', JSON.stringify(persistedProfile));
+        localStorage.setItem('serica_onboarding_completed', 'true');
       } catch { }
     } else if (settings.onboardingCompleted === true) {
       setIsWelcomeOpen(false);
       try {
-        localStorage.setItem('neutrino_onboarding_completed', 'true');
+        localStorage.setItem('serica_onboarding_completed', 'true');
       } catch { }
     } else if (userProfile) {
       migrationPatch.userProfile = userProfile;
@@ -471,14 +471,14 @@ export function App() {
 
     if (!settings.customTheme) {
       try {
-        const savedTheme = localStorage.getItem('neutrino_simple_theme_v5');
+        const savedTheme = (localStorage.getItem('serica_simple_theme_v5') || localStorage.getItem('neutrino_simple_theme_v5'));
         if (savedTheme) migrationPatch.customTheme = JSON.parse(savedTheme);
       } catch { }
     }
 
     if (!Array.isArray(settings.pinnedSites)) {
       try {
-        const savedPins = localStorage.getItem('neutrino_pinned_sites');
+        const savedPins = (localStorage.getItem('serica_pinned_sites') || localStorage.getItem('neutrino_pinned_sites'));
         if (savedPins) migrationPatch.pinnedSites = JSON.parse(savedPins);
       } catch { }
     }
@@ -491,18 +491,18 @@ export function App() {
   // Clean up any legacy zoom locks or invalid custom themes
   useEffect(() => {
     try {
-      localStorage.removeItem('neutrino_browser_zoom');
-      localStorage.removeItem('neutrino_homescreen_scale');
+      localStorage.removeItem('serica_browser_zoom'); localStorage.removeItem('neutrino_browser_zoom');
+      localStorage.removeItem('serica_homescreen_scale'); localStorage.removeItem('neutrino_homescreen_scale');
       const validAccents = new Set(['#FFFFFF', '#1C1917', '#E4E4E7', '#71717A', '#38BDF8', '#10B981']);
-      const savedTheme = localStorage.getItem('neutrino_simple_theme_v5');
+      const savedTheme = (localStorage.getItem('serica_simple_theme_v5') || localStorage.getItem('neutrino_simple_theme_v5'));
       if (savedTheme) {
         try {
           const parsed = JSON.parse(savedTheme);
           if (parsed.accent && !validAccents.has(String(parsed.accent).toUpperCase())) {
-            localStorage.removeItem('neutrino_simple_theme_v5');
+            localStorage.removeItem('serica_simple_theme_v5'); localStorage.removeItem('neutrino_simple_theme_v5');
           }
         } catch {
-          localStorage.removeItem('neutrino_simple_theme_v5');
+          localStorage.removeItem('serica_simple_theme_v5'); localStorage.removeItem('neutrino_simple_theme_v5');
         }
       }
       document.documentElement.style.zoom = '';
@@ -572,15 +572,15 @@ export function App() {
     };
 
     // Native Electron IPC listeners (authoritative single-dispatch from main process)
-    const unsubIpcToggle = window.neutrino?.onToggleTabs?.(() => {
+    const unsubIpcToggle = window.serica?.onToggleTabs?.(() => {
       toggleSidebar();
     });
     // Ctrl+T arrives as `{ newTab: true }` (R12.8); Ctrl+K/L/F6 open the bar normally.
-    const unsubIpcCmd = window.neutrino?.onOpenCommandBar?.((opts) => {
+    const unsubIpcCmd = window.serica?.onOpenCommandBar?.((opts) => {
       if (opts?.newTab) openNewTabCommandBar();
       else openCommandBar();
     });
-    const unsubIpcEsc = window.neutrino?.onEscapePressed?.(() => {
+    const unsubIpcEsc = window.serica?.onEscapePressed?.(() => {
       setIsCommandBarOpen(false);
       setIsArchiveOpen(false);
       setIsSettingsOpen(false);
@@ -591,13 +591,13 @@ export function App() {
       setIsVpnModalOpen(false);
     });
     // Ctrl+Comma while a webview has focus (main process before-input-event)
-    const unsubIpcSettings = window.neutrino?.onOpenSettings?.(() => {
+    const unsubIpcSettings = window.serica?.onOpenSettings?.(() => {
       setIsSettingsOpen(true);
     });
-    const unsubIpcHistory = window.neutrino?.onOpenHistory?.(() => {
+    const unsubIpcHistory = window.serica?.onOpenHistory?.(() => {
       setIsHistoryModalOpen(true);
     });
-    const unsubIpcSpaceSwitched = window.neutrino?.onSpaceSwitched?.((payload) => {
+    const unsubIpcSpaceSwitched = window.serica?.onSpaceSwitched?.((payload) => {
       triggerThemeCrossFade();
       if (payload?.spaceName) {
         playSpaceSwitch(payload.spaceName, '');
@@ -608,22 +608,22 @@ export function App() {
     const handleOpenHistoryEvent = () => setIsHistoryModalOpen(true);
     const handleOpenVpnEvent = () => setIsVpnModalOpen(true);
     const handleOpenExtensionsEvent = () => setIsExtensionsOpen(true);
-    window.addEventListener('neutrino:open-extensions', handleOpenExtensionsEvent);
+    window.addEventListener('serica:open-extensions', handleOpenExtensionsEvent);
     const handleOpenDownloadsEvent = () => setIsDownloadsOpen(true);
-    window.addEventListener('neutrino:open-downloads', handleOpenDownloadsEvent);
-    const unsubIpcDownloads = window.neutrino?.onOpenDownloads?.(() => setIsDownloadsOpen(true));
+    window.addEventListener('serica:open-downloads', handleOpenDownloadsEvent);
+    const unsubIpcDownloads = window.serica?.onOpenDownloads?.(() => setIsDownloadsOpen(true));
 
-    window.addEventListener('neutrino:open-settings', handleOpenSettingsEvent);
-    window.addEventListener('neutrino:open-history', handleOpenHistoryEvent);
-    window.addEventListener('neutrino:open-vpn', handleOpenVpnEvent);
-    window.addEventListener('neutrino:open-command-bar', handleOpenCommandBar);
-    window.addEventListener('neutrino:close-command-bar', handleCloseCommandBar);
-    window.addEventListener('neutrino:toggle-tabs', handleToggleTabs);
-    window.addEventListener('neutrino:close-active-tab', handleCloseActiveTab);
+    window.addEventListener('serica:open-settings', handleOpenSettingsEvent);
+    window.addEventListener('serica:open-history', handleOpenHistoryEvent);
+    window.addEventListener('serica:open-vpn', handleOpenVpnEvent);
+    window.addEventListener('serica:open-command-bar', handleOpenCommandBar);
+    window.addEventListener('serica:close-command-bar', handleCloseCommandBar);
+    window.addEventListener('serica:toggle-tabs', handleToggleTabs);
+    window.addEventListener('serica:close-active-tab', handleCloseActiveTab);
 
     // Fallback when running renderer standalone outside Electron (main process owns shortcuts in Electron)
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (window.neutrino?.isElectron) return;
+      if (window.serica?.isElectron) return;
       // Ctrl+1..9: the Nth space in Space_Switcher order; fewer than N keeps the current one (R13.4/13.5).
       if ((e.ctrlKey || e.metaKey) && e.key.length === 1 && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
@@ -642,26 +642,26 @@ export function App() {
       unsubIpcSettings?.();
       unsubIpcHistory?.();
       unsubIpcSpaceSwitched?.();
-      window.removeEventListener('neutrino:open-settings', handleOpenSettingsEvent);
-      window.removeEventListener('neutrino:open-history', handleOpenHistoryEvent);
-      window.removeEventListener('neutrino:open-vpn', handleOpenVpnEvent);
-      window.removeEventListener('neutrino:open-extensions', handleOpenExtensionsEvent);
-      window.removeEventListener('neutrino:open-downloads', handleOpenDownloadsEvent);
+      window.removeEventListener('serica:open-settings', handleOpenSettingsEvent);
+      window.removeEventListener('serica:open-history', handleOpenHistoryEvent);
+      window.removeEventListener('serica:open-vpn', handleOpenVpnEvent);
+      window.removeEventListener('serica:open-extensions', handleOpenExtensionsEvent);
+      window.removeEventListener('serica:open-downloads', handleOpenDownloadsEvent);
       unsubIpcDownloads?.();
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('neutrino:open-command-bar', handleOpenCommandBar);
-      window.removeEventListener('neutrino:close-command-bar', handleCloseCommandBar);
-      window.removeEventListener('neutrino:toggle-tabs', handleToggleTabs);
-      window.removeEventListener('neutrino:close-active-tab', handleCloseActiveTab);
+      window.removeEventListener('serica:open-command-bar', handleOpenCommandBar);
+      window.removeEventListener('serica:close-command-bar', handleCloseCommandBar);
+      window.removeEventListener('serica:toggle-tabs', handleToggleTabs);
+      window.removeEventListener('serica:close-active-tab', handleCloseActiveTab);
     };
 }, [state.activeTabId, state.activeSpaceId, spaceSwitcherOrder, activeTab, closeTab, handleSelectSpace, setIsCommandBarOpen, triggerThemeCrossFade, toggleSidebar, setSidebarExpanded, openCommandBar, openNewTabCommandBar]);
 
 // Built-in VPN state hydration & lazy History hydration (only fetch 500 history entries when open)
 useEffect(() => {
-  void window.neutrino?.getVpnStatus?.().then((status) => {
+  void window.serica?.getVpnStatus?.().then((status) => {
     if (status) setVpnStatus(status);
   });
-  const unsubVpn = window.neutrino?.onVpnStatusUpdated?.((status) => {
+  const unsubVpn = window.serica?.onVpnStatusUpdated?.((status) => {
     if (status) setVpnStatus(status);
   });
 
@@ -675,10 +675,10 @@ useEffect(() => {
     setHistoryEntries((prev) => (prev.length > 0 ? [] : prev));
     return;
   }
-  void window.neutrino?.getHistory?.({ limit: 500 }).then((list) => {
+  void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
     if (Array.isArray(list)) setHistoryEntries(list);
   });
-  const unsubHistory = window.neutrino?.onHistoryUpdated?.((entries) => {
+  const unsubHistory = window.serica?.onHistoryUpdated?.((entries) => {
     if (Array.isArray(entries)) setHistoryEntries(entries);
   });
   return () => {
@@ -688,13 +688,13 @@ useEffect(() => {
 
 useEffect(() => {
   if (!isVpnModalOpen) return;
-  void window.neutrino?.getVpnStatus?.().then((status) => {
+  void window.serica?.getVpnStatus?.().then((status) => {
     if (status) setVpnStatus(status);
   });
 }, [isVpnModalOpen]);
 
 const handleUpdateTab = (tabId: string, partial: Partial<TabState>) => {
-  window.neutrino?.updateTab?.(tabId, partial);
+  window.serica?.updateTab?.(tabId, partial);
 };
 
 // Media Controls
@@ -738,7 +738,7 @@ const dispatchSiteAction = useCallback((action: SiteAction) => {
 // Fallback Capturing Keyboard Shortcuts (only outside Electron where before-input-event is unavailable)
 useEffect(() => {
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
-    if (window.neutrino?.isElectron) return;
+    if (window.serica?.isElectron) return;
     if (e.key === 'Escape' && !e.defaultPrevented) {
       // Close the topmost panel; the command bar handles its own Escape.
       setIsArchiveOpen(false);
@@ -809,7 +809,7 @@ useEffect(() => {
       } else if (key === 'tab' || key === 'pagedown' || key === 'pageup') {
         e.preventDefault();
         const back = (key === 'tab' && e.shiftKey) || key === 'pageup';
-        void window.neutrino?.cycleTab?.(back ? -1 : 1);
+        void window.serica?.cycleTab?.(back ? -1 : 1);
       } else if (key === '=' || key === '+') {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'in' }));
@@ -830,7 +830,7 @@ useEffect(() => {
       dispatchSiteAction(e.ctrlKey || e.shiftKey ? 'hard-reload' : 'reload');
     } else if (e.key === 'F12') {
       e.preventDefault();
-      void window.neutrino?.openDevtools?.();
+      void window.serica?.openDevtools?.();
     }
   };
 
@@ -854,7 +854,7 @@ const handleOpenHistoryUrl = useCallback(
 );
 
 const handleDeleteHistoryEntry = useCallback(async (entry: HistoryEntry) => {
-  await window.neutrino?.deleteHistoryEntry?.({
+  await window.serica?.deleteHistoryEntry?.({
     id: entry.id,
     url: entry.url,
     timestamp: entry.timestamp,
@@ -862,21 +862,21 @@ const handleDeleteHistoryEntry = useCallback(async (entry: HistoryEntry) => {
 }, []);
 
 const handleClearHistory = useCallback(async (range: HistoryClearRange) => {
-  await window.neutrino?.clearHistory?.(range);
+  await window.serica?.clearHistory?.(range);
 }, []);
 
 const handleVpnConnect = useCallback(async (patch?: Partial<VpnConfig>) => {
-  const next = await window.neutrino?.connectVpn?.(patch);
+  const next = await window.serica?.connectVpn?.(patch);
   if (next) setVpnStatus(next);
 }, []);
 
 const handleVpnDisconnect = useCallback(async () => {
-  const next = await window.neutrino?.disconnectVpn?.();
+  const next = await window.serica?.disconnectVpn?.();
   if (next) setVpnStatus(next);
 }, []);
 
 const handleVpnUpdateConfig = useCallback(async (patch: Partial<VpnConfig>) => {
-  const next = await window.neutrino?.updateVpnConfig?.(patch);
+  const next = await window.serica?.updateVpnConfig?.(patch);
   if (next) setVpnStatus(next);
 }, []);
 
@@ -884,7 +884,7 @@ const handleVpnCheckIp = useCallback(async () => {
   setIsCheckingVpnIp(true);
   setVpnIpError(null);
   try {
-    const res = await window.neutrino?.checkVpnIp?.();
+    const res = await window.serica?.checkVpnIp?.();
     if (res && 'error' in res) {
       setVpnIpError(res.error);
     }
@@ -1012,7 +1012,7 @@ return (
         <div className="macos-traffic-lights">
           <button
             className="traffic-light close"
-            onClick={() => window.neutrino?.windowControl('close')}
+            onClick={() => window.serica?.windowControl('close')}
             title="Close"
             aria-label="Close"
           >
@@ -1020,7 +1020,7 @@ return (
           </button>
           <button
             className="traffic-light minimize"
-            onClick={() => window.neutrino?.windowControl('minimize')}
+            onClick={() => window.serica?.windowControl('minimize')}
             title="Minimize"
             aria-label="Minimize"
           >
@@ -1028,7 +1028,7 @@ return (
           </button>
           <button
             className="traffic-light maximize"
-            onClick={() => window.neutrino?.windowControl('maximize')}
+            onClick={() => window.serica?.windowControl('maximize')}
             title="Maximize"
             aria-label="Maximize"
           >
@@ -1429,7 +1429,7 @@ return (
           activeUrl={activeTab?.url}
           whitelist={settings.shieldWhitelist ?? []}
           onToggleSiteWhitelist={(domainOrUrl) => {
-            void window.neutrino?.toggleSiteWhitelist?.(domainOrUrl);
+            void window.serica?.toggleSiteWhitelist?.(domainOrUrl);
           }}
           onResetStats={resetShieldStats}
         />

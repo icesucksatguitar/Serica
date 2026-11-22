@@ -34,7 +34,7 @@ export function useProfiles() {
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const list = await window.neutrino?.listProfiles?.();
+    const list = await window.serica?.listProfiles?.();
     if (!list) return;
     setProfiles(list.profiles);
     setSpaces(list.spaces);
@@ -42,9 +42,9 @@ export function useProfiles() {
   }, []);
 
   useEffect(() => {
-    if (!window.neutrino) return;
+    if (!window.serica) return;
     refresh().catch(() => { });
-    const unreg = window.neutrino.onStateUpdate((state) => {
+    const unreg = window.serica.onStateUpdate((state) => {
       if (Array.isArray(state.profiles)) {
         const incoming = state.profiles;
         // state-update omits `partition`; keep the one listProfiles gave us.
@@ -59,20 +59,20 @@ export function useProfiles() {
   }, [refresh]);
 
   const createProfile = useCallback(async (name?: string) => {
-    const res = (await window.neutrino?.createProfile?.(name)) ?? NO_BRIDGE;
+    const res = (await window.serica?.createProfile?.(name)) ?? NO_BRIDGE;
     if (res.ok) await refresh();
     return res;
   }, [refresh]);
 
   const renameProfile = useCallback(async (profileId: string, name: string) => {
-    const res = (await window.neutrino?.renameProfile?.(profileId, name)) ?? NO_BRIDGE;
+    const res = (await window.serica?.renameProfile?.(profileId, name)) ?? NO_BRIDGE;
     if (res.ok) await refresh();
     return res;
   }, [refresh]);
 
   /** The caller confirms first (R1.7); `last-profile` means the deletion was refused (R1.9). */
   const deleteProfile = useCallback(async (profileId: string) => {
-    const res = (await window.neutrino?.deleteProfile?.(profileId)) ?? NO_BRIDGE;
+    const res = (await window.serica?.deleteProfile?.(profileId)) ?? NO_BRIDGE;
     await refresh();
     return res;
   }, [refresh]);

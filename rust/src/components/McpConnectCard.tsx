@@ -64,7 +64,7 @@ export const McpConnectCard: React.FC = () => {
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const s = await window.neutrino?.mcpServerStatus?.().catch(() => null);
+    const s = await window.serica?.mcpServerStatus?.().catch(() => null);
     if (s) setStatus(s);
   }, []);
 
@@ -74,7 +74,7 @@ export const McpConnectCard: React.FC = () => {
 
   const toggle = async (enabled: boolean) => {
     setBusy(true);
-    await window.neutrino?.updateSettings?.({ mcpServerEnabled: enabled }).catch(() => undefined);
+    await window.serica?.updateSettings?.({ mcpServerEnabled: enabled }).catch(() => undefined);
     // The backend (re)starts the listener when settings change.
     await new Promise((r) => setTimeout(r, 250));
     await refresh();
@@ -105,7 +105,7 @@ export const McpConnectCard: React.FC = () => {
             checked={status.enabled}
             disabled={busy}
             onChange={(e) => void toggle(e.target.checked)}
-            aria-label="Allow AI agents to control Neutrino"
+            aria-label="Allow AI agents to control Serica"
           />
           <span className="extension-switch-track" />
         </label>
@@ -124,7 +124,7 @@ export const McpConnectCard: React.FC = () => {
               className="mcp-connect-copy"
               title="Issue a new token (connected clients must be updated)"
               onClick={async () => {
-                const s = await window.neutrino?.mcpRegenerateToken?.().catch(() => null);
+                const s = await window.serica?.mcpRegenerateToken?.().catch(() => null);
                 if (s) setStatus(s);
               }}
             >

@@ -61,7 +61,7 @@ type ImportView =
 const MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
 
 function api() {
-  return window.neutrino;
+  return window.serica;
 }
 
 /**

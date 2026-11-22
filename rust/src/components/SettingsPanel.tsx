@@ -486,7 +486,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       className="settings-button"
                       onClick={() => {
                         onClose();
-                        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+                        window.dispatchEvent(new CustomEvent('serica:open-extensions'));
                       }}
                     >
                       <Puzzle size={13} aria-hidden="true" />
@@ -501,7 +501,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <span className="settings-info-title">Shields Active Protection</span>
                   </div>
                   <p className="settings-info-text">
-                    Neutrino shields block known tracking domains, intrusive scripts, and analytics beacons automatically. Website cookies, sessions, and storage remain strictly partitioned per profile.
+                    Serica shields block known tracking domains, intrusive scripts, and analytics beacons automatically. Website cookies, sessions, and storage remain strictly partitioned per profile.
                   </p>
                 </div>
               </section>

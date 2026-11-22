@@ -284,7 +284,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 if let Some(w) = app.handle.get_window("main") {
                     let _ = w.set_fullscreen(fs);
                 }
-                ui_emit(&app.handle, "neutrino:html-fullscreen", fs);
+                ui_emit(&app.handle, "serica:html-fullscreen", fs);
                 Ok(())
             })),
             &mut token,
@@ -372,7 +372,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                         let stream = windows::Win32::UI::Shell::SHCreateMemStream(Some(&body));
                         env.CreateWebResourceResponse(stream.as_ref(), 200, &HSTRING::from("OK"), &HSTRING::from(format!("Content-Type: {mime}\r\nAccess-Control-Allow-Origin: *")))?
                     }
-                    None => env.CreateWebResourceResponse(None, 403, &HSTRING::from("Blocked by Neutrino Shields"), &HSTRING::from(""))?,
+                    None => env.CreateWebResourceResponse(None, 403, &HSTRING::from("Blocked by Serica Shields"), &HSTRING::from(""))?,
                 };
                 args.SetResponse(&response)?;
                 let item = app.shields.record_block(&id, &uri, &d, rtype);
@@ -395,7 +395,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 }
                 let msg = take(msg);
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) else { return Ok(()) };
-                if v.get("__neutrino").is_none() {
+                if v.get("__serica").is_none() {
                     return Ok(());
                 }
                 if v["t"] == "ext-install" || v["t"] == "ext-query" {
@@ -453,7 +453,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                     let _ = f.ActiveMatchIndex(&mut active);
                     ui_emit(
                         &app.handle,
-                        "neutrino:find-result",
+                        "serica:find-result",
                         serde_json::json!({ "tabId": id, "totalMatches": count.max(0), "activeMatch": if count > 0 { active + 1 } else { 0 } }),
                     );
                 }
@@ -514,7 +514,7 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
     let script = format!(
         r#"(function(){{
   if (window.top !== window || location.hostname !== {host}) return;
-  try {{ Object.defineProperty(window, '__neutrinoCosmetic', {{ value: {host} }}); }} catch (e) {{}}
+  try {{ Object.defineProperty(window, '__sericaCosmetic', {{ value: {host} }}); }} catch (e) {{}}
   const css = {css};
   if (css) {{
     const add = () => {{ const s = document.createElement('style'); s.textContent = css; (document.head || document.documentElement).appendChild(s); }};
@@ -567,7 +567,7 @@ unsafe fn verify_scriptlets(core: &ICoreWebView2, ctx: &Rc<RefCell<Ctx>>) {
         }
     }
     let (ctx2, core2) = (ctx.clone(), core.clone());
-    let check = format!("window.__neutrinoCosmetic === {}", js_string(&host));
+    let check = format!("window.__sericaCosmetic === {}", js_string(&host));
     let _ = core.ExecuteScript(
         &HSTRING::from(check),
         &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
@@ -588,7 +588,7 @@ unsafe fn read_theme_color(app: &Shared, tab_id: &str, core: &ICoreWebView2) {
         &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
             if hr.is_ok() {
                 let color = serde_json::from_str::<serde_json::Value>(&result).ok().and_then(|v| v.as_str().map(str::to_string));
-                ui_emit(&app.handle, "neutrino:page-color", serde_json::json!({ "tabId": id, "themeColor": color }));
+                ui_emit(&app.handle, "serica:page-color", serde_json::json!({ "tabId": id, "themeColor": color }));
             }
             Ok(())
         })),

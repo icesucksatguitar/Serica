@@ -1,7 +1,7 @@
 {
-  "name": "neutrino-rust",
+  "name": "serica-rust",
   "version": "0.4.1",
-  "description": "Neutrino Browser - Rust + Tauri v2 implementation",
+  "description": "Serica Browser - Rust + Tauri v2 implementation",
   "type": "module",
   "scripts": {
     "dev": "vite",

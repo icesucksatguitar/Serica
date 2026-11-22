@@ -14,12 +14,12 @@ export interface TabPreviewCardProps {
 }
 
 function parsePreviewDomain(url?: string): { domain: string; isNewTab: boolean; isInternal: boolean } {
-  if (!url || url === 'neutrino://newtab' || url === 'about:blank') {
+  if (!url || url === 'serica://newtab' || url === 'neutrino://newtab' || url === 'about:blank') {
     return { domain: 'new tab', isNewTab: true, isInternal: true };
   }
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === 'neutrino:') {
+    if (parsed.protocol === 'serica:' || parsed.protocol === 'neutrino:') {
       return { domain: parsed.hostname || 'neutrino', isNewTab: false, isInternal: true };
     }
     return { domain: parsed.hostname.replace(/^www\./, ''), isNewTab: false, isInternal: false };
@@ -33,7 +33,7 @@ function parsePreviewDomain(url?: string): { domain: string; isNewTab: boolean; 
  * adopting the clean aesthetics from commit 7704421b.
  */
 const PreviewMockup: React.FC<{ url?: string; domain: string; isNewTab: boolean }> = ({ url = '', domain, isNewTab }) => {
-  if (isNewTab || url.startsWith('neutrino://newtab')) {
+  if (isNewTab || url.startsWith('serica://newtab') || url.startsWith('neutrino://newtab')) {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     return (

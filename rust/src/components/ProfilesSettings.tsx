@@ -122,7 +122,7 @@ export const ProfilesSettings: React.FC<ProfilesSettingsProps> = ({ tabs }) => {
 
   const deleteSpaceNow = (spaceId: string) =>
     run(async () => {
-      const res = await window.neutrino?.deleteSpace?.(spaceId);
+      const res = await window.serica?.deleteSpace?.(spaceId);
       if (!res) setMessage(describeManagementError('unavailable'));
       else setMessage(res.ok ? null : describeManagementError(res.error));
       await refresh();
@@ -160,7 +160,7 @@ export const ProfilesSettings: React.FC<ProfilesSettingsProps> = ({ tabs }) => {
     run(async () => {
       const name = cleanName(newSpaceName, SPACE_NAME_MAX);
       if (!name || !owner) return;
-      const created = await window.neutrino?.createSpace?.(name, undefined, owner);
+      const created = await window.serica?.createSpace?.(name, undefined, owner);
       if (created) {
         setNewSpaceName('');
         setMessage(null);

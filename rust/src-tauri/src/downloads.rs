@@ -243,7 +243,7 @@ impl Downloads {
 }
 
 pub fn emit(app: &Shared, item: &DownloadItem) {
-    ui_emit(&app.handle, "neutrino:download-updated", item.clone());
+    ui_emit(&app.handle, "serica:download-updated", item.clone());
 }
 
 /// Default folder WebView2 saves to (the user's Downloads folder).
@@ -364,7 +364,7 @@ pub mod native {
                     file_exists: true,
                 };
                 app.downloads.add(item.clone());
-                ui_emit(&app.handle, "neutrino:download-started", item);
+                ui_emit(&app.handle, "serica:download-started", item);
 
                 let mut t = Default::default();
                 {
@@ -473,7 +473,7 @@ mod tests {
     }
 
     fn temp_file(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("neutrino-dl-test-{name}-{}.json", std::process::id()));
+        let p = std::env::temp_dir().join(format!("serica-dl-test-{name}-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&p);
         p
     }

@@ -46,7 +46,7 @@ export interface SimpleTheme {
 export const MAC_THEMES: SimpleTheme[] = [
   {
     id: 'radical-dark',
-    name: 'Neutrino Pitch Black',
+    name: 'Serica Pitch Black',
     mode: 'dark',
     bgApp: '#000000',
     bgCard: '#0A0A0C',
@@ -57,7 +57,7 @@ export const MAC_THEMES: SimpleTheme[] = [
   },
   {
     id: 'clean-light',
-    name: 'Neutrino Warm Light',
+    name: 'Serica Warm Light',
     mode: 'light',
     bgApp: '#FAF7F2',
     bgCard: '#FFFFFF',

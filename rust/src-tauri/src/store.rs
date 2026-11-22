@@ -1002,7 +1002,7 @@ mod tests {
     use super::*;
 
     fn store() -> Store {
-        let dir = std::env::temp_dir().join(format!("neutrino-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("serica-test-{}", uuid::Uuid::new_v4()));
         Store::load(dir)
     }
 

@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk() {
-        let p = std::env::temp_dir().join(format!("neutrino-window-{}.json", std::process::id()));
+        let p = std::env::temp_dir().join(format!("serica-window-{}.json", std::process::id()));
         let g = WindowGeometry { x: 10, y: 20, width: 1500, height: 950, maximized: true };
         save(&p, &g);
         assert_eq!(load(&p), Some(g));

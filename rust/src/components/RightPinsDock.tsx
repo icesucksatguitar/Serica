@@ -35,7 +35,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
       return persistedPins;
     }
     try {
-      const saved = localStorage.getItem('neutrino_pinned_sites');
+      const saved = (localStorage.getItem('serica_pinned_sites') || localStorage.getItem('neutrino_pinned_sites'));
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -48,7 +48,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     if (Array.isArray(persistedPins) && persistedPins.length > 0) {
       setPins(persistedPins);
       try {
-        localStorage.setItem('neutrino_pinned_sites', JSON.stringify(persistedPins));
+        localStorage.setItem('serica_pinned_sites', JSON.stringify(persistedPins));
       } catch {}
     }
   }, [persistedPins]);
@@ -131,7 +131,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   const savePins = (updated: PinnedSite[]) => {
     setPins(updated);
     try {
-      localStorage.setItem('neutrino_pinned_sites', JSON.stringify(updated));
+      localStorage.setItem('serica_pinned_sites', JSON.stringify(updated));
     } catch {}
     onPersistPins?.(updated);
   };

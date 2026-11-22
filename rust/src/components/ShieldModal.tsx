@@ -48,7 +48,7 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
   const [engineInfo, setEngineInfo] = useState<{ engine: string; lists: string[]; updating: boolean } | null>(null);
   useEffect(() => {
     if (!isOpen) return;
-    void window.neutrino?.getShieldsInfo?.().then((i) => setEngineInfo(i)).catch(() => setEngineInfo(null));
+    void window.serica?.getShieldsInfo?.().then((i) => setEngineInfo(i)).catch(() => setEngineInfo(null));
   }, [isOpen]);
   if (!isOpen) return null;
 
@@ -67,7 +67,7 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
             ) : (
               <ShieldAlert size={20} style={{ color: 'var(--text-muted)' }} />
             )}
-            <span>Neutrino Shields</span>
+            <span>Serica Shields</span>
           </div>
             <button className="close-btn" onClick={onClose} aria-label="Close Shields">
               <X size={16} />

@@ -76,9 +76,9 @@ pub struct TabHost {
 /// Runs in every tab's top frame: reports CSS classes/ids for Brave's generic
 /// cosmetic filtering. Messages are ignored by Tauri's IPC (not invoke calls).
 pub const PAGE_SCRIPT: &str = r#"(() => {
-  if (window.top !== window || window.__neutrinoPage) return;
-  Object.defineProperty(window, '__neutrinoPage', { value: true });
-  const post = (m) => { try { window.chrome.webview.postMessage(JSON.stringify(Object.assign({ __neutrino: 1 }, m))); } catch (e) {} };
+  if (window.top !== window || window.__sericaPage) return;
+  Object.defineProperty(window, '__sericaPage', { value: true });
+  const post = (m) => { try { window.chrome.webview.postMessage(JSON.stringify(Object.assign({ __serica: 1 }, m))); } catch (e) {} };
   const seenC = new Set(), seenI = new Set();
   let pendC = [], pendI = [], timer = 0;
   const flush = () => { timer = 0; if (pendC.length || pendI.length) { post({ t: 'cosmetic', classes: pendC, ids: pendI }); pendC = []; pendI = []; } };

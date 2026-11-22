@@ -66,6 +66,6 @@ fn candidate_dirs() -> Vec<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     };
-    base.map(|b| ["neutrino-browser", "neutrino", "Neutrino"].iter().map(|n| b.join(n)).collect())
+    base.map(|b| ["serica-browser", "serica", "Serica", "neutrino-browser", "neutrino", "Neutrino", "com.serica.browser", "com.neutrino.browser"].iter().map(|n| b.join(n)).collect())
         .unwrap_or_default()
 }

@@ -311,7 +311,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       title: '> View Downloads',
       hint: 'Ctrl+J',
       action: () => {
-        window.dispatchEvent(new CustomEvent('neutrino:open-downloads'));
+        window.dispatchEvent(new CustomEvent('serica:open-downloads'));
         onClose();
       },
     },
@@ -320,7 +320,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       title: '> Manage Extensions',
       hint: 'Extensions',
       action: () => {
-        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+        window.dispatchEvent(new CustomEvent('serica:open-extensions'));
         onClose();
       },
     },

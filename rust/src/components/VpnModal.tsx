@@ -32,7 +32,7 @@ const MODE_OPTIONS: Array<{
     {
       id: 'doh-only',
       label: 'Encrypted DNS',
-      tagline: 'DNS-over-HTTPS + WebRTC leak guard inside Neutrino (built-in, zero setup).',
+      tagline: 'DNS-over-HTTPS + WebRTC leak guard inside Serica (built-in, zero setup).',
     },
     {
       id: 'system-vpn',
@@ -47,7 +47,7 @@ const MODE_OPTIONS: Array<{
     {
       id: 'custom-proxy',
       label: 'Custom Tunnel',
-      tagline: 'Connects Neutrino sessions through your SOCKS5, HTTPS, or HTTP tunnel endpoint.',
+      tagline: 'Connects Serica sessions through your SOCKS5, HTTPS, or HTTP tunnel endpoint.',
     },
   ];
 
@@ -177,7 +177,7 @@ export const VpnModal: React.FC<VpnModalProps> = ({
         <div className="modal-header">
           <div className="modal-title">
             <Lock size={18} style={{ color: statusColor }} />
-            <span>Neutrino Privacy Tunnel (VPN)</span>
+            <span>Serica Privacy Tunnel (VPN)</span>
           </div>
           <button className="close-btn" onClick={onClose} aria-label="Close VPN panel">
             <X size={16} />

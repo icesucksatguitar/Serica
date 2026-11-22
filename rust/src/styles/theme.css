@@ -282,7 +282,7 @@
   /* Oceanic teal */
 
   /* ==========================================================================
-     NEUTRINO PURE OLED PITCH BLACK PALETTE (DEFAULT DARK)
+     SERICA PURE OLED PITCH BLACK PALETTE (DEFAULT DARK)
      ========================================================================== */
   --bg: #000000;
   /* pure pitch black canvas */
@@ -3384,11 +3384,11 @@ input:focus-visible {
   height: 2px;
   border-radius: 2px;
   background: linear-gradient(90deg, transparent, var(--theme-accent, #60a5fa), transparent);
-  animation: neutrinoPillLoading 1.15s ease-in-out infinite;
+  animation: sericaPillLoading 1.15s ease-in-out infinite;
   pointer-events: none;
 }
 
-@keyframes neutrinoPillLoading {
+@keyframes sericaPillLoading {
   0% {
     transform: translateX(-60%);
     opacity: 0.4;
@@ -4984,7 +4984,7 @@ input:focus-visible {
 }
 
 /* 5. Minimal New Tab Page */
-.neutrino-minimal-newtab {
+.serica-minimal-newtab {
   width: 100%;
   height: 100%;
   background: transparent !important;
@@ -5484,7 +5484,7 @@ input:focus-visible {
   color: #0f172a;
 }
 
-[data-theme="light"] .neutrino-minimal-newtab {
+[data-theme="light"] .serica-minimal-newtab {
   background: transparent !important;
 }
 
@@ -6181,10 +6181,10 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
 }
 
 /* On Search Bar Focus: Smoothly raise glow opacity & scale */
-.neutrino-minimal-newtab:focus-within .ambient-glow-container,
-.neutrino-minimal-newtab:has(.newtab-search-reveal-wrapper:focus-within) .ambient-glow-container,
-.neutrino-minimal-newtab:has(.newtab-prompt-trigger:focus) .ambient-glow-container,
-.neutrino-minimal-newtab.search-focused .ambient-glow-container,
+.serica-minimal-newtab:focus-within .ambient-glow-container,
+.serica-minimal-newtab:has(.newtab-search-reveal-wrapper:focus-within) .ambient-glow-container,
+.serica-minimal-newtab:has(.newtab-prompt-trigger:focus) .ambient-glow-container,
+.serica-minimal-newtab.search-focused .ambient-glow-container,
 .ambient-glow-layer.glow-focused .ambient-glow-container {
   opacity: min(0.88, calc(var(--glow-opacity, 0.40) * 1.25));
   transform: translate3d(-50%, -50%, 0) scale(1.12);
@@ -10380,10 +10380,10 @@ body.light .zen-sleeping-hint {
 }
 
 .spin-icon {
-  animation: neutrinoSpin 1s linear infinite;
+  animation: sericaSpin 1s linear infinite;
 }
 
-@keyframes neutrinoSpin {
+@keyframes sericaSpin {
   from {
     transform: rotate(0deg);
   }
@@ -10448,7 +10448,7 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   background-color: var(--theme-surface-solid, var(--theme-bg-canvas)) !important;
 }
 /* ==========================================================================
-   EXTENSIONS PANEL (neutrino://extensions)
+   EXTENSIONS PANEL (serica://extensions)
    ========================================================================== */
 .extensions-modal-card {
   width: 520px;

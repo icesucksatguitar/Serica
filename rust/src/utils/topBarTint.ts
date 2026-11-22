@@ -46,11 +46,11 @@ export interface TopBarTint {
   vars: Record<string, string>;
 }
 
-/** Internal pages (neutrino://, about:blank) and tabs without a page draw the default theme. */
+/** Internal pages (serica://, about:blank) and tabs without a page draw the default theme. */
 export function isInternalPageUrl(url: string | null | undefined): boolean {
   if (!url) return true;
   const u = url.trim().toLowerCase();
-  return u === '' || u.startsWith('neutrino://') || u.startsWith('about:');
+  return u === '' || u.startsWith('serica://') || u.startsWith('neutrino://') || u.startsWith('about:');
 }
 
 /** Linear sRGB-space blend from `a` toward `b` by t (0..1). */

@@ -219,7 +219,7 @@ mod tests {
         h.record_visit("https://a.com/", "A", None);
         h.entries[0].timestamp -= 10_000;
         h.record_visit("https://a.com/", "", None);
-        h.record_visit("neutrino://newtab", "", None);
+        h.record_visit("serica://newtab", "", None);
         let all = h.recent(10);
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].visit_count, 2);

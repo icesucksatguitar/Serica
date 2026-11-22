@@ -557,7 +557,7 @@ impl Vpn {
                     Ok(())
                 }
                 Err(e) => {
-                    let _ = client.write_all(format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nX-Neutrino-Error: {}\r\n\r\n", e.replace(['\r', '\n'], " ")).as_bytes()).await;
+                    let _ = client.write_all(format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nX-Serica-Error: {}\r\n\r\n", e.replace(['\r', '\n'], " ")).as_bytes()).await;
                     Err(e)
                 }
             }
@@ -871,13 +871,13 @@ pub fn detect_os_vpn() -> Option<OsVpnAdapter> {
 pub const WEBRTC_GUARD_JS: &str = r#"(() => {
   try {
     const Orig = window.RTCPeerConnection;
-    if (!Orig || Orig.__neutrinoGuard) return;
+    if (!Orig || Orig.__sericaGuard) return;
     const Guarded = function (config, ...rest) {
       const c = Object.assign({}, config || {}, { iceTransportPolicy: 'relay' });
       return new Orig(c, ...rest);
     };
     Guarded.prototype = Orig.prototype;
-    Guarded.__neutrinoGuard = true;
+    Guarded.__sericaGuard = true;
     Object.setPrototypeOf(Guarded, Orig);
     window.RTCPeerConnection = Guarded;
     if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = Guarded;

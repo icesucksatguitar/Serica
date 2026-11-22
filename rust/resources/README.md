@@ -8,7 +8,7 @@ Brave's `adblock-resources` (the other file Shields downloads) doesn't include
 them.
 
 The app downloads this file at runtime (see `UBO_RESOURCES_URL` in
-`src-tauri/src/shields.rs`) and caches it; it is not compiled into Neutrino.
+`src-tauri/src/shields.rs`) and caches it; it is not compiled into Serica.
 
 **License:** the contents are uBlock Origin code, licensed under the
 [GNU GPL v3](https://github.com/gorhill/uBlock/blob/master/LICENSE.txt),
