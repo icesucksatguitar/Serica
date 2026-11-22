@@ -125,6 +125,8 @@ export const tauriBridge = {
   // MCP & assistant drawer
   callMcp: (method: string, params?: any) => invoke<any>('mcp_call', { method, params: params ?? null }),
   getMcpLogs: () => invoke<any[]>('get_mcp_logs'),
+  mcpServerStatus: () => invoke<any>('mcp_server_status'),
+  mcpRegenerateToken: () => invoke<any>('mcp_regenerate_token'),
   assistantOpen: (url: string, x: number, y: number, width: number, height: number) =>
     invoke<void>('assistant_open', { url, x, y, width, height }),
   assistantBounds: (x: number, y: number, width: number, height: number) =>

@@ -55,6 +55,11 @@ pub struct BrowserSettings {
     pub sidebar_auto_hide: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f64,
+    /// Local MCP endpoint for external agents (off by default).
+    #[serde(default)]
+    pub mcp_server_enabled: bool,
+    #[serde(default = "default_mcp_port")]
+    pub mcp_server_port: u16,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -64,6 +69,9 @@ fn yes() -> bool {
 }
 fn default_sidebar_width() -> f64 {
     240.0
+}
+fn default_mcp_port() -> u16 {
+    crate::mcp_http::DEFAULT_PORT
 }
 fn default_search_engine() -> String {
     "google".into()
@@ -116,6 +124,8 @@ impl BrowserSettings {
             ("sidebarExpanded", Value::is_boolean),
             ("sidebarAutoHide", Value::is_boolean),
             ("sidebarWidth", Value::is_number),
+            ("mcpServerEnabled", Value::is_boolean),
+            ("mcpServerPort", Value::is_u64),
         ];
         for (key, ok) in typed {
             if obj.get(*key).map(|v| !ok(v)).unwrap_or(false) {
@@ -136,6 +146,9 @@ impl BrowserSettings {
     }
 
     pub fn normalize(&mut self) {
+        if self.mcp_server_port < 1024 {
+            self.mcp_server_port = default_mcp_port();
+        }
         if !SEARCH_ENGINES.iter().any(|(id, _)| *id == self.search_engine) {
             self.search_engine = default_search_engine();
         }

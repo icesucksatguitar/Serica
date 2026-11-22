@@ -783,6 +783,23 @@ pub async fn mcp_call(method: String, params: Option<Value>, app: State<'_, Shar
     Ok(crate::mcp::handle(app.inner(), &method, params.unwrap_or(Value::Null)).await)
 }
 
+/// State of the local MCP endpoint (URL, token, running, last error).
+#[tauri::command]
+pub async fn mcp_server_status(app: State<'_, Shared>) -> R<Value> {
+    let (enabled, port) = {
+        let s = app.store.lock();
+        (s.settings.mcp_server_enabled, s.settings.mcp_server_port)
+    };
+    Ok(app.mcp_http.status(enabled, port))
+}
+
+/// Issues a new access token; clients using the old one stop working.
+#[tauri::command]
+pub async fn mcp_regenerate_token(app: State<'_, Shared>) -> R<Value> {
+    app.mcp_http.regenerate_token();
+    mcp_server_status(app).await
+}
+
 #[tauri::command]
 pub async fn get_mcp_logs(app: State<'_, Shared>) -> R<Vec<Value>> {
     Ok(app.mcp_logs.lock().iter().rev().take(50).rev().cloned().collect())

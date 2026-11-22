@@ -10656,8 +10656,9 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   transition: transform 0.16s ease;
 }
 
+/* A fixed "on" color: some themes use a white accent, which would hide the white knob. */
 .extension-switch input:checked + .extension-switch-track {
-  background-color: var(--theme-accent, #3b82f6);
+  background-color: #10b981;
 }
 
 .extension-switch input:checked + .extension-switch-track::after {
@@ -10826,4 +10827,125 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 
 .download-row:not(:hover):not(:focus-within) .download-actions .delete {
   opacity: 0;
+}
+
+/* ==========================================================================
+   MCP: CONNECT AN AI AGENT (local endpoint card)
+   ========================================================================== */
+.mcp-connect-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle, rgba(0, 0, 0, 0.03));
+}
+
+.mcp-connect-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcp-connect-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.mcp-connect-icon.on {
+  color: var(--shield-green, #10b981);
+}
+
+.mcp-connect-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-connect-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.mcp-connect-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.mcp-connect-token {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.mcp-connect-token-label {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.mcp-connect-token-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  color: var(--text-main);
+}
+
+.mcp-connect-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-main);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mcp-connect-copy:hover {
+  border-color: var(--border-strong);
+}
+
+.mcp-connect-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-connect-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.mcp-connect-pre {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input, rgba(0, 0, 0, 0.2));
+  color: var(--text-main);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.mcp-connect-note {
+  font-size: 10.5px;
+  color: var(--text-muted);
 }

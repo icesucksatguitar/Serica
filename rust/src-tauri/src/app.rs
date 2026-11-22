@@ -74,6 +74,7 @@ pub struct App {
     pub vpn: Arc<Vpn>,
     pub extensions: Extensions,
     pub downloads: Downloads,
+    pub mcp_http: crate::mcp_http::McpHttp,
     pub host: Mutex<TabHost>,
     pub mcp_logs: Mutex<VecDeque<Value>>,
     blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
@@ -139,6 +140,7 @@ impl App {
             vpn,
             extensions: Extensions::new(data_dir.join("extensions")),
             downloads: Downloads::new(data_dir.join("downloads.json")),
+            mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
             host: Mutex::new(TabHost::new(data_dir.join("webdata"), port)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
@@ -186,6 +188,7 @@ impl App {
                 let s = self.store.lock().settings.clone();
                 self.shields.configure(s.adblock_enabled, &s.shield_whitelist);
                 ui_emit(&self.handle, "neutrino:settings-updated", s);
+                crate::mcp_http::sync(&self);
             }
             if state || settings {
                 let snap = self.snapshot();
@@ -244,6 +247,7 @@ impl App {
     }
 
     fn start_background_jobs(self: &Arc<Self>) {
+        crate::mcp_http::sync(self);
         // Zen auto-sleep and Today-tab archiving, once a minute.
         let app = self.clone();
         tauri::async_runtime::spawn(async move {

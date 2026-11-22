@@ -7,6 +7,7 @@ mod extensions;
 mod history;
 mod importer;
 mod mcp;
+mod mcp_http;
 mod model;
 mod settings;
 mod shields;
@@ -104,6 +105,8 @@ pub fn run() {
             commands::check_vpn_ip,
             commands::mcp_call,
             commands::get_mcp_logs,
+            commands::mcp_server_status,
+            commands::mcp_regenerate_token,
             commands::assistant_open,
             commands::assistant_bounds,
             commands::assistant_close,

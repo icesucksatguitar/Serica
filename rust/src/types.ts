@@ -255,6 +255,8 @@ declare global {
       historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
       getShieldsInfo?: () => Promise<{ engine: string; lists: string[]; lastUpdated: number | null; updating: boolean; lastError: string | null }>;
       updateFilterLists?: () => Promise<void>;
+      mcpServerStatus?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
+      mcpRegenerateToken?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
       listDownloads?: () => Promise<DownloadItem[]>;
       downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
       clearDownloads?: () => Promise<DownloadItem[]>;

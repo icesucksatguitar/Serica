@@ -16,6 +16,7 @@ src-tauri/src/            Rust backend
   history.rs              Persistent history with search and suggestions
   settings.rs             Settings with validation (never resets on a bad key)
   mcp.rs                  MCP tools that let assistants drive the browser
+  mcp_http.rs             Local MCP endpoint (127.0.0.1:7531/mcp, token auth, off by default)
   extensions.rs           Chrome Web Store extensions (CRX install, per-profile sync)
   downloads.rs            Download manager (WebView2 downloads, pause/resume, history)
   importer.rs             One-time read-only import of a profile from the old Electron build

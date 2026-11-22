@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { McpConnectCard } from './McpConnectCard';
 import {
   Bot,
   X,
@@ -10,7 +11,6 @@ import {
   Play,
   Share2,
   ExternalLink,
-  CheckCircle2,
   AlertCircle,
   Move,
   Maximize2,
@@ -779,28 +779,7 @@ export const McpModal: React.FC<McpModalProps> = ({
           {/* TAB 3: TOOLS (Native MCP Server Tools & Live Protocol Logs) */}
           {activeTabType === 'tools' && (
             <div className="tools-tab-container">
-              {/* Server Status Header */}
-              <div
-                style={{
-                  background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '12px 14px',
-                  border: '1px solid var(--border)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                }}
-              >
-                <CheckCircle2 size={18} style={{ color: 'var(--shield-green, #10b981)' }} />
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
-                    Native MCP Server Active
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    JSON-RPC 2.0 interface listening on standard protocol pipes.
-                  </div>
-                </div>
-              </div>
+              <McpConnectCard />
 
               {/* Registered Tools */}
               <div>
@@ -809,6 +788,7 @@ export const McpModal: React.FC<McpModalProps> = ({
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {[
+                    { name: 'browser_get_status', desc: 'Active space, active tab, tab count and shields state' },
                     { name: 'browser_navigate', desc: 'Load web URL into target or active tab' },
                     { name: 'browser_list_tabs', desc: 'List all open tabs, status, and spaces' },
                     { name: 'browser_create_tab', desc: 'Open a new tab in target space' },

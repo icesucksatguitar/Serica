@@ -92,30 +92,58 @@ async fn call_tool(app: &Shared, name: &str, args: &Value) -> Result<Value, Stri
     }
 }
 
-/// Handles one JSON-RPC request and returns the JSON-RPC response.
-pub async fn handle(app: &Shared, method: &str, params: Value) -> Value {
-    let id = now_ms();
+/// MCP protocol revisions this server speaks, newest first.
+const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+
+fn is_known_tool(name: &str) -> bool {
+    tools().as_array().map(|t| t.iter().any(|x| x["name"] == name)).unwrap_or(false)
+}
+
+/// Handles one JSON-RPC message. Returns the response, or `None` for
+/// notifications (and stray responses), which get no reply.
+pub async fn dispatch(app: &Shared, msg: &Value) -> Option<Value> {
+    let method = msg["method"].as_str()?;
+    let id = msg.get("id").cloned().filter(|v| !v.is_null())?;
+    let params = msg.get("params").cloned().unwrap_or(Value::Null);
     app.log_mcp(json!({ "timestamp": now_ms(), "direction": "in", "method": method, "data": params }));
+    let ok = |result: Value| json!({ "jsonrpc": "2.0", "id": id.clone(), "result": result });
+    let err = |code: i64, message: String| json!({ "jsonrpc": "2.0", "id": id.clone(), "error": { "code": code, "message": message } });
     let resp = match method {
-        "initialize" => json!({ "jsonrpc": "2.0", "id": id, "result": {
-            "protocolVersion": "2024-11-05",
-            "serverInfo": { "name": "neutrino-browser-mcp", "version": env!("CARGO_PKG_VERSION") },
-            "capabilities": { "tools": {} } } }),
-        "tools/list" => json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": tools() } }),
+        "initialize" => {
+            let asked = params["protocolVersion"].as_str().unwrap_or("");
+            let version = PROTOCOL_VERSIONS.iter().find(|v| **v == asked).copied().unwrap_or(PROTOCOL_VERSIONS[0]);
+            ok(json!({
+                "protocolVersion": version,
+                "serverInfo": { "name": "neutrino-browser", "title": "Neutrino Browser", "version": env!("CARGO_PKG_VERSION") },
+                "capabilities": { "tools": { "listChanged": false } },
+                "instructions": "Controls the user's Neutrino browser: read status, list/open/close tabs, navigate, hibernate background tabs, control media and read ad-blocker stats. Tab ids come from browser_list_tabs."
+            }))
+        }
+        "tools/list" => ok(json!({ "tools": tools() })),
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or("");
             if name.is_empty() {
-                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32602, "message": "Missing tool name parameter" } })
+                err(-32602, "Missing tool name".into())
+            } else if !is_known_tool(name) {
+                err(-32602, format!("Unknown tool: {name}"))
             } else {
-                match call_tool(app, name, &params["arguments"]).await {
-                    Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }] } }),
-                    Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": e } }),
+                let args = if params["arguments"].is_object() { params["arguments"].clone() } else { json!({}) };
+                match call_tool(app, name, &args).await {
+                    Ok(v) => ok(json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }], "isError": false })),
+                    // Tool failures are results the model can read, not protocol errors.
+                    Err(e) => ok(json!({ "content": [{ "type": "text", "text": e }], "isError": true })),
                 }
             }
         }
-        "ping" => json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
-        _ => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": format!("Method not found: {method}") } }),
+        "ping" => ok(json!({})),
+        _ => err(-32601, format!("Method not found: {method}")),
     };
     app.log_mcp(json!({ "timestamp": now_ms(), "direction": "out", "method": method, "data": resp }));
-    resp
+    Some(resp)
+}
+
+/// In-app entry point (MCP panel): one request, one response.
+pub async fn handle(app: &Shared, method: &str, params: Value) -> Value {
+    let msg = json!({ "jsonrpc": "2.0", "id": now_ms(), "method": method, "params": params });
+    dispatch(app, &msg).await.unwrap_or(Value::Null)
 }
