@@ -14,6 +14,7 @@ mod shields;
 mod store;
 mod tabhost;
 mod vpn;
+mod window_state;
 #[cfg(windows)]
 mod webview_win;
 
@@ -33,6 +34,9 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("com.neutrino.browser"));
+            if let Some(window) = app.get_webview_window("main") {
+                window_state::attach(&window, data_dir.join("window.json"));
+            }
             let shared = app::App::new(app.handle().clone(), data_dir);
             app.manage(shared);
             Ok(())
