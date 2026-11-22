@@ -1,149 +1,144 @@
-# Neutrino Browser
+<div align="center">
 
-Neutrino is a high-speed, local-first desktop browser featuring Arc-inspired Spaces, interactive tab previews, built-in tracker & ad-blocking, customizable themes & ambient glows, and native MCP intelligence capabilities.
+<img src="rust/src-tauri/icons/icon.png" alt="Neutrino logo" width="96" height="96">
 
-This repository hosts two side-by-side implementations of Neutrino:
+# Neutrino
 
-1. **`electron/`**: The mature, full-featured reference implementation built on Electron 33, Chromium, React 18, and TypeScript.
-2. **`rust/`**: The modern, memory-efficient, resource-conscious implementation built on **Rust** and **Tauri v2**, providing a native OS-backed browser with identical design language and UX.
+**An open-source, Arc-style browser for Windows.**
 
----
+[![Latest release](https://img.shields.io/github/v/release/icesucksatguitar/neutrino?label=release)](https://github.com/icesucksatguitar/neutrino/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
-## Repository Structure
+<img src="docs/screenshots/hero-homescreen.png" alt="Neutrino new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
 
-```
-├── electron/          # Reference Electron implementation
-│   ├── src/           # Main process, preload, and React renderer UI
-│   ├── tests/         # Unit and integration test suites
-│   ├── package.json   # Electron build scripts and dependencies
-│   └── README.md      # Electron documentation and architecture notes
-├── rust/              # Rust + Tauri v2 implementation
-│   ├── src-tauri/     # Rust backend (Tauri v2, webview management, adblock, storage)
-│   ├── ui/            # React frontend sharing design tokens with the reference app
-│   └── README.md      # Living migration progress report & parity status
-├── docs/              # Shared architectural notes, feature inventory, port plan, and parity checks
-│   ├── FEATURE_INVENTORY.md   # Exhaustive audit of all browser features and Tauri feasibility
-│   └── PORT_PLAN.md           # Step-by-step migration blueprint and technical strategy
-└── README.md          # This file
-```
+### [⬇ Download the latest release](https://github.com/icesucksatguitar/neutrino/releases/latest)
 
+</div>
 
+> **Windows SmartScreen:** Neutrino isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
 
+## Why Neutrino
 
+Arc stops working on **December 22, 2026**. Neutrino keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the download is a single ~10 MB executable. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
 
+## Features
 
+### Spaces and the sidebar
+<img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
+- **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Each space can use its own profile, so cookies and logins stay separate.
+- **Vertical sidebar** with **Pinned** tabs, folders and a **Today** section. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
+- **Tab previews** on hover, a favorites dock, and a media mini player for audio playing in another tab.
 
+### Command palette
+<img src="docs/screenshots/command-palette.png" alt="Command palette listing open tabs across spaces" width="820">
 
+<kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>Ctrl</kbd>+<kbd>L</kbd> opens a URL, searches the web, or jumps to an open tab in any space. Type `>` for commands such as settings, themes, shields, downloads, extensions and tab hibernation.
 
+### Theme Studio
+<img src="docs/screenshots/theme-studio.png" alt="Theme Studio with a color wheel, presets and ambient glow controls" width="820">
 
+Each space gets its own gradient theme. Pick colors on a wheel, adjust intensity and grain, switch light/dark/auto, or start from one of 10 presets. The new-tab page has an animated ambient glow with adjustable strength, speed and spread.
 
-# Build Rust release without incrementing version
-python build.py --env rust --bump none
+### Shields: built-in ad and tracker blocking
+<img src="docs/screenshots/shields.png" alt="Shields panel showing blocked ads and trackers on a news site" width="820">
 
-# Build Electron and bump minor version (e.g. 0.2.1 -> 0.3.0)
-```bash
-python build.py --env electron --bump minor
+Shields uses Brave's open-source [`adblock-rust`](https://github.com/brave/adblock-rust) engine with EasyList, EasyPrivacy and uBlock Origin's filter lists, covering network requests, cosmetic filters and scriptlets. Lists update in the background. You can allow a site with one click and see a live list of recent blocks.
 
-# Build both releases and bump patch version
-python build.py --env all --bump patch
+### Tab hibernation
+Background tabs that sit idle for 10 minutes are put to sleep to free memory, and wake when you return to them. Pinned and playing tabs stay awake. You can also hibernate every inactive tab at once from the command palette.
 
-# Optional flags:
-#   --clean   Clean dist/release folders before building
-#   --run     Launch the application immediately after build
+### Built-in MCP for AI agents
+<img src="docs/screenshots/mcp-connect.png" alt="MCP panel with the local endpoint enabled and ready-to-copy Claude configs" width="820">
 
-# PowerShell wrapper:
-.\build.ps1 -env rust -bump none
-.\build.ps1 -env electron -bump minor
+Neutrino can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Neutrino](#connect-claude-to-neutrino).
 
-```
+### Also included
+- **Chrome Web Store extensions.** Open an extension's store page and press **Add to Neutrino**, then manage extensions at `neutrino://extensions`.
+- **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel and retry.
+- **Privacy tunnel:** DNS-over-HTTPS, Tor (SOCKS5) or your own SOCKS5/HTTP proxy, with an optional kill switch.
+- **History** with search, find in page, zoom, and HTML fullscreen.
 
+## Connect Claude to Neutrino
 
+1. In Neutrino, open **AI Assistants & Tools** (the sparkle button in the top bar) → **Tools**, and turn on **Connect an AI agent**.
+2. The panel shows your endpoint (`http://127.0.0.1:7531/mcp`) and a private access token, with copy buttons for each config below.
 
-
-
-
-
-
-
-
----
-
-## Unified Build & Release System
-
-A master orchestrator script is provided at the repository root (`build.py` and `build.ps1` for PowerShell) to build, increment versions, and stage standalone releases for either or both environments:
+**Claude Code**
 
 ```bash
-# Build Rust (Tauri v2) release without version bump
-python build.py --env rust --bump none
-
-# Build Electron release and bump minor version (0.2.1 -> 0.3.0)
-python build.py --env electron --bump minor
-
-# Build both environments and bump patch version
-python build.py --env all --bump patch
-
-# PowerShell convenience wrapper
-.\build.ps1 -env rust -bump none
-.\build.ps1 -env electron -bump minor
+claude mcp add --transport http neutrino http://127.0.0.1:7531/mcp --header "Authorization: Bearer <your-token>"
 ```
 
-### Running Release Directory
+**Claude Desktop** (`claude_desktop_config.json`, through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote); requires Node.js)
 
-Build artifacts are staged in the root `release/` directory, allowing side-by-side execution:
-
+```json
+{
+  "mcpServers": {
+    "neutrino": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:7531/mcp", "--header", "Authorization:${NEUTRINO_AUTH}"],
+      "env": { "NEUTRINO_AUTH": "Bearer <your-token>" }
+    }
+  }
+}
 ```
-release/
-├── electron/          # Standalone packaged Electron release (Neutrino.exe)
-├── rust/              # Standalone compiled Rust/Tauri release (Neutrino.exe)
-└── manifest.json      # Metadata tracking current versions, timestamps, and sizes
-```
 
----
+**Tools:** `browser_get_status`, `browser_list_tabs`, `browser_navigate`, `browser_create_tab`, `browser_close_tab`, `browser_zen_optimize`, `browser_media_control`, `browser_get_adblock_stats`.
 
-## Quick Start
+The endpoint is off by default and listens only on `127.0.0.1`. Every request needs the token, and requests from web pages (non-local origins) are refused. Anyone with the token can control your tabs, so keep it private; you can issue a new one from the same panel.
 
-### 1. Electron Reference Implementation (`electron/`)
+## Roadmap
 
-#### Prerequisites
-- Node.js >= 20 (Node v24 recommended)
-- npm >= 10
+- [x] Rust + Tauri v2 rewrite (the Electron prototype has been retired)
+- [x] Chrome Web Store extensions, download manager, MCP endpoint
+- [ ] Arc importer (Spaces, pinned tabs and folders)
+- [ ] Installer and Start-menu integration (releases are a portable `.exe` today)
+- [ ] Auto-update
+- [ ] Code signing, to remove the SmartScreen warning
+- [ ] Password manager
 
-#### Building & Running
+## Building from source
+
+<details>
+<summary>Prerequisites and commands</summary>
+
+**Requirements:** Windows 10/11 with the WebView2 Runtime (preinstalled on current Windows), [Rust](https://rustup.rs) 1.80+, Node.js 20+, and the Visual Studio C++ Build Tools.
+
 ```bash
-cd electron
+git clone https://github.com/icesucksatguitar/neutrino.git
+cd neutrino/rust
 npm install
-npm run build
-npm start
+npm run tauri dev        # run with hot reload
 ```
 
-#### Running Tests & Packaging
+Release build (stages `release/rust/Neutrino.exe`):
+
 ```bash
-npm test                # Run Vitest test suites
-npm run package         # Package standalone Windows x64 binary to release/
+cd neutrino
+python build.py --bump none     # or: --bump patch | minor | major, --clean, --run
 ```
 
----
+Tests:
 
-### 2. Rust + Tauri Implementation (`rust/`)
-
-#### Prerequisites
-- Rust >= 1.80 (2021 edition)
-- Node.js >= 20 and npm
-- Windows: WebView2 Runtime (preinstalled on Windows 10/11) & Visual Studio C++ Build Tools
-
-#### Building & Running
 ```bash
-cd rust
-npm install
-npm run tauri dev       # Launch desktop app with hot reload
+cd rust/src-tauri && cargo test
+cd rust && npx tsc --noEmit
 ```
 
-#### Packaging
-```bash
-npm run tauri build     # Compile optimized release binary and installer
-```
+Architecture notes and module overview: [`rust/README.md`](rust/README.md).
 
-For detailed migration status, feature parity matrices, benchmark comparisons, and platform limitation notes, refer to [`rust/README.md`](rust/README.md).
+</details>
 
+## How this was built
 
+I designed and directed Neutrino. AI coding agents wrote much of the implementation, and I [FILL IN: what you debugged or wrote yourself].
+
+## Contributing
+
+Issues and pull requests are welcome. For larger changes, please open an issue first so we can agree on the approach. Before submitting, run `cargo test` in `rust/src-tauri` and `npx tsc --noEmit` in `rust/`.
+
+## License
+
+[MIT](LICENSE)
