@@ -20,11 +20,11 @@ function parsePreviewDomain(url?: string): { domain: string; isNewTab: boolean; 
   try {
     const parsed = new URL(url);
     if (parsed.protocol === 'serica:' || parsed.protocol === 'neutrino:') {
-      return { domain: parsed.hostname || 'neutrino', isNewTab: false, isInternal: true };
+      return { domain: parsed.hostname || 'serica', isNewTab: false, isInternal: true };
     }
     return { domain: parsed.hostname.replace(/^www\./, ''), isNewTab: false, isInternal: false };
   } catch {
-    return { domain: url.replace(/^https?:\/\//, '').split('/')[0] || 'neutrino', isNewTab: false, isInternal: false };
+    return { domain: url.replace(/^https?:\/\//, '').split('/')[0] || 'serica', isNewTab: false, isInternal: false };
   }
 }
 

@@ -6,13 +6,13 @@
 
 **An open-source, Arc-style browser for Windows.**
 
-[![Latest release](https://img.shields.io/github/v/release/icesucksatguitar/neutrino?label=release)](https://github.com/icesucksatguitar/neutrino/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/icesucksatguitar/Serica?label=release)](https://github.com/icesucksatguitar/Serica/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
 <img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
 
-### [⬇ Download the latest release](https://github.com/icesucksatguitar/neutrino/releases/latest)
+### [⬇ Download the latest release](https://github.com/icesucksatguitar/Serica/releases/latest)
 
 Get the **`.msi` installer** (adds Start menu and desktop shortcuts), or the portable `.exe` if you'd rather not install anything.
 
@@ -54,7 +54,7 @@ Background tabs that sit idle for 10 minutes are put to sleep to free memory, an
 ### Built-in MCP for AI agents
 <img src="docs/screenshots/mcp-connect.png" alt="MCP panel with the local endpoint enabled and ready-to-copy Claude configs" width="820">
 
-Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Serica](#connect-claude-to-neutrino).
+Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Serica](#connect-claude-to-serica).
 
 ### Also included
 - **Chrome Web Store extensions.** Open an extension's store page and press **Add to Serica**, then manage extensions at `serica://extensions`.
@@ -109,8 +109,8 @@ The endpoint is off by default and listens only on `127.0.0.1`. Every request ne
 **Requirements:** Windows 10/11 with the WebView2 Runtime (preinstalled on current Windows), [Rust](https://rustup.rs) 1.80+, Node.js 20+, and the Visual Studio C++ Build Tools.
 
 ```bash
-git clone https://github.com/icesucksatguitar/neutrino.git
-cd neutrino/rust
+git clone https://github.com/icesucksatguitar/Serica.git
+cd Serica/rust
 npm install
 npm run tauri dev        # run with hot reload
 ```
@@ -118,7 +118,7 @@ npm run tauri dev        # run with hot reload
 Release build (stages `release/rust/Serica.exe`):
 
 ```bash
-cd neutrino
+cd Serica
 python build.py --bump none     # or: --bump patch | minor | major, --clean, --run
 ```
 

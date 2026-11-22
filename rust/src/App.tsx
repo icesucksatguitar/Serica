@@ -901,9 +901,9 @@ const shouldShowMiniPlayer =
   activeMediaState.tabId !== state.activeTabId;
 
 // Command_Bar submission: in new-tab mode (Ctrl+T / sidebar new tab control) a URL or search
-// opens a Today tab in the Active_Space (R12.8); neutrino:// panel URLs still open their panel.
+// opens a Today tab in the Active_Space (R12.8); serica:// panel URLs still open their panel.
 const handleCommandBarNavigate = (url: string) => {
-  if (isCommandBarNewTab && !/^neutrino:\/\/(settings|history|vpn)$/i.test(url.trim())) {
+  if (isCommandBarNewTab && !/^(?:serica|neutrino):\/\/(settings|history|vpn)$/i.test(url.trim())) {
     void createTab(url, state.activeSpaceId);
     return;
   }

@@ -12,17 +12,17 @@ interface McpServerStatus {
 
 /** Ready-to-paste client configs for the local MCP endpoint. */
 export function claudeCodeCommand(s: Pick<McpServerStatus, 'url' | 'token'>): string {
-  return `claude mcp add --transport http neutrino ${s.url} --header "Authorization: Bearer ${s.token}"`;
+  return `claude mcp add --transport http serica ${s.url} --header "Authorization: Bearer ${s.token}"`;
 }
 
 export function claudeDesktopConfig(s: Pick<McpServerStatus, 'url' | 'token'>): string {
   return JSON.stringify(
     {
       mcpServers: {
-        neutrino: {
+        serica: {
           command: 'npx',
-          args: ['-y', 'mcp-remote', s.url, '--header', 'Authorization:${NEUTRINO_AUTH}'],
-          env: { NEUTRINO_AUTH: `Bearer ${s.token}` },
+          args: ['-y', 'mcp-remote', s.url, '--header', 'Authorization:${SERICA_AUTH}'],
+          env: { SERICA_AUTH: `Bearer ${s.token}` },
         },
       },
     },
