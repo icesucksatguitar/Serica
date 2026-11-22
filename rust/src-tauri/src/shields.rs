@@ -519,5 +519,22 @@ mod youtube_diag {
             }
         }
         println!("youtube +js rules: {total}; scriptlet names missing from resources: {missing:?}");
+
+        // Build the real engine the way Shields does and inspect what it injects.
+        let mut set = adblock::lists::FilterSet::new(false);
+        for l in super::LISTS {
+            if let Ok(text) = std::fs::read_to_string(dir.join("lists").join(format!("{}.txt", l.name))) {
+                set.add_filter_list(text, super::parse_opts(l.trusted));
+            }
+        }
+        let mut engine = adblock::Engine::new_with_filter_set(set);
+        let shields = super::Shields::new(dir.clone(), Default::default());
+        engine.use_resources(shields.resources().unwrap_or_default());
+        let script = engine.url_cosmetic_resources("https://www.youtube.com/watch?v=x").injected_script;
+        let invoked = script.matches("try {").count();
+        println!("youtube injected script: {} bytes, {invoked} scriptlet invocations", script.len());
+        for f in ["function jsonPrune", "function setConstant", "function trustedReplaceXhrResponse", "class JSONPath"] {
+            println!("  contains {f:?}: {}", script.contains(f));
+        }
     }
 }

@@ -28,15 +28,18 @@ const resources = [];
 for (const s of builtinScriptlets) {
   if (typeof s.fn !== 'function' || !s.name) continue;
   const source = s.fn.toString();
-  // adblock-rust invokes function-style scriptlets by their declared name.
-  if (!/^function\s+[^\s(]+\s*\(/.test(source)) {
+  const isDependency = s.name.endsWith('.fn');
+  // adblock-rust invokes scriptlets by their declared function name, so those
+  // must be plain named functions. Dependencies (`*.fn`) are pasted in verbatim
+  // and may be classes or async functions.
+  if (!isDependency && !/^function\s+[^\s(]+\s*\(/.test(source)) {
     console.warn(`skipping ${s.name}: not a named function declaration`);
     continue;
   }
   const resource = {
     name: s.name,
     aliases: Array.isArray(s.aliases) ? s.aliases : [],
-    kind: { mime: s.name.endsWith('.fn') ? 'fn/javascript' : 'application/javascript' },
+    kind: { mime: isDependency ? 'fn/javascript' : 'application/javascript' },
     content: b64(source),
   };
   const deps = (s.dependencies || []).filter((d) => typeof d === 'string');
