@@ -1,220 +1,183 @@
+// Thin typed bridge from the UI to the Rust backend (src-tauri/src/commands.rs).
+// Every call is a Tauri `invoke`; every `on*` subscribes to an event the
+// backend emits to the main webview. No browser logic lives here.
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-// Thin adapter layer providing complete parity with Electron's preload window.neutrino API
+type Unsubscribe = () => void;
+
+/** Subscribes to a backend event; safe to unsubscribe before `listen` resolves. */
+function on<T>(event: string, callback: (payload: T) => void): Unsubscribe {
+  let unlisten: UnlistenFn | undefined;
+  let cancelled = false;
+  void listen<T>(event, (e) => callback(e.payload)).then((fn) => {
+    if (cancelled) fn();
+    else unlisten = fn;
+  });
+  return () => {
+    cancelled = true;
+    unlisten?.();
+  };
+}
+
+const siteAction = (action: string) => invoke<void>('site_action', { action });
+
 export const tauriBridge = {
   isElectron: false,
   isTauri: true,
 
-  // Navigation & Site Controls
-  navigate: async (url: string) => {
-    // If navigating active tab
-    const state: any = await invoke('get_browser_state');
-    if (state.activeTabId) {
-      await invoke('update_tab', { tabId: state.activeTabId, partial: { url, title: url, isLoading: true } });
-      setTimeout(() => {
-        void invoke('update_tab', { tabId: state.activeTabId, partial: { isLoading: false } });
-      }, 350);
-    }
-  },
-  goBack: async () => {},
-  goForward: async () => {},
-  reload: async () => {
-    const state: any = await invoke('get_browser_state');
-    if (state.activeTabId) {
-      await invoke('update_tab', { tabId: state.activeTabId, partial: { isLoading: true } });
-      setTimeout(() => {
-        void invoke('update_tab', { tabId: state.activeTabId, partial: { isLoading: false } });
-      }, 300);
-    }
-  },
-  hardReload: async () => {},
-  stopLoading: async () => {},
-  reopenClosedTab: async () => null,
-  cycleTab: async (_direction: 1 | -1) => null,
-  openExternalUrl: async (url: string) => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-opener');
-      await open(url);
-      return true;
-    } catch {
-      window.open(url, '_blank');
-      return true;
-    }
-  },
-  onSiteAction: (callback: (payload: { action: string; source?: string }) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:site-action', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onSpaceSwitched: (callback: (payload: { spaceId: string; spaceName: string }) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:space-switched', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
+  // Navigation
+  navigate: (url: string) => invoke<void>('navigate', { url }),
+  goBack: () => siteAction('back'),
+  goForward: () => siteAction('forward'),
+  reload: () => siteAction('reload'),
+  hardReload: () => siteAction('hard-reload'),
+  stopLoading: () => siteAction('stop'),
+  siteAction,
+  reopenClosedTab: () => invoke<any>('reopen_closed_tab'),
+  cycleTab: (direction: 1 | -1) => invoke<any>('cycle_tab', { direction }),
+  openExternalUrl: (url: string) => invoke<boolean>('open_external_url', { url }),
+  openDevtools: () => invoke<void>('open_devtools'),
 
-  // State, Tabs & Spaces
-  getState: async () => invoke('get_browser_state'),
-  createTab: async (url?: string, spaceId?: string) => invoke('create_tab', { url, spaceId }),
-  updateTab: async (tabId: string, partial: any) => invoke('update_tab', { tabId, partial }),
-  closeTab: async (tabId: string) => invoke('close_tab', { tabId }),
-  selectTab: async (tabId: string) => invoke('select_tab', { tabId }),
-  togglePinTab: async (tabId: string) => invoke('toggle_pin_tab', { tabId }),
-  toggleSleepTab: async (tabId: string) => invoke('toggle_sleep_tab', { tabId }),
-  reorderTabs: async (draggedTabId: string, targetTabId: string) =>
-    invoke('reorder_tabs', { draggedTabId, targetTabId }),
+  // Native viewport (tab webviews are positioned over this rectangle)
+  setViewport: (x: number, y: number, width: number, height: number) =>
+    invoke<void>('set_viewport', { x, y, width, height }),
+  freezeViewport: () => invoke<string | null>('viewport_freeze'),
+  thawViewport: () => invoke<void>('viewport_thaw'),
+  findInPage: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) =>
+    invoke<void>('find_in_page', { query, forward: options?.forward ?? true, findNext: options?.findNext ?? false }),
+  getMediaState: (tabId: string) => invoke<any>('get_media_state', { tabId }),
+  mediaControl: (action: string, params?: { tabId?: string; value?: number }) =>
+    params?.tabId ? invoke<void>('media_control', { tabId: params.tabId, action, value: params.value ?? null }) : Promise.resolve(),
 
-  selectSpace: async (spaceId: string) => invoke('select_space', { spaceId }),
-  createSpace: async (name: string, color?: string, profileId?: string) =>
-    invoke('create_space', { name, color, profileId }),
-  deleteSpace: async (spaceId: string) => invoke('delete_space', { spaceId }),
-  updateSpace: async (spaceId: string, patch: any) => invoke('update_space', { spaceId, patch }),
-  reorderSpace: async (spaceId: string, toIndex: number) => invoke('reorder_space', { spaceId, toIndex }),
+  // State, tabs & spaces
+  getState: () => invoke<any>('get_browser_state'),
+  createTab: (url?: string, spaceId?: string) => invoke<any>('create_tab', { url: url ?? null, spaceId: spaceId ?? null }),
+  updateTab: (tabId: string, partial: any) => invoke<void>('update_tab', { tabId, partial }),
+  closeTab: (tabId: string) => invoke<void>('close_tab', { tabId }),
+  selectTab: (tabId: string) => invoke<void>('select_tab', { tabId }),
+  togglePinTab: (tabId: string) => invoke<void>('toggle_pin_tab', { tabId }),
+  toggleSleepTab: (tabId: string) => invoke<void>('toggle_sleep_tab', { tabId }),
+  reorderTabs: (draggedTabId: string, targetTabId: string) => invoke<void>('reorder_tabs', { draggedTabId, targetTabId }),
+  selectSpace: (spaceId: string) => invoke<void>('select_space', { spaceId }),
+  createSpace: (name: string, color?: string, profileId?: string) =>
+    invoke<any>('create_space', { name, color: color ?? null, profileId: profileId ?? null }),
+  deleteSpace: (spaceId: string) => invoke<any>('delete_space', { spaceId }),
+  updateSpace: (spaceId: string, patch: any) => invoke<any>('update_space', { spaceId, patch }),
+  reorderSpace: (spaceId: string, toIndex: number) => invoke<any>('reorder_space', { spaceId, toIndex }),
 
-  // Profiles (placeholder for session profiles)
-  listProfiles: async () => ({
-    profiles: [{ id: 'profile-default', name: 'Default Profile', createdAt: Date.now() }],
-    spaces: [],
-    activeProfileId: 'profile-default',
-    activeSpaceId: 'space-study',
-  }),
+  // Profiles
+  listProfiles: () => invoke<any>('list_profiles'),
+  createProfile: (name?: string) => invoke<any>('create_profile', { name: name ?? null }),
+  renameProfile: (profileId: string, name: string) => invoke<any>('rename_profile', { profileId, name }),
+  deleteProfile: (profileId: string) => invoke<any>('delete_profile', { profileId }),
 
-  // Sidebar Layout
-  moveTab: async () => ({ ok: true, needsReload: false }),
-  pinTab: async (tabId: string) => invoke('toggle_pin_tab', { tabId }),
-  unpinTab: async (tabId: string) => invoke('toggle_pin_tab', { tabId }),
-  addFavorite: async () => ({ ok: true }),
-  removeFavorite: async () => ({ ok: true }),
-  duplicateTab: async (id: string, spaceId?: string) => {
-    const tab: any = await invoke('create_tab', { url: 'neutrino://newtab', spaceId });
-    return { ok: true, tab };
-  },
-  listArchive: async () => [],
-  restoreArchivedTab: async () => ({ ok: false, error: 'not-implemented' }),
-  updateSidebarState: async (patch: any) => invoke('update_settings', { patch }),
-  setZoomFactor: async () => {},
+  // Sidebar layout
+  moveTab: (op: any) => invoke<any>('move_tab', { op }),
+  pinTab: (tabId: string) => invoke<any>('pin_tab', { tabId }),
+  unpinTab: (tabId: string) => invoke<any>('unpin_tab', { tabId }),
+  addFavorite: (tabId: string) => invoke<any>('add_favorite', { tabId }),
+  removeFavorite: (favoriteId: string) => invoke<any>('remove_favorite', { favoriteId }),
+  duplicateTab: (id: string, spaceId?: string) => invoke<any>('duplicate_tab', { id, spaceId: spaceId ?? null }),
+  createFolder: (spaceId: string, name: string) => invoke<any>('create_folder', { spaceId, name }),
+  updateFolder: (folderId: string, patch: any) => invoke<any>('update_folder', { folderId, patch }),
+  deleteFolder: (folderId: string) => invoke<any>('delete_folder', { folderId }),
+  moveTabToFolder: (tabId: string, folderId: string | null) => invoke<any>('move_tab_to_folder', { tabId, folderId }),
+  listArchive: () => invoke<any[]>('list_archive'),
+  restoreArchivedTab: (archivedId: string) => invoke<any>('restore_archived_tab', { archivedId }),
+  updateSidebarState: (patch: any) => invoke<any>('update_settings', { patch }),
+  setZoomFactor: (factor: number) => invoke<void>('set_zoom_factor', { factor, tabId: null }),
 
-  // Adblock & Privacy Shields
-  toggleShields: async () => invoke('toggle_shields'),
-  toggleSiteWhitelist: async (domainOrUrl: string) => invoke('toggle_site_whitelist', { domainOrUrl }),
-  resetShieldStats: async () => invoke('reset_shield_stats'),
-  zenOptimize: async () => invoke('zen_optimize'),
-  getShieldStats: async () => invoke('get_shield_stats'),
+  // Shields (Brave adblock engine)
+  toggleShields: () => invoke<boolean>('toggle_shields'),
+  toggleSiteWhitelist: (domainOrUrl: string) => invoke<any>('toggle_site_whitelist', { domainOrUrl }),
+  resetShieldStats: () => invoke<any>('reset_shield_stats'),
+  getShieldStats: () => invoke<any>('get_shield_stats'),
+  getShieldsInfo: () => invoke<any>('get_shields_info'),
+  updateFilterLists: () => invoke<void>('update_filter_lists'),
+  zenOptimize: () => invoke<any>('zen_optimize'),
 
-  // Settings & Theme
-  getSettings: async () => invoke('get_settings'),
-  updateSettings: async (patch: any) => invoke('update_settings', { patch }),
-  getPerformanceStatus: async () => invoke('get_performance_status'),
-  setThemeMode: async () => ({ success: true }),
-
-  // Window Controls
-  windowControl: async (action: 'minimize' | 'maximize' | 'close') => invoke('window_control', { action }),
+  // Settings & theme
+  getSettings: () => invoke<any>('get_settings'),
+  updateSettings: (patch: any) => invoke<any>('update_settings', { patch }),
+  getPerformanceStatus: () => invoke<any>('get_performance_status'),
+  setThemeMode: (mode: 'dark' | 'light' | 'system') => invoke<any>('set_theme_mode', { mode }),
+  windowControl: (action: 'minimize' | 'maximize' | 'close') => invoke<void>('window_control', { action }),
 
   // Previews
-  captureTabPreview: async (tabId: string) => invoke('capture_tab_preview', { tabId }),
-  captureTabPreviewById: async (tabId: string) => invoke('capture_tab_preview', { tabId }),
-  getTabPreview: async (tabId: string) => invoke('get_tab_preview', { tabId }),
-  registerTabWebview: async () => true,
-  sampleTabTopColor: async () => null,
+  captureTabPreview: (tabId: string) => invoke<string | null>('capture_tab_preview', { tabId }),
+  captureTabPreviewById: (tabId: string) => invoke<string | null>('capture_tab_preview', { tabId }),
+  getTabPreview: (tabId: string) => invoke<string | null>('get_tab_preview', { tabId }),
 
   // History
-  getHistory: async (options?: any) => invoke('get_history', { options }),
-  deleteHistoryEntry: async (target: any) => invoke('delete_history_entry', { target }),
-  clearHistory: async (range?: string) => invoke('clear_history', { range }),
+  getHistory: (options?: any) => invoke<any[]>('get_history', { options: options ?? null }),
+  historySuggest: (text: string, limit?: number) => invoke<any[]>('history_suggest', { text, limit: limit ?? null }),
+  deleteHistoryEntry: (target: any) => invoke<boolean>('delete_history_entry', { target }),
+  clearHistory: (range?: string) => invoke<number>('clear_history', { range: range ?? null }),
 
-  // VPN
-  getVpnStatus: async () => invoke('get_vpn_status'),
-  connectVpn: async () => invoke('connect_vpn'),
-  disconnectVpn: async () => invoke('disconnect_vpn'),
-  checkVpnIp: async () => invoke('check_vpn_ip'),
+  // VPN / privacy tunnel
+  getVpnStatus: () => invoke<any>('get_vpn_status'),
+  connectVpn: (patch?: any) => invoke<any>('connect_vpn', { patch: patch ?? null }),
+  disconnectVpn: () => invoke<any>('disconnect_vpn'),
+  updateVpnConfig: (patch: any) => invoke<any>('update_vpn_config', { patch }),
+  checkVpnIp: () => invoke<any>('check_vpn_ip'),
 
-  // MCP
-  callMcp: async (method: string, params?: any) => invoke('mcp_call', { method, params }),
-  getMcpLogs: async () => invoke('get_mcp_logs'),
+  // MCP & assistant drawer
+  callMcp: (method: string, params?: any) => invoke<any>('mcp_call', { method, params: params ?? null }),
+  getMcpLogs: () => invoke<any[]>('get_mcp_logs'),
+  assistantOpen: (url: string, x: number, y: number, width: number, height: number) =>
+    invoke<void>('assistant_open', { url, x, y, width, height }),
+  assistantBounds: (x: number, y: number, width: number, height: number) =>
+    invoke<void>('assistant_bounds', { x, y, width, height }),
+  assistantClose: () => invoke<void>('assistant_close'),
+  assistantInsertText: (text: string) => invoke<boolean>('assistant_insert_text', { text }),
 
-  // Passwords
-  getPasswordStatus: async () => invoke('passwords_status'),
-  listPasswords: async () => invoke('passwords_list'),
+  // Downloads
+  listDownloads: () => invoke<any[]>('list_downloads'),
+  downloadAction: (id: string, action: string) => invoke<boolean>('download_action', { id, action }),
+  clearDownloads: () => invoke<any[]>('clear_downloads'),
+  openDownloadsFolder: () => invoke<void>('open_downloads_folder'),
 
-  // Reactive Listeners
-  onStateUpdate: (callback: (state: any) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:state-update', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onTrackerBlocked: (callback: (item: any) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:tracker-blocked', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onSettingsUpdated: (callback: (settings: any) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:settings-updated', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onPerformanceStatusUpdated: (callback: (status: any) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:performance-updated', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onHistoryUpdated: (callback: (entries: any[]) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:history-updated', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onVpnStatusUpdated: (callback: (status: any) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:vpn-status-updated', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onOpenSettings: (callback: () => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:open-settings', () => callback()).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onOpenCommandBar: (callback: (opts?: { newTab?: boolean }) => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:open-command-bar', (event: any) => callback(event.payload)).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onToggleTabs: (callback: () => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:toggle-tabs', () => callback()).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
-  onEscapePressed: (callback: () => void) => {
-    let unlisten: (() => void) | undefined;
-    void listen('neutrino:escape-pressed', () => callback()).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  },
+  // Extensions (Chrome Web Store)
+  listExtensions: () => invoke<any[]>('list_extensions'),
+  installExtension: (input: string) => invoke<any>('install_extension', { input }),
+  setExtensionEnabled: (id: string, enabled: boolean) => invoke<boolean>('set_extension_enabled', { id, enabled }),
+  removeExtension: (id: string) => invoke<boolean>('remove_extension', { id }),
+  openExtensionPage: (id: string, page: 'popup' | 'options') => invoke<boolean>('open_extension_page', { id, page }),
+
+  // Passwords (not available in this build; the backend says so)
+  getPasswordStatus: () => invoke<any>('passwords_status'),
+  listPasswords: () => invoke<any[]>('passwords_list'),
+
+  // Events from the backend
+  onStateUpdate: (cb: (state: any) => void) => on('neutrino:state-update', cb),
+  onTrackerBlocked: (cb: (item: any) => void) => on('neutrino:tracker-blocked', cb),
+  onSettingsUpdated: (cb: (settings: any) => void) => on('neutrino:settings-updated', cb),
+  onPerformanceStatusUpdated: (cb: (status: any) => void) => on('neutrino:performance-updated', cb),
+  onHistoryUpdated: (cb: (entries: any[]) => void) => on('neutrino:history-updated', cb),
+  onVpnStatusUpdated: (cb: (status: any) => void) => on('neutrino:vpn-status-updated', cb),
+  onArchiveUpdated: (cb: (entries: any[]) => void) => on('neutrino:archive-updated', cb),
+  onDownloadStarted: (cb: (item: any) => void) => on('neutrino:download-started', cb),
+  onDownloadUpdated: (cb: (item: any) => void) => on('neutrino:download-updated', cb),
+  onDownloadsChanged: (cb: (list: any[]) => void) => on('neutrino:downloads-changed', cb),
+  onOpenDownloads: (cb: () => void) => on('neutrino:open-downloads', () => cb()),
+  onExtensionsUpdated: (cb: (list: any[]) => void) => on('neutrino:extensions-updated', cb),
+  onExtensionInstalled: (cb: (ext: any) => void) => on('neutrino:extension-installed', cb),
+  onOpenSettings: (cb: () => void) => on('neutrino:open-settings', () => cb()),
+  onOpenHistory: (cb: () => void) => on('neutrino:open-history', () => cb()),
+  onOpenCommandBar: (cb: (opts?: { newTab?: boolean }) => void) => on('neutrino:open-command-bar', cb),
+  onToggleTabs: (cb: () => void) => on('neutrino:toggle-tabs', () => cb()),
+  onEscapePressed: (cb: () => void) => on('neutrino:escape-pressed', () => cb()),
+  onSiteAction: (cb: (payload: { action: string; source?: string }) => void) => on('neutrino:site-action', cb),
+  onSpaceSwitched: (cb: (payload: { spaceId: string; spaceName: string }) => void) => on('neutrino:space-switched', cb),
+  onZoomUpdated: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => on('neutrino:zoom-updated', cb),
+  onFindResult: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => on('neutrino:find-result', cb),
+  onPageColor: (cb: (r: { tabId: string; themeColor: string | null }) => void) => on('neutrino:page-color', cb),
+  onHtmlFullscreen: (cb: (isFullscreen: boolean) => void) => on('neutrino:html-fullscreen', cb),
 };
 
-// Mount global window.neutrino shim
+export type TauriBridge = typeof tauriBridge;
+
 if (typeof window !== 'undefined') {
   (window as any).neutrino = tauriBridge;
 }
-

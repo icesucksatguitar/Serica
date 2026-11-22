@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_SETTINGS, normalizeSettings } from '../../main/settings';
+import { DEFAULT_SETTINGS, normalizeSettings } from '../shared/settings';
 import type { BrowserSettings } from '../types';
 
 export interface UseSettingsResult {

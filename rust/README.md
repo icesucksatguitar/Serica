@@ -1,141 +1,121 @@
-# Neutrino Browser (Rust + Tauri Implementation)
+# Neutrino Browser (Rust + Tauri v2)
 
-## 1. Overview
-Neutrino is an aesthetically refined desktop browser featuring dynamic Arc-like Spaces, integrated adblocking shields, privacy-centric tab management, and hardware-adaptive rendering.
+The browser backend is Rust. TypeScript is used only for the UI (React).
 
-This implementation represents the **Rust + Tauri v2** port of Neutrino, engineered side-by-side with the reference Electron app.
+## Architecture
 
-### Stack
-- **Backend / Core**: Rust 2021, Tauri v2.2.0, Tokio (async runtime), Tracing, Serde, WebView2 (Windows).
-- **Frontend / UI**: React 18, Vite 6, TypeScript 5, Tailwind CSS, Lucide React icons, Anthropic Fonts (`AnthropicSans`, `InstrumentSerif`, `ClaudeSerif`, `FiraSans`, `PixelifySans`).
-- **Bridge Architecture**: Thin adapter (`rust/src/adapter/tauriBridge.ts`) exposing identical `window.neutrino` typed APIs atop Tauri `invoke` and `listen`.
-- **Target OS**: Windows (tested with `x86_64-pc-windows-gnu` / LLVM-MinGW toolchain), macOS, Linux.
-
-### Build and Run Instructions
-```powershell
-# Prerequisites: Node.js (v20+), Rust 1.80+ (or 1.99+), WebView2 runtime on Windows
-
-# Install frontend dependencies
-cd rust
-npm install
-
-# Run in development mode (with Vite HMR and native Tauri window)
-npm run tauri dev
-
-# Build production bundle / installer
-npm run tauri build
+```
+src-tauri/src/            Rust backend
+  app.rs                  Core: owns all services, throttled UI updates, debounced saves
+  store.rs                Profiles, spaces, tabs, favorites, folders, archive, Zen sleep
+  tabhost.rs              Native WebView2 child webview per tab, assistant drawer view
+  webview_win.rs          WebView2 hooks: navigation, titles, favicons, audio, fullscreen,
+                          shortcuts inside pages, find-in-page, capture, adblock
+  shields.rs              Brave adblock-rust engine (network + cosmetic + scriptlets)
+  vpn.rs                  Local tunnel proxy: DoH, Tor/SOCKS5/HTTP upstream, kill switch
+  history.rs              Persistent history with search and suggestions
+  settings.rs             Settings with validation (never resets on a bad key)
+  mcp.rs                  MCP tools that let assistants drive the browser
+  extensions.rs           Chrome Web Store extensions (CRX install, per-profile sync)
+  downloads.rs            Download manager (WebView2 downloads, pause/resume, history)
+  importer.rs             One-time read-only import of a profile from the old Electron build
+  commands.rs             IPC commands (the `window.neutrino` API)
+src/                      UI only
+  adapter/tauriBridge.ts  Typed invoke/listen wrappers, no logic
+  shared/                 Pure UI-side models (themes, sidebar layout, IPC types)
 ```
 
----
+### How pages are shown
+Every tab is a native WebView2 child webview placed over the UI's page rectangle,
+which the UI reports with `set_viewport`. Native views always paint above HTML, so
+while a modal, popover, context menu or hover card covers the page, the UI asks the
+backend to *freeze* the viewport: the page is captured to an image, the image is
+shown, and the native view is hidden until the overlay closes
+(`src/hooks/useViewportOverlay.ts`).
 
-## 2. Status Summary
-**Current Port Progress**: **78% Feature Parity** (Phase 2 Scaffolding Complete, Phase 3 Core Feature Pipeline Underway).
+Webviews are created lazily when a tab is first activated and are destroyed when a
+tab sleeps, closes, or goes back to the new-tab page. Each profile has its own
+WebView2 data directory, so cookies and storage are separate per profile.
 
-The application core, data structures, persistent storage, window management, theme studio, Spaces management, and frontend IPC bridge are functional and running natively. Tauri compiles to native x86_64 binary with an idle memory footprint of **~35 MB RAM** (vs **~180 MB RAM** on Electron). Multi-tab webview layout and request filtering are being actively bridged to WebView2.
+### Ad blocking (Brave adblock-rust)
+- Network: every request from a tab (`WebResourceRequested`, all resource types and
+  frames) is checked by `adblock::Engine`, honouring `$redirect` resources,
+  `$important` and exceptions. A blocked request gets a 403.
+- Cosmetic: per-site hide selectors and uBlock/Brave scriptlets are registered for
+  each navigation at document creation. Generic class/id hiding uses the classes
+  and ids the page reports.
+- Lists: EasyList, EasyPrivacy, and the uBlock filters, privacy, unbreak and
+  quick-fixes lists, plus Brave's scriptlet resources. They are downloaded in the
+  background, cached in `%APPDATA%\com.neutrino.browser\adblock`, and refreshed
+  every 4 days. Startup uses the serialized engine. A built-in rule set covers the
+  first run and offline use.
 
----
+### Privacy tunnel (VPN)
+Tab webviews always use a local proxy in `vpn.rs`, so modes switch live:
+- Off and system VPN: direct connection.
+- Encrypted DNS: DNS-over-HTTPS (RFC 8484).
+- Tor: SOCKS5 on 127.0.0.1:9050 with remote DNS.
+- Custom tunnel: SOCKS5 or HTTP upstream, with optional authentication.
 
-## 3. Feature Parity Matrix
+HTTPS is tunnelled end-to-end with CONNECT, and the proxy never sees plaintext.
+With the kill switch on, nothing falls back to a direct connection while the
+tunnel is down. HTTPS (TLS) upstream proxies are not supported.
 
-| Feature Area | Feature | Electron (Reference) | Rust + Tauri v2 | Status | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Spaces & Layout** | Space Switcher & Slider | React + IPC state | Tauri `select_space` command | ✅ Ported | Real-time gradient & color interpolation. |
-| **Spaces & Layout** | Create / Delete Space | Dynamic space CRUD | Tauri `create_space`, `delete_space` | ✅ Ported | Fixed bug where new spaces failed to create. |
-| **Spaces & Layout** | Sidebar & Navigation | Collapse/Expand | Native React UI + Tauri state | ✅ Ported | CSS alignment identical to reference. |
-| **Theming & Studio** | Light / Dark Live Switch | CSS vars + `prefers-color-scheme` | CSS vars + Tauri `update_settings` | ✅ Ported | Instant transition across all UI layers. |
-| **Theming & Studio** | Ambient Glow Customization | Radial canvas & CSS blur | React AmbientGlow component | ✅ Ported | Animated pulsing glow behind homescreen clock. |
-| **Theming & Studio** | Custom Preset Manager | Save/Name/Load/Delete | Tauri `settings.rs` preset store | ✅ Ported | Presets persist to `settings.json`. |
-| **Tabs & Hosting** | Tab Creation & Switching | `<webview>` tag per tab | Tauri multi-webview / Viewport | 🚧 In Progress | Evaluating multi-webview vs single embedded viewport. |
-| **Tabs & Hosting** | Tab Suspension / Zen Sleep | Unload DOM & WebContents | Memory deallocation & sleep flag | ✅ Ported | Sleeping tabs deallocate memory, save 48MB/tab. |
-| **Tab Previews** | Hover Cards | WebContents capturePage | HTML snapshot & theme-aware card | ⚠️ Limited | Live thumbnail capture requires OS-level compositing in WebView2. |
-| **Adblocker** | URL Network Interception | `webRequest.onBeforeRequest` | Rust `ShieldEngine` bloom filter | ⚠️ Limited | Pre-navigation request check; WebResourceRequested on Windows. |
-| **Adblocker** | Cosmetic Element Hiding | Injected CSS stylesheet | Injected CSS script | ✅ Ported | EasyList CSS hiding rules injected on DOM ready. |
-| **Adblocker** | YouTube Ad Skipper | MutationObserver script | Injected JS script | ✅ Ported | Auto-clicks skip button and accelerates playback. |
-| **Adblocker** | Site Whitelisting | Local whitelist set | Tauri `toggle_site_whitelist` | ✅ Ported | Whitelist toggles persist to `settings.json`. |
-| **Data & Persistence** | Electron Data Importer | Reads `%APPDATA%/neutrino` | Auto-detects & migrates on start | ✅ Ported | Backs up original `state.json` to `state.json.bak`. |
-| **Data & Persistence** | Local Settings Store | Electron store in storage/ | `%APPDATA%/com.neutrino.browser` | ✅ Ported | Fully JSON compatible with original schema. |
-| **Window Controls** | Frameless Window Controls | Custom min/max/close | Tauri `window_control` command | ✅ Ported | Native minimize, maximize toggle, and close. |
-| **Performance** | Low-End Mode | Reduces blur & hardware accel | Tauri `low_end_mode` toggle | ✅ Ported | Auto-detected and controllable via Settings. |
-| **History & Privacy** | History Logging & Search | Disk JSON history | Tauri `history.rs` SQLite/JSON | ✅ Ported | Real-time URL query & history clearing. |
-| **VPN & MCP** | VPN UI & Mock Tunnel | Renderer IPC bridge | Tauri `connect_vpn` / `check_vpn_ip` | ✅ Ported | UI state parity with IP lookup endpoint. |
-| **Passwords & Vault** | Windows Hello / DPAPI | Native Rust crate (`neutrino-native`) | Direct Tauri integration | 🚧 In Progress | Linking `windows::Security_Credentials_UI`. |
+### Downloads
+`downloads.rs` takes over every download a tab starts (WebView2 `DownloadStarting`,
+marked handled, so Edge's own flyout never shows). Files go to the user's Downloads
+folder. The top bar shows a Downloads button with a progress ring, and a new download
+opens the panel (also Ctrl+J or `neutrino://downloads`). From the panel you can pause,
+resume, cancel, retry, open a file, show it in its folder, and clear finished entries.
+The list is kept in `downloads.json`. Downloads that were still running when the
+browser closed are marked "Browser closed".
 
----
+### Extensions (Chrome Web Store)
+`extensions.rs` uses WebView2's browser-extension API (runtime 1.0.2420+).
+- Install: on any `chromewebstore.google.com/detail/...` page, tabs get an
+  **Add to Neutrino** button, because the store's own button needs Chrome. You
+  can also paste a store link or extension ID into the Extensions panel. The CRX
+  comes from Google's update service. It is unpacked to
+  `%APPDATA%\com.neutrino.browser\extensions\<id>`, `_metadata` is removed, and
+  the store public key is written to `manifest.json` so the extension keeps its
+  store ID.
+- `extensions.json` is the source of truth. Each tab profile is synced against
+  it the first time one of its tabs opens in a session, and again after any
+  change. Missing extensions are added, enabled state is applied, and removed
+  extensions are uninstalled.
+- Manage them in `neutrino://extensions`, the command bar (Manage Extensions),
+  or Settings → Privacy. WebView2 has no toolbar, so an extension's popup and
+  options pages open in a tab (`chrome-extension://<id>/...`).
 
-## 4. ❌ Features That Could Not Be Translated Directly
+## Build and run
 
-| Feature | What It Did in Electron | Why It Cannot Be Done Directly in Tauri | Attempted Approaches | Workaround / Final Resolution |
-| :--- | :--- | :--- | :--- | :--- |
-| **Synchronous `session.webRequest` Blocking** | Intercepted every subresource HTTP request (images, scripts, trackers) synchronously before network dispatch via Chromium API. | Tauri does not expose Chromium internals directly; it binds to OS webviews (Microsoft Edge WebView2 on Windows, WebKit on macOS/Linux). WebView2 does not provide a single cross-platform subresource stream interceptor without COM event listeners. | 1. Local HTTP filtering proxy (causes TLS certificate warnings).<br>2. Injected service worker (blocked on cross-origin requests). | Implemented hybrid approach: Top-level navigation interception via Rust `ShieldEngine`, plus cosmetic filtering scripts (`display: none !important`) and YouTube mutation-observer ad skipping. |
-| **Live WebContents `capturePage()` Thumbnail Stream** | Sampled live bitmap memory of inactive tabs for hover previews without bringing them to focus. | Tauri `WebviewWindow` does not expose an out-of-process pixel buffer capture API for non-visible webviews. | Tested `PrintWindow` Win32 API, which produces blank textures for GPU-accelerated WebView2 windows. | Implemented responsive SVG / mock card preview that follows the exact Light/Dark theme and Space colors, eliminating the black thumbnail visual bug. |
-| **Arbitrary Chromium CommandLine Switches** | Allowed setting Chrome flags like `--disable-gpu-compositing` or `--enable-features=...` dynamically at runtime. | WebView2 initializes through Edge runtime parameters (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), which are environment-variable driven and fixed per process lifecycle. | Evaluated setting environment variables before WebView2 creation. | Windows supports `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` configured in Rust `build.rs` or `tauri.conf.json`, but switches cannot be toggled per-tab on the fly. |
+Prerequisites: Rust (stable, MSVC toolchain on Windows), Node 20+, and the WebView2
+runtime.
 
----
+```powershell
+npm install
+npm run tauri dev                 # dev with Vite HMR
+npm run tauri build -- --no-bundle  # release exe in src-tauri/target/release
+cd src-tauri; cargo test          # backend unit tests
+```
 
-## 5. ⚠️ Known Differences and Limitations
-1. **Webview Engine**: Electron uses bundled Chromium 130. Tauri on Windows uses the system Evergreen Microsoft Edge WebView2 (Chromium-based), meaning browser updates follow Windows Update rather than bundled binary updates.
-2. **Binary Distribution**: The Tauri executable is significantly smaller (~25MB vs ~160MB for Electron uncompressed), and does not require bundling 120MB of Chromium binaries and Node.js runtime.
-3. **Multi-Process Architecture**: Tauri runs single native Rust host process with lightweight WebView2 renderers, eliminating Electron's separate Node.js main process overhead.
+## Status
 
----
+Working:
+- Tabs: navigation, back/forward, reload, stop, titles, favicons, loading state,
+  zoom, find in page, devtools (F12), `target=_blank` links opened as tabs, and
+  real popups for OAuth.
+- Sidebar: pinned, Today and favorites; folders; drag moves; move to another
+  space; duplicate; close and reopen (Ctrl+Shift+T); tab cycling.
+- Spaces and profiles, each profile with isolated storage.
+- Zen sleep after 10 minutes idle, manual Zen, and archiving of old Today tabs.
+- Live tab previews.
+- Browser shortcuts while a page has focus: Ctrl+T/L/K/W/S/E/F/H/Tab/1–9,
+  Ctrl+J, Ctrl+Shift+T, Ctrl+comma, F6, Alt+Home and Esc.
+- History, Shields, the VPN modes above, the MCP tools, and the assistant drawer.
+- Media mini player, docked above the page while a page is shown.
+- HTML fullscreen and theme-color top-bar tint.
 
-## 6. Bug Status (7 Known Electron Bugs)
-
-| Bug ID | Description | Electron Status | Tauri Status | Resolution Notes |
-| :---: | :--- | :---: | :---: | :--- |
-| **Bug 1** | Random visual artifacts on webpages | ⚠️ Present | ✅ Fixed | WebView2 on Windows uses native DirectComposition swapchains without Electron composite layering conflicts. |
-| **Bug 2** | Lag without hardware acceleration on low-end PCs | ⚠️ Present | ✅ Fixed | Memory footprint decreased from 180MB to 35MB; `low_end_mode` in Rust automatically disables CSS backdrop blur filters. |
-| **Bug 3** | Tab preview stays dark in light theme | ❌ Buggy | ✅ Fixed | Preview renderer dynamically samples active Space palette and theme mode (`light` vs `dark`), generating matching SVG/CSS cards. |
-| **Bug 4** | Adblocker doesn't work / sync | ❌ Broken | ✅ Fixed | `ShieldEngine` in Rust initializes with EasyList domains and binds directly to settings persistence; cosmetic script auto-injected. |
-| **Bug 5** | Cannot add new Space, switching does nothing | ❌ Broken | ✅ Fixed | Tauri command `create_space` and `select_space` atomically update state and emit change events to React. |
-| **Bug 6** | Spaces sidebar alignment is off | ❌ Buggy | ✅ Fixed | Sidebar flex container and margins locked to exact 48px rail width matching Arc specification. |
-| **Bug 7** | No presets on customization tab | ❌ Missing | ✅ Fixed | 5 built-in presets (Obsidian Neon, Aurora Borealis, Sunset Horizon, Cyber Minimal, Rose Quartz) shipped in `settings.rs` with custom preset CRUD. |
-
----
-
-## 7. Benchmarks (Electron vs Tauri v2)
-
-| Metric | Electron 33 (Reference) | Rust + Tauri v2 | Delta |
-| :--- | :--- | :--- | :--- |
-| **Startup Time (Cold)** | ~1.42s | ~0.38s | **-73% faster** |
-| **Idle RAM (Homescreen)** | 182 MB | 35.2 MB | **-80% memory** |
-| **RAM (10 Active Tabs)** | 640 MB | 280 MB | **-56% memory** |
-| **RAM (10 Sleeping Tabs)** | 210 MB | 68 MB | **-67% memory** |
-| **Installer Size (NSIS/MSI)** | ~98 MB | ~18 MB | **-81% smaller** |
-| **Executable Binary Size (Stripped Release)** | ~188.7 MB | **6.88 MB** | **-96.3% smaller** |
-| **Executable Binary Size (Unstripped Debug)** | ~188.7 MB | ~253 MB | (Debug symbols included) |
-
----
-
-## 8. Release Artifacts & Executables
-
-### Native Executables
-- **Tauri Native Release Executable**:
-  - `release/Neutrino-Tauri.exe` (or `rust/src-tauri/target/release/neutrino-rust.exe`)
-  - **Size**: **6.88 MB** (`6,886,912` bytes)
-  - **Type**: Self-contained Windows x86_64 PE32+ executable with embedded frontend assets.
-- **Tauri Native Debug Executable**:
-  - `rust/src-tauri/target/debug/neutrino-rust.exe`
-  - **Size**: 253 MB (contains full DWARF/PDB debug symbols and backtraces)
-- **Electron Reference Executable**:
-  - `electron/release/Neutrino-win32-x64/Neutrino.exe`
-  - **Size**: 188.7 MB (bundled Chromium 130 + Node.js 20.18 + electron runtime)
-
----
-
-## 9. Architecture Notes
-- **`rust/src/adapter/tauriBridge.ts`**: Pure TypeScript bridge shim that provides `window.neutrino` methods (`getBrowserState()`, `selectSpace()`, `createTab()`, etc.) mapped directly to `@tauri-apps/api/core::invoke`.
-- **`rust/src-tauri/src/state.rs`**: Single source of truth managed via `tokio::sync::RwLock<InnerState>`.
-- **`rust/src-tauri/src/importer.rs`**: Safe profile migrator that looks for existing Electron user data in `%APPDATA%\neutrino-browser` and `%APPDATA%\neutrino`, creates a pre-import backup, and silently migrates spaces, settings, profiles, and tab state.
-
----
-
-## 10. Next Steps and Decisions
-1. **Multi-Webview Tab Viewport vs Single Swapping Child Webview**:
-   - *Option A (Recommended)*: Use Tauri v2's child webview pattern with hidden/visible visibility toggling for active tabs, preserving memory suspension on sleeping tabs.
-   - *Option B*: Host external web content in an isolated overlay WebviewWindow anchored to the central content pane bounds.
-2. **Deep Filter Rule Engine Integration**:
-   - Integrate Brave's Rust `adblock` engine crate directly into Tauri's custom protocol handler for deep subresource regex matching.
-3. **Parity Verification**:
-   - High-resolution visual parity reports and benchmark results are saved in [`docs/parity/README.md`](../docs/parity/README.md).
-
+Not available yet:
+- Password manager. The UI shows it as unavailable.
+- Turning the WebRTC leak guard on or off applies to newly created tab webviews only.

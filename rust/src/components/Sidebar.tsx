@@ -31,11 +31,12 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { sidebarVisibility } from '../../main/sidebar/layout';
+import { sidebarVisibility } from '../shared/layout';
 import { useSpaceSwipe } from '../hooks/useSpaceSwipe';
 import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
+import { useViewportOverlay } from '../hooks/useViewportOverlay';
 import {
   buildSidebarView,
   contextMenuActions,
@@ -326,6 +327,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
   const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || !visible);
+  // Menus, hover cards and the auto-hide sidebar float over the native page.
+  useViewportOverlay(menu !== null || folderMenu !== null || Boolean(preview.state && !drag.dragging) || (autoHide && visible));
   const hidePreview = preview.hide;
   const previewKey = preview.state?.target.key;
   useEffect(() => {
@@ -728,6 +731,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
         {rootPinned.map((item) => renderTabRow(item, inert))}
+        {expanded && rootPinned.length === 0 && folders.length === 0 && (
+          <div className="nsb-section-empty-hint">Drag tabs here to pin them</div>
+        )}
       </div>
     );
   };
@@ -763,6 +769,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {favoritesInPanes && (current || v.favorites.length > 0) && paneSection('favorite', v.favorites, 'nsb-favorites', current)}
         {paneSection('pinned', v.pinned, 'nsb-list nsb-pinned', current, v)}
         {showPinnedOrToday && <div className="nsb-divider" role="separator" />}
+        {expanded && (
+          <div className="nsb-pinned-section-header nsb-today-section-header">
+            <span className="nsb-pinned-section-label">Today</span>
+          </div>
+        )}
         {paneSection('today', v.today, 'nsb-list nsb-today', current)}
       </div>
     );
@@ -865,7 +876,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               className="nsb-icon-btn"
               aria-expanded={expanded}
-              title={expanded ? 'Collapse sidebar (Ctrl+E)' : 'Expand sidebar (Ctrl+E)'}
+              title={expanded ? 'Collapse sidebar (Ctrl+S)' : 'Expand sidebar (Ctrl+S)'}
               aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
               onClick={() => onUpdateSidebarState({ sidebarExpanded: !expanded })}
             >

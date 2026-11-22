@@ -1,134 +1,71 @@
-use crate::settings::BrowserSettings;
-use crate::spaces::Space;
-use crate::tabs::TabState;
-use std::fs;
+//! One-time, read-only import of the Electron build's profile on first launch.
+//!
+//! Electron keeps settings in `neutrino-data/browser-state.json` and the
+//! sidebar model (profiles, spaces, tabs, favorites, folders, archive) in
+//! `neutrino-data/profiles.json`. Both shapes are field-compatible with the
+//! Rust model, so they are handed to `Store::load` as raw JSON.
+
+use serde_json::Value;
 use std::path::{Path, PathBuf};
-use tracing::info;
 
 pub struct ImportedData {
-    pub spaces: Option<Vec<Space>>,
-    pub tabs: Option<Vec<TabState>>,
-    pub active_space_id: Option<String>,
-    pub settings: Option<BrowserSettings>,
+    pub settings: Option<Value>,
+    pub state: Option<Value>,
 }
 
 pub fn try_import_electron_data() -> Option<ImportedData> {
-    let candidate_dirs = get_electron_data_dirs();
-    for dir in candidate_dirs {
-        if let Some(imported) = try_import_from_dir(&dir) {
-            return Some(imported);
-        }
-    }
-    None
+    candidate_dirs().into_iter().find_map(|d| import_from(&d))
 }
 
-fn try_import_from_dir(electron_dir: &Path) -> Option<ImportedData> {
-    if !electron_dir.exists() {
+fn read(path: &Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+fn import_from(dir: &Path) -> Option<ImportedData> {
+    let data = dir.join("neutrino-data");
+    let browser_state = read(&data.join("browser-state.json"));
+    let profiles = read(&data.join("profiles.json"));
+    if browser_state.is_none() && profiles.is_none() {
         return None;
     }
+    tracing::info!("importing Electron data from {:?}", data);
 
-    info!("Checking Electron user data directory at: {:?}", electron_dir);
-
-    // Check neutrino-data/browser-state.json first (primary Electron storage)
-    let primary_state = electron_dir.join("neutrino-data").join("browser-state.json");
-    let fallback_state = electron_dir.join("storage").join("state.json");
-    let state_file = if primary_state.exists() {
-        primary_state
-    } else if fallback_state.exists() {
-        fallback_state
-    } else {
-        return None;
-    };
-
-    let content = fs::read_to_string(&state_file).ok()?;
-    
-    // Backup before importing as requested in Phase 3.1
-    let backup_file = state_file.with_extension("backup-pre-tauri.json");
-    if !backup_file.exists() {
-        let _ = fs::write(&backup_file, &content);
-        info!("Created backup of Electron state at: {:?}", backup_file);
-    }
-
-    let val = serde_json::from_str::<serde_json::Value>(&content).ok()?;
-
-    let mut spaces = None;
-    let mut tabs = None;
-    let mut active_space_id = None;
-    let mut settings = None;
-
-    if let Some(spaces_arr) = val.get("spaces") {
-        if let Ok(sp) = serde_json::from_value::<Vec<Space>>(spaces_arr.clone()) {
-            if !sp.is_empty() {
-                spaces = Some(sp);
+    let settings = browser_state.as_ref().and_then(|v| v.get("settings").cloned());
+    let mut state = serde_json::Map::new();
+    if let Some(Value::Object(p)) = profiles {
+        for key in ["profiles", "spaces", "tabs", "favorites", "folders", "archive"] {
+            if let Some(v) = p.get(key) {
+                state.insert(key.to_string(), v.clone());
+            }
+        }
+    } else if let Some(Value::Object(b)) = &browser_state {
+        for key in ["spaces", "tabs"] {
+            if let Some(v) = b.get(key) {
+                state.insert(key.to_string(), v.clone());
             }
         }
     }
-
-    if let Some(tabs_arr) = val.get("tabs") {
-        if let Ok(t) = serde_json::from_value::<Vec<TabState>>(tabs_arr.clone()) {
-            tabs = Some(t);
-        }
+    let active = settings
+        .as_ref()
+        .and_then(|s| s.get("activeSpaceId"))
+        .or_else(|| browser_state.as_ref().and_then(|b| b.get("activeSpaceId")))
+        .cloned();
+    if let Some(a) = active {
+        state.insert("activeSpaceId".into(), a);
     }
-
-    if let Some(settings_val) = val.get("settings") {
-        if let Ok(s) = serde_json::from_value::<BrowserSettings>(settings_val.clone()) {
-            settings = Some(s);
-        }
-        if let Some(active_id) = settings_val.get("activeSpaceId").and_then(|v| v.as_str()) {
-            active_space_id = Some(active_id.to_string());
-        }
-    }
-
-    if active_space_id.is_none() {
-        if let Some(active_id) = val.get("activeSpaceId").and_then(|v| v.as_str()) {
-            active_space_id = Some(active_id.to_string());
-        }
-    }
-
-    if spaces.is_some() || settings.is_some() || tabs.is_some() {
-        info!("Successfully imported Electron data from {:?}", state_file);
-        Some(ImportedData {
-            spaces,
-            tabs,
-            active_space_id,
-            settings,
-        })
-    } else {
-        None
-    }
+    Some(ImportedData { settings, state: if state.is_empty() { None } else { Some(Value::Object(state)) } })
 }
 
-fn get_electron_data_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let base = Path::new(&appdata);
-            dirs.push(base.join("neutrino-browser"));
-            dirs.push(base.join("neutrino"));
-            dirs.push(base.join("Neutrino"));
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            let base = Path::new(&home).join("Library").join("Application Support");
-            dirs.push(base.join("neutrino-browser"));
-            dirs.push(base.join("neutrino"));
-            dirs.push(base.join("Neutrino"));
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(config) = std::env::var("XDG_CONFIG_HOME") {
-            let base = Path::new(&config);
-            dirs.push(base.join("neutrino-browser"));
-            dirs.push(base.join("neutrino"));
-        } else if let Ok(home) = std::env::var("HOME") {
-            let base = Path::new(&home).join(".config");
-            dirs.push(base.join("neutrino-browser"));
-            dirs.push(base.join("neutrino"));
-        }
-    }
-    dirs
+fn candidate_dirs() -> Vec<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+    };
+    base.map(|b| ["neutrino-browser", "neutrino", "Neutrino"].iter().map(|n| b.join(n)).collect())
+        .unwrap_or_default()
 }

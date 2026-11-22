@@ -3,7 +3,7 @@ import {
   type ThemePalette,
   computeThemePalette,
   validateAndClampSpaceTheme,
-} from '../../main/spaceTheme';
+} from '../shared/spaceTheme';
 
 export function getOsPrefersDark(): boolean {
   try {

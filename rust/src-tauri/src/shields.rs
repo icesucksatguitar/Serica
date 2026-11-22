@@ -1,190 +1,474 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+//! Content blocking powered by Brave's `adblock` engine (adblock-rust).
+//!
+//! * Network: every subresource request of a tab webview is checked with
+//!   `Engine::check_network_request` (see `webview_win.rs`), including
+//!   `$redirect` neutered resources and `$important` rules.
+//! * Cosmetic: per-URL hide selectors and uBO/Brave scriptlets come from
+//!   `url_cosmetic_resources`; generic class/id hiding uses
+//!   `hidden_class_id_selectors` with the classes/ids the page reports.
+//!
+//! Lists: a compiled-in fallback list is active immediately at startup; the
+//! full lists (EasyList, EasyPrivacy, uBlock filters/privacy/unbreak/quick-fixes)
+//! plus Brave's scriptlet resources are downloaded in the background, cached on
+//! disk and refreshed every few days. A serialized engine makes later startups
+//! fast.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShieldStats {
-    pub total_blocked: i64,
-    pub ads_blocked: i64,
-    pub trackers_blocked: i64,
-    pub analytics_blocked: i64,
-    pub fingerprinters_blocked: i64,
-    pub data_saved_kb: i64,
+use crate::model::{now_ms, ShieldStats};
+use adblock::lists::{FilterSet, ParseOptions};
+use adblock::resources::{PermissionMask, Resource};
+use adblock::Engine;
+use parking_lot::{Mutex, RwLock};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+const REFRESH_AFTER_MS: i64 = 4 * 24 * 3_600_000;
+
+struct ListSource {
+    name: &'static str,
+    url: &'static str,
+    /// uBO lists may use trusted scriptlets.
+    trusted: bool,
 }
 
-impl Default for ShieldStats {
-    fn default() -> Self {
-        Self {
-            total_blocked: 0,
-            ads_blocked: 0,
-            trackers_blocked: 0,
-            analytics_blocked: 0,
-            fingerprinters_blocked: 0,
-            data_saved_kb: 0,
-        }
-    }
+const LISTS: &[ListSource] = &[
+    ListSource { name: "easylist", url: "https://easylist.to/easylist/easylist.txt", trusted: false },
+    ListSource { name: "easyprivacy", url: "https://easylist.to/easylist/easyprivacy.txt", trusted: false },
+    ListSource { name: "ublock-filters", url: "https://ublockorigin.github.io/uAssets/filters/filters.txt", trusted: true },
+    ListSource { name: "ublock-privacy", url: "https://ublockorigin.github.io/uAssets/filters/privacy.txt", trusted: true },
+    ListSource { name: "ublock-unbreak", url: "https://ublockorigin.github.io/uAssets/filters/unbreak.txt", trusted: true },
+    ListSource { name: "ublock-quick-fixes", url: "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt", trusted: true },
+];
+
+const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock-resources/master/dist/resources.json";
+
+/// Always-available rules used until the downloaded lists are ready (and if
+/// the machine is offline on first start).
+const BUILTIN_RULES: &str = r#"
+||doubleclick.net^
+||googleadservices.com^
+||googlesyndication.com^
+||adservice.google.com^
+||pagead2.googlesyndication.com^
+||adnxs.com^
+||criteo.com^
+||criteo.net^
+||rubiconproject.com^
+||pubmatic.com^
+||openx.net^
+||amazon-adsystem.com^
+||adroll.com^
+||advertising.com^
+||taboola.com^
+||outbrain.com^
+||popads.net^
+||adcolony.com^
+||moatads.com^
+||casalemedia.com^
+||smartadserver.com^
+||google-analytics.com^
+||analytics.google.com^
+||googletagmanager.com^
+||googletagservices.com^
+||connect.facebook.net^$third-party
+||pixel.facebook.com^
+||tr.snapchat.com^
+||analytics.tiktok.com^
+||ads.tiktok.com^
+||scorecardresearch.com^
+||quantserve.com^
+||hotjar.com^
+||mouseflow.com^
+||segment.io^
+||cdn.segment.com^
+||mixpanel.com^
+||amplitude.com^
+||fullstory.com^
+||clarity.ms^
+||bat.bing.com^
+||fingerprintjs.com^
+||fpjs.io^
+##.adsbygoogle
+##.ad-banner
+##.advertisement
+##[id^="google_ads_iframe"]
+##.trc_related_container
+youtube.com##ytd-ad-slot-renderer
+youtube.com##ytd-in-feed-ad-layout-renderer
+youtube.com##ytd-banner-promo-renderer
+youtube.com###player-ads
+youtube.com##.ytp-ad-module
+youtube.com##ytd-promoted-sparkles-web-renderer
+youtube.com##ytd-display-ad-renderer
+"#;
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ShieldsInfo {
+    /// "builtin" until the downloaded lists are compiled, then "full".
+    pub engine: String,
+    pub lists: Vec<String>,
+    pub last_updated: Option<i64>,
+    pub updating: bool,
+    pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct BlockedTrackerItem {
-    pub url: String,
-    pub domain: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+pub struct Decision {
+    pub redirect: Option<String>,
     pub rule: Option<String>,
-    pub timestamp: i64,
+    pub category: &'static str,
 }
 
-pub struct ShieldEngine {
-    enabled: bool,
-    whitelist: HashSet<String>,
-    #[allow(dead_code)]
-    blocked_domains: HashSet<&'static str>,
+pub struct Shields {
+    engine: RwLock<Arc<Engine>>,
+    enabled: AtomicBool,
+    whitelist: RwLock<Vec<String>>,
+    stats: Mutex<ShieldStats>,
+    tab_counts: Mutex<HashMap<String, i64>>,
+    pub info: Mutex<ShieldsInfo>,
+    dir: PathBuf,
 }
 
-impl Default for ShieldEngine {
-    fn default() -> Self {
-        let mut domains = HashSet::new();
-        // Common ad networks
-        domains.insert("doubleclick.net");
-        domains.insert("googleadservices.com");
-        domains.insert("googlesyndication.com");
-        domains.insert("adservice.google.com");
-        domains.insert("adnxs.com");
-        domains.insert("criteo.com");
-        domains.insert("criteo.net");
-        domains.insert("rubiconproject.com");
-        domains.insert("pubmatic.com");
-        domains.insert("openx.net");
-        domains.insert("amazon-adsystem.com");
-        domains.insert("adroll.com");
-        domains.insert("advertising.com");
-        domains.insert("taboola.com");
-        domains.insert("outbrain.com");
-        domains.insert("popads.net");
-        domains.insert("adcolony.com");
-        // Trackers & telemetry
-        domains.insert("google-analytics.com");
-        domains.insert("analytics.google.com");
-        domains.insert("googletagmanager.com");
-        domains.insert("pixel.facebook.com");
-        domains.insert("tr.snapchat.com");
-        domains.insert("analytics.tiktok.com");
-        domains.insert("ads.tiktok.com");
-        domains.insert("scorecardresearch.com");
-        domains.insert("quantserve.com");
-        domains.insert("hotjar.com");
-        domains.insert("mouseflow.com");
-        domains.insert("segment.io");
-        domains.insert("mixpanel.com");
-        domains.insert("amplitude.com");
+fn parse_opts(trusted: bool) -> ParseOptions {
+    ParseOptions {
+        permissions: if trusted { PermissionMask::from_bits(0b1) } else { PermissionMask::default() },
+        ..Default::default()
+    }
+}
 
-        Self {
-            enabled: true,
-            whitelist: HashSet::new(),
-            blocked_domains: domains,
+fn builtin_engine() -> Engine {
+    let mut set = FilterSet::new(false);
+    set.add_filter_list(BUILTIN_RULES.to_string(), parse_opts(false));
+    Engine::new_with_filter_set(set)
+}
+
+impl Shields {
+    pub fn new(dir: PathBuf, stats: ShieldStats) -> Arc<Self> {
+        let _ = std::fs::create_dir_all(&dir);
+        let s = Arc::new(Self {
+            engine: RwLock::new(Arc::new(builtin_engine())),
+            enabled: AtomicBool::new(true),
+            whitelist: RwLock::new(Vec::new()),
+            stats: Mutex::new(stats),
+            tab_counts: Mutex::new(HashMap::new()),
+            info: Mutex::new(ShieldsInfo { engine: "builtin".into(), ..Default::default() }),
+            dir,
+        });
+        s.load_cached();
+        s
+    }
+
+    pub fn configure(&self, enabled: bool, whitelist: &[String]) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+        *self.whitelist.write() = whitelist.to_vec();
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    /// True when blocking applies to pages on `page_url`'s host.
+    pub fn active_for(&self, page_url: &str) -> bool {
+        if !self.enabled() {
+            return false;
+        }
+        let host = url::Url::parse(page_url).ok().and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_lowercase()));
+        match host {
+            Some(h) => !self.whitelist.read().iter().any(|w| h == *w || h.ends_with(&format!(".{w}"))),
+            None => true,
         }
     }
-}
 
-#[allow(dead_code)]
-impl ShieldEngine {
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
-    pub fn set_whitelist(&mut self, list: Vec<String>) {
-        self.whitelist = list
-            .into_iter()
-            .map(|d| d.trim().to_lowercase())
-            .filter(|d| !d.is_empty())
-            .collect();
-    }
-
-    pub fn is_whitelisted(&self, host: &str) -> bool {
-        let clean = host.trim().to_lowercase();
-        self.whitelist.iter().any(|w| clean == *w || clean.ends_with(&format!(".{}", w)))
-    }
-
-    pub fn is_domain_blocked(&self, host: &str) -> bool {
-        let clean = host.trim().to_lowercase();
-        self.blocked_domains.iter().any(|b| clean == *b || clean.ends_with(&format!(".{}", b)))
-    }
-
-    pub fn check_url(&self, url_str: &str) -> Option<BlockedTrackerItem> {
-        if !self.enabled {
+    /// Checks one network request. `request_type` uses adblock-rust names
+    /// ("script", "image", "sub_frame", "xhr", ...).
+    pub fn check(&self, url: &str, source_url: &str, request_type: &str) -> Option<Decision> {
+        if !(url.starts_with("http") || url.starts_with("ws")) || !self.active_for(source_url) {
             return None;
         }
+        let req = adblock::request::Request::new(url, source_url, request_type, "GET").ok()?;
+        let engine = self.engine.read().clone();
+        let res = engine.check_network_request(&req);
+        if !res.should_block() {
+            return None;
+        }
+        Some(Decision {
+            redirect: res.redirect,
+            rule: res.filter.and_then(|f| f.raw_line),
+            category: categorize(url),
+        })
+    }
 
-        if let Ok(parsed) = url::Url::parse(url_str) {
-            if let Some(host) = parsed.host_str() {
-                if self.is_whitelisted(host) {
-                    return None;
+    pub fn cosmetic(&self, url: &str) -> Option<adblock::cosmetic_filter_cache::UrlSpecificResources> {
+        if !self.active_for(url) {
+            return None;
+        }
+        Some(self.engine.read().clone().url_cosmetic_resources(url))
+    }
+
+    pub fn class_id_selectors(&self, classes: &[String], ids: &[String], exceptions: &HashSet<String>) -> Vec<String> {
+        self.engine.read().clone().hidden_class_id_selectors(classes, ids, exceptions)
+    }
+
+    /// Records a block for stats and returns the event payload for the UI.
+    pub fn record_block(&self, tab_id: &str, url: &str, d: &Decision, request_type: &str) -> crate::model::BlockedTrackerItem {
+        {
+            let mut s = self.stats.lock();
+            s.total_blocked += 1;
+            match d.category {
+                "Advertising" => s.ads_blocked += 1,
+                "Analytics" => s.analytics_blocked += 1,
+                "Fingerprinting" => s.fingerprinters_blocked += 1,
+                _ => s.trackers_blocked += 1,
+            }
+            s.data_saved_kb += estimated_kb(request_type);
+        }
+        *self.tab_counts.lock().entry(tab_id.to_string()).or_insert(0) += 1;
+        crate::model::BlockedTrackerItem {
+            url: url.chars().take(512).collect(),
+            domain: url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default(),
+            category: d.category.to_string(),
+            rule: d.rule.clone(),
+            timestamp: now_ms(),
+            tab_id: Some(tab_id.to_string()),
+        }
+    }
+
+    pub fn stats(&self) -> ShieldStats {
+        self.stats.lock().clone()
+    }
+
+    pub fn reset_stats(&self) -> ShieldStats {
+        *self.stats.lock() = ShieldStats::default();
+        self.tab_counts.lock().clear();
+        ShieldStats::default()
+    }
+
+    pub fn tab_count(&self, tab_id: &str) -> i64 {
+        self.tab_counts.lock().get(tab_id).copied().unwrap_or(0)
+    }
+
+    /// Per-tab counters restart on each top-level navigation.
+    pub fn reset_tab(&self, tab_id: &str) {
+        self.tab_counts.lock().remove(tab_id);
+    }
+
+    // ------------------------------------------------------------------ lists
+
+    fn resources(&self) -> Option<Vec<Resource>> {
+        let text = std::fs::read_to_string(self.dir.join("resources.json")).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    fn load_cached(&self) {
+        let Ok(bytes) = std::fs::read(self.dir.join("engine.dat")) else { return };
+        let mut engine = Engine::default();
+        if engine.deserialize(&bytes).is_err() {
+            tracing::warn!("cached adblock engine is stale; will rebuild");
+            return;
+        }
+        if let Some(r) = self.resources() {
+            engine.use_resources(r);
+        }
+        *self.engine.write() = Arc::new(engine);
+        let meta = std::fs::read_to_string(self.dir.join("meta.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        let mut info = self.info.lock();
+        info.engine = "full".into();
+        info.last_updated = meta.as_ref().and_then(|m| m["updatedAt"].as_i64());
+        info.lists = LISTS.iter().map(|l| l.name.to_string()).collect();
+        tracing::info!("loaded cached adblock engine");
+    }
+
+    fn needs_refresh(&self) -> bool {
+        let info = self.info.lock();
+        info.engine != "full" || info.last_updated.map(|t| now_ms() - t > REFRESH_AFTER_MS).unwrap_or(true)
+    }
+
+    /// Downloads lists and rebuilds the engine on a background thread.
+    pub fn spawn_updater(self: &Arc<Self>, force: bool) {
+        let this = self.clone();
+        if !force && !this.needs_refresh() {
+            return;
+        }
+        {
+            let mut info = this.info.lock();
+            if info.updating {
+                return;
+            }
+            info.updating = true;
+        }
+        tauri::async_runtime::spawn(async move {
+            let result = this.update_lists().await;
+            let mut info = this.info.lock();
+            info.updating = false;
+            match result {
+                Ok(()) => info.last_error = None,
+                Err(e) => {
+                    tracing::warn!("adblock list update failed: {e}");
+                    info.last_error = Some(e);
                 }
+            }
+        });
+    }
 
-                if self.is_domain_blocked(host) {
-                    return Some(BlockedTrackerItem {
-                        url: url_str.to_string(),
-                        domain: host.to_string(),
-                        category: Some("Advertising & Analytics".to_string()),
-                        rule: Some(format!("||{}^", host)),
-                        timestamp: chrono::Utc::now().timestamp_millis(),
-                    });
+    async fn update_lists(self: &Arc<Self>) -> Result<(), String> {
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Neutrino/0.3")
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let lists_dir = self.dir.join("lists");
+        let _ = std::fs::create_dir_all(&lists_dir);
+        let mut texts = Vec::new();
+        for l in LISTS {
+            let path = lists_dir.join(format!("{}.txt", l.name));
+            let fetched = match client.get(l.url).send().await.and_then(|r| r.error_for_status()) {
+                Ok(r) => r.text().await.ok(),
+                Err(e) => {
+                    tracing::warn!("fetching {} failed: {e}", l.name);
+                    None
+                }
+            };
+            let text = match fetched.filter(|t| t.len() > 1000) {
+                Some(t) => {
+                    let _ = crate::store::write_atomic(&path, t.as_bytes());
+                    t
+                }
+                // Offline: fall back to the copy from the last successful update.
+                None => match std::fs::read_to_string(&path) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                },
+            };
+            texts.push((text, l.trusted));
+        }
+        if texts.is_empty() {
+            return Err("no filter lists could be downloaded".into());
+        }
+        if let Ok(r) = client.get(RESOURCES_URL).send().await.and_then(|r| r.error_for_status()) {
+            if let Ok(body) = r.text().await {
+                if serde_json::from_str::<Vec<Resource>>(&body).is_ok() {
+                    let _ = crate::store::write_atomic(&self.dir.join("resources.json"), body.as_bytes());
                 }
             }
         }
-        None
-    }
-
-    pub fn get_cosmetic_css(&self) -> &'static str {
-        r#"
-        .adsbygoogle, .ad-banner, .advertisement, [id^="google_ads_iframe"],
-        div[class*="ad-container"], div[class*="ad_wrapper"], div[class*="taboola-"],
-        div[class*="outbrain-"], .trc_related_container, .ad-slot,
-        ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer,
-        ytd-banner-promo-renderer, #player-ads, .video-ads, .ytp-ad-module {
-            display: none !important;
-            height: 0 !important;
-            min-height: 0 !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }
-        "#
-    }
-
-    pub fn get_youtube_skipper_script(&self) -> &'static str {
-        r#"
-        (() => {
-            if (window.__neutrino_yt_skipper_injected) return;
-            window.__neutrino_yt_skipper_injected = true;
-
-            const skipAd = () => {
-                const video = document.querySelector('video');
-                const adShowing = document.querySelector('.ad-showing, .ad-interrupting');
-                if (adShowing && video && !isNaN(video.duration)) {
-                    video.playbackRate = 16.0;
-                    video.muted = true;
-                    if (video.duration > 0 && video.currentTime < video.duration) {
-                        video.currentTime = video.duration;
-                    }
-                }
-                const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern');
-                if (skipBtn) {
-                    try { skipBtn.click(); } catch(e) {}
-                }
-            };
-
-            setInterval(skipAd, 300);
-        })();
-        "#
+        let resources = self.resources();
+        let dir = self.dir.clone();
+        let engine = tauri::async_runtime::spawn_blocking(move || {
+            let mut set = FilterSet::new(false);
+            set.add_filter_list(BUILTIN_RULES.to_string(), parse_opts(false));
+            for (text, trusted) in texts {
+                set.add_filter_list(text, parse_opts(trusted));
+            }
+            let mut engine = Engine::new_with_filter_set(set);
+            let _ = crate::store::write_atomic(&dir.join("engine.dat"), &engine.serialize());
+            if let Some(r) = resources {
+                engine.use_resources(r);
+            }
+            engine
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        *self.engine.write() = Arc::new(engine);
+        let now = now_ms();
+        let _ = crate::store::write_atomic(&self.dir.join("meta.json"), serde_json::json!({ "updatedAt": now }).to_string().as_bytes());
+        let mut info = self.info.lock();
+        info.engine = "full".into();
+        info.last_updated = Some(now);
+        info.lists = LISTS.iter().map(|l| l.name.to_string()).collect();
+        tracing::info!("adblock engine rebuilt from downloaded lists");
+        Ok(())
     }
 }
 
+/// Coarse category for the Shields panel, from the blocked URL.
+pub fn categorize(url: &str) -> &'static str {
+    let u = url.to_lowercase();
+    const FINGERPRINT: &[&str] = &["fingerprint", "fpjs", "fpcdn", "deviceid", "clientjs", "/fp.js", "iovation", "threatmetrix"];
+    const ANALYTICS: &[&str] = &[
+        "analytics", "google-analytics", "googletagmanager", "metrics", "telemetry", "segment.", "mixpanel", "amplitude",
+        "hotjar", "mouseflow", "fullstory", "clarity.ms", "scorecardresearch", "quantserve", "/collect", "stats.", "newrelic", "nr-data",
+    ];
+    const TRACKING: &[&str] = &["pixel", "track", "beacon", "facebook.net", "facebook.com/tr", "snapchat", "tiktok", "bat.bing", "/event", "linkedin.com/px"];
+    if FINGERPRINT.iter().any(|k| u.contains(k)) {
+        "Fingerprinting"
+    } else if ANALYTICS.iter().any(|k| u.contains(k)) {
+        "Analytics"
+    } else if TRACKING.iter().any(|k| u.contains(k)) {
+        "Tracking"
+    } else {
+        "Advertising"
+    }
+}
+
+fn estimated_kb(request_type: &str) -> i64 {
+    match request_type {
+        "script" => 40,
+        "sub_frame" => 80,
+        "image" => 18,
+        "media" => 200,
+        "stylesheet" => 12,
+        "font" => 30,
+        _ => 4,
+    }
+}
+
+/// Builds a CSS block hiding `selectors` (chunked so one invalid selector only
+/// disables its own chunk).
+pub fn hide_css(selectors: impl IntoIterator<Item = String>) -> String {
+    let list: Vec<String> = selectors.into_iter().filter(|s| !s.contains('{') && !s.contains('}')).collect();
+    list.chunks(64)
+        .map(|c| format!("{}{{display:none !important;}}", c.join(",")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shields() -> Arc<Shields> {
+        Shields::new(std::env::temp_dir().join(format!("shields-{}", uuid::Uuid::new_v4())), ShieldStats::default())
+    }
+
+    #[test]
+    fn blocks_known_ad_domain_with_builtin_rules() {
+        let s = shields();
+        let d = s.check("https://securepubads.g.doubleclick.net/tag/js/gpt.js", "https://news.example.com/", "script");
+        assert!(d.is_some());
+        assert!(s.check("https://news.example.com/app.js", "https://news.example.com/", "script").is_none());
+    }
+
+    #[test]
+    fn whitelist_and_toggle_disable_blocking() {
+        let s = shields();
+        let ad = "https://www.google-analytics.com/analytics.js";
+        s.configure(true, &["example.com".into()]);
+        assert!(s.check(ad, "https://shop.example.com/", "script").is_none());
+        assert!(s.check(ad, "https://other.org/", "script").is_some());
+        s.configure(false, &[]);
+        assert!(s.check(ad, "https://other.org/", "script").is_none());
+    }
+
+    #[test]
+    fn stats_categories() {
+        let s = shields();
+        let d = s.check("https://www.google-analytics.com/analytics.js", "https://a.org/", "script").unwrap();
+        assert_eq!(d.category, "Analytics");
+        s.record_block("t1", "https://www.google-analytics.com/analytics.js", &d, "script");
+        assert_eq!(s.stats().analytics_blocked, 1);
+        assert_eq!(s.tab_count("t1"), 1);
+        s.reset_stats();
+        assert_eq!(s.stats().total_blocked, 0);
+    }
+
+    #[test]
+    fn cosmetic_selectors_for_youtube() {
+        let s = shields();
+        let r = s.cosmetic("https://www.youtube.com/watch?v=x").unwrap();
+        assert!(r.hide_selectors.contains("ytd-ad-slot-renderer"));
+        let generic = s.class_id_selectors(&["adsbygoogle".into()], &[], &HashSet::new());
+        assert!(generic.iter().any(|g| g.contains("adsbygoogle")));
+    }
+}

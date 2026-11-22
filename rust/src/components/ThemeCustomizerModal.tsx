@@ -28,7 +28,7 @@ import {
   validateAndClampSpaceGlow,
   wheelPosToColorKeepingLightness,
   wheelPosToHueSat,
-} from '../../main/spaceTheme';
+} from '../shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from '../utils/applySpaceTheme';
 
 export interface SimpleTheme {

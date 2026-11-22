@@ -1,3 +1,4 @@
+import { useViewportOverlay } from '../hooks/useViewportOverlay';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, X, Globe, ExternalLink } from 'lucide-react';
 
@@ -54,6 +55,24 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
 
   const [scales, setScales] = useState<{ [id: string]: number }>({});
   const [isHoveredDock, setIsHoveredDock] = useState(false);
+  useViewportOverlay(Boolean(isOnWebpage) && isHoveredDock);
+  // Entering the thin edge zone reveals the dock; if the pointer then moves away
+  // without entering the dock, no mouseleave fires on it, so un-reveal here.
+  useEffect(() => {
+    if (!isHoveredDock) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = dockRef.current?.getBoundingClientRect();
+      const left = rect && rect.width > 0 ? rect.left : window.innerWidth - 80;
+      if (e.clientX < left - 24) setIsHoveredDock(false);
+    };
+    const onBlur = () => setIsHoveredDock(false);
+    window.addEventListener('mousemove', onMove, { passive: true });
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [isHoveredDock]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newUrl, setNewUrl] = useState('');
   const [newTitle, setNewTitle] = useState('');
@@ -71,7 +90,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   };
 
   // macOS Dock Fish-Eye Magnification physics
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLElement>) => {
     const dock = dockRef.current;
     if (!dock) return;
 

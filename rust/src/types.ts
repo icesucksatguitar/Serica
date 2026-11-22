@@ -4,14 +4,14 @@ import type {
   ReducedEffectsMode,
   SpaceTheme,
   SpaceThemesMap,
-} from '../main/settings';
+} from './shared/settings';
 import type {
   CustomSpaceThemePreset,
   SpaceThemeMode,
   SpaceThemePoint,
   SpaceThemePreset,
   ThemePalette,
-} from '../main/spaceTheme';
+} from './shared/spaceTheme';
 
 export type {
   BrowserSettings,
@@ -26,8 +26,8 @@ export type {
   ThemePalette,
 };
 
-import type { FavoriteEntry, FolderRecord, TabSection } from '../main/profiles/types';
-import type { LayoutSection, MoveOp } from '../main/sidebar/layout';
+import type { FavoriteEntry, FolderRecord, TabSection } from './shared/profileTypes';
+import type { LayoutSection, MoveOp } from './shared/layout';
 
 export type { FavoriteEntry, FolderRecord, TabSection, LayoutSection, MoveOp };
 
@@ -180,7 +180,7 @@ export interface AuthHandoffNotice {
   isPopup: boolean;
 }
 
-export type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from '../main/history';
+export type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from './shared/ipcTypes';
 export type {
   VpnMode,
   DohProviderId,
@@ -188,11 +188,51 @@ export type {
   VpnConfig,
   VpnStatus,
   VpnIpCheckResult,
-} from '../main/vpnCore';
-import type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from '../main/history';
-import type { VpnConfig, VpnStatus, VpnIpCheckResult } from '../main/vpnCore';
+} from './shared/ipcTypes';
+import type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from './shared/ipcTypes';
+import type { VpnConfig, VpnStatus, VpnIpCheckResult } from './shared/ipcTypes';
 
 export type AuthHandoffResult = { ok: true; siteHost: string } | { ok: false; error: string };
+
+export type DownloadState = 'inProgress' | 'paused' | 'completed' | 'canceled' | 'failed';
+
+/** A download tracked by the download manager (src-tauri/src/downloads.rs). */
+export interface DownloadItem {
+  id: string;
+  url: string;
+  filename: string;
+  path: string;
+  mime: string;
+  /** -1 when unknown. */
+  totalBytes: number;
+  receivedBytes: number;
+  bytesPerSec: number;
+  state: DownloadState;
+  error?: string | null;
+  canResume: boolean;
+  startedAt: number;
+  endedAt?: number | null;
+  tabId?: string | null;
+  fileExists: boolean;
+}
+
+export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove' | 'retry';
+
+/** A browser extension installed from the Chrome Web Store (src-tauri/src/extensions.rs). */
+export interface ExtensionInfo {
+  id: string;
+  runtimeId?: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  icon?: string | null;
+  popup?: string | null;
+  options?: string | null;
+  permissions: string[];
+  source: string;
+  installedAt: number;
+}
 
 export type SiteAction = 'back' | 'forward' | 'reload' | 'hard-reload' | 'stop' | 'home' | 'open-find';
 
@@ -200,6 +240,40 @@ declare global {
   interface Window {
     neutrino?: {
       isElectron: boolean;
+      isTauri?: boolean;
+      // Native tab viewport (Rust tab host)
+      siteAction?: (action: SiteAction) => Promise<void>;
+      setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
+      freezeViewport?: () => Promise<string | null>;
+      thawViewport?: () => Promise<void>;
+      findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
+      onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
+      onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
+      onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
+      getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
+      openDevtools?: () => Promise<void>;
+      historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
+      getShieldsInfo?: () => Promise<{ engine: string; lists: string[]; lastUpdated: number | null; updating: boolean; lastError: string | null }>;
+      updateFilterLists?: () => Promise<void>;
+      listDownloads?: () => Promise<DownloadItem[]>;
+      downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
+      clearDownloads?: () => Promise<DownloadItem[]>;
+      openDownloadsFolder?: () => Promise<void>;
+      onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
+      onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
+      onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;
+      onOpenDownloads?: (cb: () => void) => () => void;
+      listExtensions?: () => Promise<ExtensionInfo[]>;
+      installExtension?: (input: string) => Promise<ExtensionInfo>;
+      setExtensionEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
+      removeExtension?: (id: string) => Promise<boolean>;
+      openExtensionPage?: (id: string, page: 'popup' | 'options') => Promise<boolean>;
+      onExtensionsUpdated?: (cb: (list: ExtensionInfo[]) => void) => () => void;
+      onExtensionInstalled?: (cb: (ext: ExtensionInfo) => void) => () => void;
+      assistantOpen?: (url: string, x: number, y: number, width: number, height: number) => Promise<void>;
+      assistantBounds?: (x: number, y: number, width: number, height: number) => Promise<void>;
+      assistantClose?: () => Promise<void>;
+      assistantInsertText?: (text: string) => Promise<boolean>;
       navigate: (url: string) => Promise<void>;
       goBack: () => Promise<void>;
       goForward: () => Promise<void>;
@@ -252,7 +326,7 @@ declare global {
       updateSidebarState?: (patch: Partial<SidebarState>) => Promise<BrowserSettings>;
       reorderTabs?: (draggedTabId: string, targetTabId: string) => Promise<void>;
       setZoomFactor?: (factor: number) => Promise<void>;
-      onZoomUpdated?: (cb: (data: { zoomFactor: number }) => void) => () => void;
+      onZoomUpdated?: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => () => void;
       toggleShields: () => Promise<boolean>;
       toggleSiteWhitelist?: (domainOrUrl: string) => Promise<{ domain: string; whitelisted: boolean; shieldWhitelist: string[] }>;
       resetShieldStats?: () => Promise<ShieldStats>;
@@ -349,7 +423,7 @@ export type {
   CsvExportSteps,
   DirectImportNotPossible,
 };
-import type { CredentialListItem } from '../main/passwords/model';
+import type { CredentialListItem } from './shared/ipcTypes';
 import type {
   RevealResult,
   CopyResult,
@@ -357,8 +431,8 @@ import type {
   CommitImportResult,
   PrepareImportResult,
   ImportConflictInfo,
-} from '../main/passwords/manager';
-import type { NotPossibleCause, CsvExportSteps, DirectImportNotPossible } from '../main/passwords/chromeImport';
+} from './shared/ipcTypes';
+import type { NotPossibleCause, CsvExportSteps, DirectImportNotPossible } from './shared/ipcTypes';
 
 /** Gate and parse failures from the IPC layer (`forbidden`, `invalid-input`) or the manager. */
 export interface PasswordIpcError {
@@ -377,9 +451,9 @@ export type PasswordImportStartResult =
   | PasswordIpcError;
 
 /** An archived tab in the archive list, with the name of its space (null when the space was deleted). */
-export type { ArchiveListEntry } from '../main/archive/scheduler';
-import type { ArchiveListEntry } from '../main/archive/scheduler';
+export type { ArchiveListEntry } from './shared/ipcTypes';
+import type { ArchiveListEntry } from './shared/ipcTypes';
 
 /** Password save/update prompt shapes (src/main/passwords/manager.ts). No password field. */
-export type { PromptInfo, PromptAction, PromptResult } from '../main/passwords/manager';
-import type { PromptInfo, PromptAction, PromptResult } from '../main/passwords/manager';
+export type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';
+import type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';

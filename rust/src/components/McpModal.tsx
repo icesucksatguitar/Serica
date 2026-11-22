@@ -17,8 +17,6 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { TabState } from '../types';
-import { withAssistantMarker } from '../../main/passwords/webviewMarker';
-import { DEFAULT_PARTITION } from '../../main/profiles/partition';
 
 interface McpModalProps {
   isOpen: boolean;
@@ -26,15 +24,49 @@ interface McpModalProps {
   activeTab?: TabState;
   onNavigate?: (url: string) => void;
   initialTab?: McpTab;
-  /** Session partition of the active profile; assistant webviews load in it. */
+  /** Unused: assistant pages share the active profile's storage in the Rust tab host. */
   partition?: string;
 }
 
-/** Fallback when no profile partition is passed (the default profile's session). */
-const DEFAULT_ASSISTANT_PARTITION = DEFAULT_PARTITION;
-
-/** Assistant webviews keep their existing preferences plus the marker that skips the password preload. */
-const ASSISTANT_WEBPREFERENCES = withAssistantMarker('contextIsolation=yes,nodeIntegration=no');
+/**
+ * Native assistant page (WebView2 child view owned by the Rust tab host),
+ * kept glued to this element's rectangle while the drawer moves or resizes.
+ */
+const NativeAssistantFrame: React.FC<{ url: string }> = ({ url }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    void window.neutrino?.assistantOpen?.(url, r.left, r.top, r.width, r.height).then(() => {
+      opened.current = true;
+    });
+  }, [url]);
+  useEffect(() => {
+    let last = '';
+    let raf = 0;
+    const track = () => {
+      const el = ref.current;
+      if (el && opened.current) {
+        const r = el.getBoundingClientRect();
+        const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`;
+        if (key !== last) {
+          last = key;
+          void window.neutrino?.assistantBounds?.(r.left, r.top, r.width, r.height);
+        }
+      }
+      raf = requestAnimationFrame(track);
+    };
+    raf = requestAnimationFrame(track);
+    return () => {
+      cancelAnimationFrame(raf);
+      opened.current = false;
+      void window.neutrino?.assistantClose?.();
+    };
+  }, []);
+  return <div ref={ref} className="assistant-webview" style={{ width: '100%', height: '100%' }} />;
+};
 
 type McpTab = 'assistants' | 'local' | 'tools';
 type AssistantProvider = 'claude' | 'chatgpt' | 'gemini' | 'deepseek' | 'perplexity';
@@ -90,7 +122,6 @@ export const McpModal: React.FC<McpModalProps> = ({
   activeTab,
   onNavigate,
   initialTab,
-  partition = DEFAULT_ASSISTANT_PARTITION,
 }) => {
   const [activeTabType, setActiveTabType] = useState<McpTab>(initialTab || 'assistants');
 
@@ -102,7 +133,6 @@ export const McpModal: React.FC<McpModalProps> = ({
 
   // Assistants state
   const [selectedAssistant, setSelectedAssistant] = useState<AssistantProvider>('claude');
-  const assistantWebviewRef = useRef<any>(null);
 
   // Local Models state
   const [isScanning, setIsScanning] = useState(false);
@@ -454,15 +484,7 @@ export const McpModal: React.FC<McpModalProps> = ({
     if (!activeTab?.url) return;
     const info = `Current Page: ${activeTab.title} (${activeTab.url})`;
     navigator.clipboard.writeText(info);
-    if (assistantWebviewRef.current) {
-      assistantWebviewRef.current.executeJavaScript(`
-        const el = document.querySelector('textarea, div[contenteditable="true"]');
-        if (el) {
-          el.focus();
-          document.execCommand('insertText', false, ${JSON.stringify(info + '\n\n')});
-        }
-      `).catch(() => { });
-    }
+    void window.neutrino?.assistantInsertText?.(info + '\n\n');
   };
 
   const handleTestTool = async (toolName: string, args: any) => {
@@ -642,17 +664,7 @@ export const McpModal: React.FC<McpModalProps> = ({
                 className="assistant-webview-frame"
                 style={{ pointerEvents: isDragging || isResizing ? 'none' : 'auto' }}
               >
-                {React.createElement('webview', {
-                  // The partition is part of the key: Electron fixes a webview's
-                  // session at attach time, so a profile change must remount it.
-                  key: `assistant-webview|${partition}`,
-                  ref: assistantWebviewRef,
-                  src: currentAssistant.url,
-                  partition,
-                  className: 'assistant-webview',
-                  allowpopups: 'true',
-                  webpreferences: ASSISTANT_WEBPREFERENCES,
-                })}
+                <NativeAssistantFrame url={currentAssistant.url} />
               </div>
             </div>
           )}

@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import {
+  Puzzle,
   X,
   Moon,
   Sun,
@@ -11,12 +12,13 @@ import {
   KeyRound,
   SlidersHorizontal,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   ARCHIVE_INTERVAL_OPTIONS,
   SEARCH_ENGINES,
   type ArchiveIntervalHours,
   type SearchEngineId,
-} from '../../main/settings';
+} from '../shared/settings';
 import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
 import { PasswordsSettings } from './PasswordsSettings';
@@ -88,7 +90,7 @@ const SettingsSwitch: React.FC<SwitchProps> = ({ checked, label, onChange }) => 
 interface SettingsTabMeta {
   id: SettingsTabId;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+  icon: LucideIcon;
   title: string;
   description: string;
 }
@@ -435,6 +437,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       label="Shields"
                       onChange={(next) => onUpdateSettings({ adblockEnabled: next })}
                     />
+                  </div>
+                </div>
+
+                <div className="settings-card">
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">Extensions</span>
+                      <span className="settings-hint">Add, disable or remove Chrome Web Store extensions</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-button"
+                      onClick={() => {
+                        onClose();
+                        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+                      }}
+                    >
+                      <Puzzle size={13} aria-hidden="true" />
+                      Manage
+                    </button>
                   </div>
                 </div>
 

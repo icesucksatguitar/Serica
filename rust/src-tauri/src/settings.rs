@@ -1,79 +1,20 @@
+//! Browser settings. Persisted as `settings.json` in the app data directory.
+//!
+//! Only the keys the backend acts on are typed. Theme data (`spaceThemes`,
+//! `customThemePresets`) is owned by the UI's theme studio and stored opaquely,
+//! so a shape change on the UI side can never make the whole file fail to load.
+//! Unknown keys (`theme`, `userProfile`, `pinnedSites`, ...) are kept verbatim.
+
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpaceGlowSettings {
-    pub style: String,
-    pub color: String,
-    pub intensity: f64,
-    pub speed: f64,
-    pub size: f64,
-}
-
-impl Default for SpaceGlowSettings {
-    fn default() -> Self {
-        Self {
-            style: "theme".to_string(),
-            color: "#F59E0B".to_string(),
-            intensity: 0.56,
-            speed: 0.55,
-            size: 0.58,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpaceThemePoint {
-    pub color: String,
-    pub x: f64,
-    pub y: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpaceTheme {
-    pub points: Vec<SpaceThemePoint>,
-    pub intensity: f64,
-    pub grain: f64,
-    pub mode: String,
-    #[serde(default)]
-    pub glow: Option<SpaceGlowSettings>,
-}
-
-impl Default for SpaceTheme {
-    fn default() -> Self {
-        Self {
-            points: vec![
-                SpaceThemePoint {
-                    color: "#0F6B4B".to_string(),
-                    x: 0.28,
-                    y: 0.3,
-                },
-                SpaceThemePoint {
-                    color: "#0A2F23".to_string(),
-                    x: 0.72,
-                    y: 0.72,
-                },
-            ],
-            intensity: 0.72,
-            grain: 0.26,
-            mode: "dark".to_string(),
-            glow: Some(SpaceGlowSettings::default()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomSpaceThemePreset {
-    pub id: String,
-    pub name: String,
-    pub theme: SpaceTheme,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
+pub const SEARCH_ENGINES: &[(&str, &str)] = &[
+    ("google", "https://www.google.com/search?q="),
+    ("duckduckgo", "https://duckduckgo.com/?q="),
+    ("bing", "https://www.bing.com/search?q="),
+    ("brave", "https://search.brave.com/search?q="),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,128 +30,227 @@ pub struct PerformanceStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserSettings {
-    #[serde(default = "default_true")]
+    #[serde(default = "yes")]
     pub adblock_enabled: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "yes")]
     pub zen_sleep_enabled: bool,
     #[serde(default = "default_search_engine")]
     pub search_engine: String,
     #[serde(default = "default_reduced_effects")]
     pub reduced_effects_mode: String,
     #[serde(default)]
-    pub space_themes: HashMap<String, SpaceTheme>,
+    pub space_themes: Map<String, Value>,
     #[serde(default)]
-    pub custom_theme_presets: Vec<CustomSpaceThemePreset>,
+    pub custom_theme_presets: Vec<Value>,
     #[serde(default)]
     pub shield_whitelist: Vec<String>,
+    /// 12 | 24 | 168 | 720 | "never"
     #[serde(default = "default_archive_interval")]
-    pub archive_interval_hours: serde_json::Value,
-    #[serde(default = "default_true")]
+    pub archive_interval_hours: Value,
+    #[serde(default = "yes")]
     pub right_pins_dock_visible: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "yes")]
     pub sidebar_expanded: bool,
-    #[serde(default = "default_false")]
+    #[serde(default)]
     pub sidebar_auto_hide: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f64,
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: Map<String, Value>,
 }
 
+fn yes() -> bool {
+    true
+}
 fn default_sidebar_width() -> f64 {
     240.0
 }
-
-fn default_true() -> bool {
-    true
-}
-fn default_false() -> bool {
-    false
-}
 fn default_search_engine() -> String {
-    "google".to_string()
+    "google".into()
 }
 fn default_reduced_effects() -> String {
-    "auto".to_string()
+    "auto".into()
 }
-fn default_archive_interval() -> serde_json::Value {
-    serde_json::Value::from(12)
+fn default_archive_interval() -> Value {
+    Value::from(12)
 }
 
 impl Default for BrowserSettings {
     fn default() -> Self {
-        let mut themes = HashMap::new();
-        themes.insert("space-study".to_string(), SpaceTheme::default());
-        themes.insert(
-            "space-work".to_string(),
-            SpaceTheme {
-                points: vec![
-                    SpaceThemePoint {
-                        color: "#1E3A8A".to_string(),
-                        x: 0.28,
-                        y: 0.3,
-                    },
-                    SpaceThemePoint {
-                        color: "#0F172A".to_string(),
-                        x: 0.72,
-                        y: 0.72,
-                    },
-                ],
-                intensity: 0.70,
-                grain: 0.22,
-                mode: "dark".to_string(),
-                glow: Some(SpaceGlowSettings {
-                    style: "theme".to_string(),
-                    color: "#3B82F6".to_string(),
-                    intensity: 0.55,
-                    speed: 0.55,
-                    size: 0.58,
-                }),
-            },
-        );
-        themes.insert(
-            "space-leisure".to_string(),
-            SpaceTheme {
-                points: vec![
-                    SpaceThemePoint {
-                        color: "#701A75".to_string(),
-                        x: 0.28,
-                        y: 0.3,
-                    },
-                    SpaceThemePoint {
-                        color: "#2E1065".to_string(),
-                        x: 0.72,
-                        y: 0.72,
-                    },
-                ],
-                intensity: 0.68,
-                grain: 0.24,
-                mode: "dark".to_string(),
-                glow: Some(SpaceGlowSettings {
-                    style: "theme".to_string(),
-                    color: "#EC4899".to_string(),
-                    intensity: 0.58,
-                    speed: 0.55,
-                    size: 0.58,
-                }),
-            },
-        );
-
-        Self {
-            adblock_enabled: true,
-            zen_sleep_enabled: true,
-            search_engine: "google".to_string(),
-            reduced_effects_mode: "auto".to_string(),
-            space_themes: themes,
-            custom_theme_presets: Vec::new(),
-            shield_whitelist: Vec::new(),
-            archive_interval_hours: serde_json::Value::from(12),
-            right_pins_dock_visible: true,
-            sidebar_expanded: true,
-            sidebar_auto_hide: false,
-            sidebar_width: 240.0,
-            extra: HashMap::new(),
-        }
+        Self::from_value(Value::Object(Map::new()))
     }
 }
 
+/// Normalizes a whitelist entry to a bare lowercase hostname.
+pub fn normalize_host(input: &str) -> String {
+    let mut s = input.trim().to_lowercase();
+    if s.contains("://") {
+        if let Ok(u) = url::Url::parse(&s) {
+            s = u.host_str().unwrap_or("").to_string();
+        }
+    }
+    let s = s.split('/').next().unwrap_or("");
+    let s = s.rsplit('@').next().unwrap_or("");
+    let s = s.split(':').next().unwrap_or("");
+    s.trim_start_matches("www.").trim_matches('.').to_string()
+}
+
+impl BrowserSettings {
+    /// Builds settings from any JSON value, never failing: invalid typed fields
+    /// are dropped and fall back to their defaults.
+    pub fn from_value(value: Value) -> Self {
+        let mut obj = match value {
+            Value::Object(m) => m,
+            _ => Map::new(),
+        };
+        // Drop typed keys whose JSON type is wrong so one bad key can't reset the file.
+        let typed: &[(&str, fn(&Value) -> bool)] = &[
+            ("adblockEnabled", Value::is_boolean),
+            ("zenSleepEnabled", Value::is_boolean),
+            ("searchEngine", Value::is_string),
+            ("reducedEffectsMode", Value::is_string),
+            ("spaceThemes", Value::is_object),
+            ("customThemePresets", Value::is_array),
+            ("shieldWhitelist", Value::is_array),
+            ("rightPinsDockVisible", Value::is_boolean),
+            ("sidebarExpanded", Value::is_boolean),
+            ("sidebarAutoHide", Value::is_boolean),
+            ("sidebarWidth", Value::is_number),
+        ];
+        for (key, ok) in typed {
+            if obj.get(*key).map(|v| !ok(v)).unwrap_or(false) {
+                obj.remove(*key);
+            }
+        }
+        if let Some(Value::Array(list)) = obj.get("shieldWhitelist") {
+            if list.iter().any(|v| !v.is_string()) {
+                obj.remove("shieldWhitelist");
+            }
+        }
+        let mut s: BrowserSettings = serde_json::from_value(Value::Object(obj)).unwrap_or_else(|e| {
+            tracing::warn!("settings could not be parsed, using defaults: {e}");
+            serde_json::from_value(Value::Object(Map::new())).expect("default settings")
+        });
+        s.normalize();
+        s
+    }
+
+    pub fn normalize(&mut self) {
+        if !SEARCH_ENGINES.iter().any(|(id, _)| *id == self.search_engine) {
+            self.search_engine = default_search_engine();
+        }
+        if !matches!(self.reduced_effects_mode.as_str(), "auto" | "on" | "off") {
+            self.reduced_effects_mode = default_reduced_effects();
+        }
+        let valid_interval = match &self.archive_interval_hours {
+            Value::Number(n) => matches!(n.as_i64(), Some(12 | 24 | 168 | 720)),
+            Value::String(s) => s == "never",
+            _ => false,
+        };
+        if !valid_interval {
+            self.archive_interval_hours = default_archive_interval();
+        }
+        if !self.sidebar_width.is_finite() {
+            self.sidebar_width = default_sidebar_width();
+        }
+        self.sidebar_width = self.sidebar_width.clamp(160.0, 520.0);
+        let mut seen = std::collections::HashSet::new();
+        self.shield_whitelist = self
+            .shield_whitelist
+            .iter()
+            .map(|h| normalize_host(h))
+            .filter(|h| !h.is_empty() && seen.insert(h.clone()))
+            .collect();
+        // Typed keys must never also live in `extra`, or they'd be serialized twice.
+        for k in [
+            "adblockEnabled", "zenSleepEnabled", "searchEngine", "reducedEffectsMode", "spaceThemes",
+            "customThemePresets", "shieldWhitelist", "archiveIntervalHours", "rightPinsDockVisible",
+            "sidebarExpanded", "sidebarAutoHide", "sidebarWidth",
+        ] {
+            self.extra.remove(k);
+        }
+    }
+
+    /// Applies a partial update: top-level keys in `patch` replace existing ones;
+    /// a `null` value removes an untyped key.
+    pub fn apply_patch(&mut self, patch: &Value) {
+        let Value::Object(patch) = patch else { return };
+        let mut current = serde_json::to_value(&*self).unwrap_or(Value::Object(Map::new()));
+        if let Value::Object(map) = &mut current {
+            for (k, v) in patch {
+                if v.is_null() {
+                    map.remove(k);
+                } else {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        *self = Self::from_value(current);
+    }
+
+    pub fn search_prefix(&self) -> &'static str {
+        SEARCH_ENGINES
+            .iter()
+            .find(|(id, _)| *id == self.search_engine)
+            .map(|(_, p)| *p)
+            .unwrap_or(SEARCH_ENGINES[0].1)
+    }
+
+    /// Hours after which an unused Today tab is archived; `None` = never.
+    pub fn archive_after_hours(&self) -> Option<i64> {
+        self.archive_interval_hours.as_i64()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_whitelisted(&self, host: &str) -> bool {
+        let host = normalize_host(host);
+        !host.is_empty()
+            && self
+                .shield_whitelist
+                .iter()
+                .any(|w| host == *w || host.ends_with(&format!(".{w}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn bad_typed_key_does_not_reset_everything() {
+        let s = BrowserSettings::from_value(json!({
+            "adblockEnabled": "yes", "sidebarExpanded": false, "theme": "light"
+        }));
+        assert!(s.adblock_enabled);
+        assert!(!s.sidebar_expanded);
+        assert_eq!(s.extra.get("theme"), Some(&json!("light")));
+    }
+
+    #[test]
+    fn sidebar_width_patch_is_typed_and_not_duplicated() {
+        let mut s = BrowserSettings::default();
+        s.apply_patch(&json!({ "sidebarWidth": 300 }));
+        assert_eq!(s.sidebar_width, 300.0);
+        let text = serde_json::to_string(&s).unwrap();
+        assert_eq!(text.matches("sidebarWidth").count(), 1);
+        s.apply_patch(&json!({ "sidebarWidth": 9000 }));
+        assert_eq!(s.sidebar_width, 520.0);
+    }
+
+    #[test]
+    fn whitelist_is_normalized() {
+        let mut s = BrowserSettings::default();
+        s.apply_patch(&json!({ "shieldWhitelist": ["https://www.Example.com/path", "example.com", ""] }));
+        assert_eq!(s.shield_whitelist, vec!["example.com".to_string()]);
+        assert!(s.is_whitelisted("sub.example.com"));
+        assert!(!s.is_whitelisted("notexample.com"));
+    }
+
+    #[test]
+    fn invalid_enum_values_fall_back() {
+        let s = BrowserSettings::from_value(json!({ "searchEngine": "yahoo", "archiveIntervalHours": 5 }));
+        assert_eq!(s.search_engine, "google");
+        assert_eq!(s.archive_interval_hours, json!(12));
+    }
+}

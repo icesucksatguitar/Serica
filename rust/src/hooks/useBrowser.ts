@@ -190,6 +190,14 @@ export function useBrowser() {
         window.dispatchEvent(new CustomEvent('neutrino:open-history'));
         return;
       }
+      if (normalized === 'neutrino://downloads') {
+        window.dispatchEvent(new CustomEvent('neutrino:open-downloads'));
+        return;
+      }
+      if (normalized === 'neutrino://extensions') {
+        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+        return;
+      }
       if (normalized === 'neutrino://vpn') {
         window.dispatchEvent(new CustomEvent('neutrino:open-vpn'));
         return;
@@ -230,8 +238,8 @@ export function useBrowser() {
     window.neutrino?.toggleSleepTab(tabId);
   }, []);
 
-  const selectSpace = useCallback((spaceId: string) => {
-    window.neutrino?.selectSpace(spaceId);
+  const selectSpace = useCallback((spaceId: string): Promise<void> => {
+    const done = Promise.resolve(window.neutrino?.selectSpace(spaceId)).catch(() => undefined);
     setState((prev) => {
       if (!prev.spaces.some((s) => s.id === spaceId)) return prev;
       const spaceTabs = prev.tabs.filter((t) => t.spaceId === spaceId);
@@ -244,6 +252,7 @@ export function useBrowser() {
         activeTabId: nextActiveTab ? nextActiveTab.id : prev.activeTabId,
       };
     });
+    return done;
   }, []);
 
   const createSpace = useCallback(async (name: string, color?: string) => {

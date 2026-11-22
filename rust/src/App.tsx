@@ -3,17 +3,17 @@ import { useBrowser } from './hooks/useBrowser';
 import { useProfiles } from './hooks/useProfiles';
 import { Sidebar } from './components/Sidebar';
 import { buildSidebarView } from './utils/sidebarModel';
-import { selectSpaceByIndex } from '../main/sidebar/layout';
+import { selectSpaceByIndex } from './shared/layout';
 import { FloatingUrlPill } from './components/FloatingUrlPill';
 import { BrowserViewport } from './components/BrowserViewport';
-import { StartupSplash } from './components/StartupSplash';
 import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { resolveSpaceTheme, resolveReducedEffectsActive } from '../main/settings';
-import { type SpaceTheme, getDefaultSpaceTheme } from '../main/spaceTheme';
+import { useViewportOverlay } from './hooks/useViewportOverlay';
+import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
+import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
 import { computeTopBarTint, type PageColorReport, type TabPageColor } from './utils/topBarTint';
 import {
@@ -30,7 +30,9 @@ import {
   Settings,
   History,
   Lock,
+  Download,
 } from 'lucide-react';
+import { useDownloads, aggregateProgress, isActiveDownload } from './hooks/useDownloads';
 import {
   TabState,
   ActiveMediaState,
@@ -66,6 +68,12 @@ const WelcomeModal = lazy(() =>
 );
 const SettingsPanel = lazy(() =>
   import('./components/SettingsPanel').then((m) => ({ default: m.SettingsPanel }))
+);
+const DownloadsPanel = lazy(() =>
+  import('./components/DownloadsPanel').then((m) => ({ default: m.DownloadsPanel }))
+);
+const ExtensionsModal = lazy(() =>
+  import('./components/ExtensionsModal').then((m) => ({ default: m.ExtensionsModal }))
 );
 const HistoryModal = lazy(() =>
   import('./components/HistoryModal').then((m) => ({ default: m.HistoryModal }))
@@ -108,6 +116,12 @@ export function App() {
   const openSettings = useCallback(() => setIsSettingsOpen(true), []);
 
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
+  const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
+  // Like Chrome's download bubble: a new download opens the panel.
+  const downloads = useDownloads(() => setIsDownloadsOpen(true));
+  const activeDownloads = downloads.filter(isActiveDownload);
+  const downloadProgress = aggregateProgress(downloads);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [isVpnModalOpen, setIsVpnModalOpen] = useState(false);
   const [vpnStatus, setVpnStatus] = useState<VpnStatus | null>(null);
@@ -149,9 +163,48 @@ export function App() {
   useEffect(() => {
     if (!isCommandBarOpen) setIsCommandBarNewTab(false);
   }, [isCommandBarOpen]);
-  const [isStartingUp, setIsStartingUp] = useState(true);
-  const [spaceOverlay, setSpaceOverlay] = useState<string | null>(null);
+  const [spaceOverlay, setSpaceOverlay] = useState<{ name: string; key: number } | null>(null);
   const [spaceTransitionClass, setSpaceTransitionClass] = useState<string>('');
+  const spaceOverlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spaceSlideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spaceOverlayKey = useRef(0);
+  // Native pages paint above HTML: while the space name shows, the new page is
+  // frozen to a snapshot so the label (and its blur) can sit on top of it.
+  const [spaceFreeze, setSpaceFreeze] = useState(false);
+  /** Shows the space name and/or slides the page; a new switch restarts both cleanly. */
+  const playSpaceSwitch = useCallback((
+    name: string | null,
+    slide: '' | 'space-transition-left' | 'space-transition-right',
+    switched: Promise<unknown> = Promise.resolve(),
+  ) => {
+    if (name) {
+      if (spaceOverlayTimer.current) clearTimeout(spaceOverlayTimer.current);
+      const key = ++spaceOverlayKey.current;
+      setSpaceOverlay({ name, key });
+      setSpaceFreeze(false);
+      // Snapshot the page we switched *to*: wait for the backend to show it.
+      void switched.then(() => {
+        setTimeout(() => {
+          if (spaceOverlayKey.current === key) setSpaceFreeze(true);
+        }, 60);
+      });
+      spaceOverlayTimer.current = setTimeout(() => {
+        spaceOverlayTimer.current = null;
+        setSpaceOverlay(null);
+        setSpaceFreeze(false);
+      }, 1450);
+    }
+    if (slide) {
+      if (spaceSlideTimer.current) clearTimeout(spaceSlideTimer.current);
+      // Drop the class for one frame so the animation restarts on rapid switches.
+      setSpaceTransitionClass('');
+      requestAnimationFrame(() => setSpaceTransitionClass(slide));
+      spaceSlideTimer.current = setTimeout(() => {
+        spaceSlideTimer.current = null;
+        setSpaceTransitionClass('');
+      }, 560);
+    }
+  }, []);
 
   // User Profile & First Launch Welcome Screen State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
@@ -205,16 +258,7 @@ export function App() {
     [updateSettings]
   );
 
-  // Automated background memory compression (Zen backend); skipped while Zen auto-sleep is off.
-  // Manual Zen commands (Command Bar) call zenOptimize directly and are unaffected.
-  const zenSleepEnabled = settings.zenSleepEnabled;
-  useEffect(() => {
-    if (!zenSleepEnabled) return;
-    const interval = setInterval(() => {
-      zenOptimize();
-    }, 180000);
-    return () => clearInterval(interval);
-  }, [zenOptimize, zenSleepEnabled]);
+  // Zen auto-sleep runs in the Rust backend (tabs idle for 10+ minutes); nothing to schedule here.
 
   useEffect(() => {
     void window.neutrino?.getPerformanceStatus?.().then((status) => {
@@ -297,7 +341,7 @@ export function App() {
     themeTransitionTimerRef.current = setTimeout(() => {
       themeTransitionTimerRef.current = null;
       document.documentElement.classList.remove('space-theme-transitioning');
-    }, 320);
+    }, 520);
   }, []);
 
   useEffect(() => {
@@ -498,35 +542,14 @@ export function App() {
     triggerThemeCrossFade();
 
     const dirClass = nextIdx >= currentIdx ? 'space-transition-left' : 'space-transition-right';
-    setSpaceTransitionClass(dirClass);
-
-    if (nextSpace) {
-      setSpaceOverlay(nextSpace.name);
-    }
-
-    selectSpace(spaceId);
-
-    setTimeout(() => {
-      setSpaceTransitionClass('');
-    }, 450);
-
-    setTimeout(() => {
-      setSpaceOverlay(null);
-    }, 1100);
+    playSpaceSwitch(nextSpace?.name ?? null, dirClass, selectSpace(spaceId));
   };
 
   const handleCreateSpace = async (name: string, color?: string) => {
     const created = await createSpace(name, color);
     if (created) {
       triggerThemeCrossFade();
-      setSpaceTransitionClass('space-transition-left');
-      setSpaceOverlay(created.name);
-      setTimeout(() => {
-        setSpaceTransitionClass('');
-      }, 450);
-      setTimeout(() => {
-        setSpaceOverlay(null);
-      }, 1100);
+      playSpaceSwitch(created.name, 'space-transition-left');
     }
     return created;
   };
@@ -561,6 +584,8 @@ export function App() {
       setIsSettingsOpen(false);
       setIsThemeModalOpen(false);
       setIsHistoryModalOpen(false);
+      setIsExtensionsOpen(false);
+      setIsDownloadsOpen(false);
       setIsVpnModalOpen(false);
     });
     // Ctrl+Comma while a webview has focus (main process before-input-event)
@@ -573,14 +598,18 @@ export function App() {
     const unsubIpcSpaceSwitched = window.neutrino?.onSpaceSwitched?.((payload) => {
       triggerThemeCrossFade();
       if (payload?.spaceName) {
-        setSpaceOverlay(payload.spaceName);
-        setTimeout(() => setSpaceOverlay(null), 1100);
+        playSpaceSwitch(payload.spaceName, '');
       }
     });
     // neutrino://settings, neutrino://history, neutrino://vpn from useBrowser.navigate
     const handleOpenSettingsEvent = () => setIsSettingsOpen(true);
     const handleOpenHistoryEvent = () => setIsHistoryModalOpen(true);
     const handleOpenVpnEvent = () => setIsVpnModalOpen(true);
+    const handleOpenExtensionsEvent = () => setIsExtensionsOpen(true);
+    window.addEventListener('neutrino:open-extensions', handleOpenExtensionsEvent);
+    const handleOpenDownloadsEvent = () => setIsDownloadsOpen(true);
+    window.addEventListener('neutrino:open-downloads', handleOpenDownloadsEvent);
+    const unsubIpcDownloads = window.neutrino?.onOpenDownloads?.(() => setIsDownloadsOpen(true));
 
     window.addEventListener('neutrino:open-settings', handleOpenSettingsEvent);
     window.addEventListener('neutrino:open-history', handleOpenHistoryEvent);
@@ -614,6 +643,9 @@ export function App() {
       window.removeEventListener('neutrino:open-settings', handleOpenSettingsEvent);
       window.removeEventListener('neutrino:open-history', handleOpenHistoryEvent);
       window.removeEventListener('neutrino:open-vpn', handleOpenVpnEvent);
+      window.removeEventListener('neutrino:open-extensions', handleOpenExtensionsEvent);
+      window.removeEventListener('neutrino:open-downloads', handleOpenDownloadsEvent);
+      unsubIpcDownloads?.();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('neutrino:open-command-bar', handleOpenCommandBar);
       window.removeEventListener('neutrino:close-command-bar', handleCloseCommandBar);
@@ -659,18 +691,6 @@ useEffect(() => {
   });
 }, [isVpnModalOpen]);
 
-// Listen for media commands from MCP or external calls
-useEffect(() => {
-  const electron = (window as any).electron;
-  if (electron?.ipcRenderer) {
-    const handler = (_: any, cmd: any) => {
-      setMediaCommand({ ...cmd, timestamp: Date.now() });
-    };
-    electron.ipcRenderer.on('neutrino:media-command', handler);
-    return () => electron.ipcRenderer.removeListener('neutrino:media-command', handler);
-  }
-}, []);
-
 const handleUpdateTab = (tabId: string, partial: Partial<TabState>) => {
   window.neutrino?.updateTab?.(tabId, partial);
 };
@@ -709,10 +729,27 @@ const handleCloseMediaPlayer = () => {
   setActiveMediaState(null);
 };
 
+const dispatchSiteAction = useCallback((action: SiteAction) => {
+  window.dispatchEvent(new CustomEvent('neutrino:site-action', { detail: { action, source: 'ui' } }));
+}, []);
+
 // Fallback Capturing Keyboard Shortcuts (only outside Electron where before-input-event is unavailable)
 useEffect(() => {
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (window.neutrino?.isElectron) return;
+    if (e.key === 'Escape' && !e.defaultPrevented) {
+      // Close the topmost panel; the command bar handles its own Escape.
+      setIsArchiveOpen(false);
+      setIsSettingsOpen(false);
+      setIsThemeModalOpen(false);
+      setIsHistoryModalOpen(false);
+      setIsExtensionsOpen(false);
+      setIsDownloadsOpen(false);
+      setIsVpnModalOpen(false);
+      setIsShieldModalOpen(false);
+      setIsMcpModalOpen(false);
+      return;
+    }
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
       if (key === 'w') {
@@ -722,6 +759,10 @@ useEffect(() => {
         if (state.activeTabId) {
           closeTab(state.activeTabId);
         }
+      } else if (key === 't' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void reopenClosedTab();
       } else if (key === 't') {
         e.preventDefault();
         e.stopPropagation();
@@ -732,7 +773,7 @@ useEffect(() => {
         e.stopPropagation();
         e.stopImmediatePropagation();
         setIsCommandBarOpen((prev) => !prev);
-      } else if (key === 'e') {
+      } else if (key === 'e' || key === 's') {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
@@ -741,30 +782,60 @@ useEffect(() => {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        window.neutrino?.reload();
+        dispatchSiteAction(e.shiftKey ? 'hard-reload' : 'reload');
       } else if (key === ',') {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
         setIsCommandBarOpen(false);
         setIsSettingsOpen(true);
+      } else if (key === 'j') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        setIsDownloadsOpen((prev) => !prev);
       } else if (key === 'h') {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
         setIsCommandBarOpen(false);
         setIsHistoryModalOpen((prev) => !prev);
+      } else if (key === 'f') {
+        e.preventDefault();
+        dispatchSiteAction('open-find');
+      } else if (key === 'tab' || key === 'pagedown' || key === 'pageup') {
+        e.preventDefault();
+        const back = (key === 'tab' && e.shiftKey) || key === 'pageup';
+        void window.neutrino?.cycleTab?.(back ? -1 : 1);
+      } else if (key === '=' || key === '+') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'in' }));
+      } else if (key === '-') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'out' }));
+      } else if (key === '0') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'reset' }));
       }
+    } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      e.preventDefault();
+      dispatchSiteAction(e.key === 'ArrowLeft' ? 'back' : 'forward');
+    } else if (e.key === 'F5') {
+      e.preventDefault();
+      dispatchSiteAction(e.ctrlKey || e.shiftKey ? 'hard-reload' : 'reload');
+    } else if (e.key === 'F12') {
+      e.preventDefault();
+      void window.neutrino?.openDevtools?.();
     }
   };
 
   window.addEventListener('keydown', handleGlobalKeyDown, true);
   return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-}, [state.activeTabId, closeTab, openNewTabCommandBar, toggleSidebar]);
+}, [state.activeTabId, closeTab, openNewTabCommandBar, toggleSidebar, reopenClosedTab, dispatchSiteAction]);
 
-const dispatchSiteAction = useCallback((action: SiteAction) => {
-  window.dispatchEvent(new CustomEvent('neutrino:site-action', { detail: { action, source: 'ui' } }));
-}, []);
 
 const shieldsBlockedCount =
   state.shieldStats.totalBlocked || (state.shieldStats.trackersBlocked + state.shieldStats.adsBlocked);
@@ -857,6 +928,22 @@ useEffect(() => {
   }
 }, [(settings as any).sidebarWidth]);
 
+// Native page views paint above HTML; freeze the page while any of these cover it.
+useViewportOverlay(spaceFreeze);
+useViewportOverlay(
+  isCommandBarOpen ||
+    isShieldModalOpen ||
+    isMcpModalOpen ||
+    isThemeModalOpen ||
+    isSettingsOpen ||
+    isHistoryModalOpen ||
+    isExtensionsOpen ||
+    isDownloadsOpen ||
+    isVpnModalOpen ||
+    isArchiveOpen ||
+    isWelcomeOpen,
+);
+
 const shellStyle = {
   '--app-sidebar-width': isSidebarDocked ? (sidebarExpanded ? `${sidebarWidth}px` : '56px') : '0px',
   '--app-top-offset': isWebpage ? '44px' : '60px',
@@ -886,8 +973,10 @@ return (
 
     {/* Space Name Animation Overlay */}
     {spaceOverlay && (
-      <div className="macos-space-name-overlay">
-        <span className="macos-space-name-text">{spaceOverlay}</span>
+      <div className="macos-space-name-overlay" aria-live="polite">
+        <div className="macos-space-name-card" key={spaceOverlay.key}>
+          <span className="macos-space-name-text">{spaceOverlay.name}</span>
+        </div>
       </div>
     )}
 
@@ -930,7 +1019,7 @@ return (
         <button
           className={`macos-tabs-toggle-pill ${sidebarExpanded ? 'active' : ''}`}
           onClick={toggleSidebar}
-          title={sidebarExpanded ? 'Collapse sidebar (Ctrl+E)' : 'Expand sidebar (Ctrl+E)'}
+          title={sidebarExpanded ? 'Collapse sidebar (Ctrl+S)' : 'Expand sidebar (Ctrl+S)'}
           aria-label="Toggle sidebar"
           aria-pressed={sidebarExpanded}
         >
@@ -1071,6 +1160,34 @@ return (
           );
         })()}
 
+        {downloads.length > 0 && (
+          <button
+            className={`minimal-icon-btn downloads-top-btn${activeDownloads.length > 0 ? ' active' : ''}`}
+            onClick={() => setIsDownloadsOpen((prev) => !prev)}
+            title={
+              activeDownloads.length > 0
+                ? `Downloads: ${activeDownloads.length} in progress${downloadProgress !== null ? ` (${Math.round(downloadProgress * 100)}%)` : ''} (Ctrl+J)`
+                : 'Downloads (Ctrl+J)'
+            }
+            aria-label="Downloads"
+          >
+            {activeDownloads.length > 0 && (
+              <svg className="downloads-ring" viewBox="0 0 24 24" aria-hidden="true">
+                <circle className="downloads-ring-track" cx="12" cy="12" r="10.5" />
+                <circle
+                  className={`downloads-ring-fill${downloadProgress === null ? ' indeterminate' : ''}`}
+                  cx="12"
+                  cy="12"
+                  r="10.5"
+                  pathLength={100}
+                  strokeDasharray={downloadProgress === null ? '25 75' : `${Math.max(2, downloadProgress * 100)} 100`}
+                />
+              </svg>
+            )}
+            <Download size={14} />
+          </button>
+        )}
+
         <button
           className="minimal-icon-btn"
           onClick={() => setIsHistoryModalOpen((prev) => !prev)}
@@ -1141,6 +1258,8 @@ return (
           userName={userProfile?.name}
           onFullscreenChange={setIsHtmlFullscreen}
           onPageColor={handlePageColor}
+          insetLeft={sidebarAutoHide && showSidebar ? 8 : 0}
+          insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
         />
       </div>
     </main>
@@ -1172,6 +1291,7 @@ return (
           onVolume={handleMediaVolume}
           onGoToTab={handleGoToMediaTab}
           onClose={handleCloseMediaPlayer}
+          dockOverPage={isWebpage}
         />
       </Suspense>
     )}
@@ -1245,6 +1365,27 @@ return (
           onOpenUrl={handleOpenHistoryUrl}
           onDeleteEntry={handleDeleteHistoryEntry}
           onClearHistory={handleClearHistory}
+        />
+      </Suspense>
+    )}
+
+    {/* Downloads (top bar / Ctrl+J / neutrino://downloads) */}
+    {isDownloadsOpen && (
+      <Suspense fallback={null}>
+        <DownloadsPanel isOpen={isDownloadsOpen} onClose={() => setIsDownloadsOpen(false)} downloads={downloads} />
+      </Suspense>
+    )}
+
+    {/* Extensions (neutrino://extensions / Command Bar) */}
+    {isExtensionsOpen && (
+      <Suspense fallback={null}>
+        <ExtensionsModal
+          isOpen={isExtensionsOpen}
+          onClose={() => setIsExtensionsOpen(false)}
+          onOpenUrl={(url) => {
+            setIsExtensionsOpen(false);
+            void createTab(url, state.activeSpaceId);
+          }}
         />
       </Suspense>
     )}
@@ -1333,11 +1474,6 @@ return (
           onComplete={handleWelcomeComplete}
         />
       </Suspense>
-    )}
-
-    {/* Startup Splash Animation */}
-    {isStartingUp && (
-      <StartupSplash onFinished={() => setIsStartingUp(false)} />
     )}
   </div>
 );

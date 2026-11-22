@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldCheck, ShieldAlert, X, EyeOff, Lock, Zap, Database, Globe, RotateCcw } from 'lucide-react';
 import { ShieldStats, BlockedTrackerItem } from '../types';
 
@@ -44,6 +44,12 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
   onToggleSiteWhitelist,
   onResetStats,
 }) => {
+  // Filter-list status of the Brave adblock engine in the Rust backend.
+  const [engineInfo, setEngineInfo] = useState<{ engine: string; lists: string[]; updating: boolean } | null>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    void window.neutrino?.getShieldsInfo?.().then((i) => setEngineInfo(i)).catch(() => setEngineInfo(null));
+  }, [isOpen]);
   if (!isOpen) return null;
 
   const siteHost = getHttpHost(activeUrl);
@@ -84,7 +90,7 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
               {enabled
-                  ? 'Blocking cross-site trackers, ads, popups, and fingerprinting'
+                  ? 'Blocking ads, trackers and fingerprinting scripts with EasyList, EasyPrivacy and uBlock filters'
                   : 'Trackers and ads are not being blocked'}
             </div>
           </div>
@@ -200,8 +206,10 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
           }}>
             <Lock size={16} style={{ color: 'var(--accent)' }} />
             <div>
-              <div style={{ fontSize: '16px', fontWeight: 700 }}>Strict</div>
-              <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>Fingerprint Noise</div>
+              <div style={{ fontSize: '16px', fontWeight: 700 }}>
+                {engineInfo?.updating ? 'Updating' : engineInfo?.engine === 'full' ? `${engineInfo.lists.length} lists` : 'Built-in'}
+              </div>
+              <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>Brave adblock engine</div>
             </div>
           </div>
 

@@ -8,8 +8,8 @@
 // keeps the computed index stable while the optimistic preview moves the
 // dragged item around.
 
-import { beginDrag, cancelDrag, move, type DragSnapshot } from '../../main/sidebar/layout';
-import type { ProfilesFile } from '../../main/profiles/types';
+import { beginDrag, cancelDrag, move, type DragSnapshot } from '../shared/layout';
+import type { ProfilesFile } from '../shared/profileTypes';
 import type { MoveOp, TabState } from '../types';
 import type { SidebarItemKind, SidebarSource } from './sidebarModel';
 

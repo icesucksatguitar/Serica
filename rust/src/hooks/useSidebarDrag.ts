@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
-import type { ProfilesFile } from '../../main/profiles/types';
+import type { ProfilesFile } from '../shared/profileTypes';
 import {
   cancelDragSession,
   insertionIndex,

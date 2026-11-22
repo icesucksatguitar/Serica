@@ -10,6 +10,7 @@ import {
   Pause,
   X,
 } from 'lucide-react';
+import { useReservePageBottom } from '../hooks/useViewportOverlay';
 import { ActiveMediaState } from '../types';
 
 interface MediaPlayerProps {
@@ -19,6 +20,8 @@ interface MediaPlayerProps {
   onVolume: (vol: number) => void;
   onGoToTab: (tabId: string) => void;
   onClose: () => void;
+  /** Over a live web page the player docks bottom-right and the page shrinks to make room. */
+  dockOverPage?: boolean;
 }
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
@@ -30,6 +33,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   onVolume,
   onGoToTab,
   onClose,
+  dockOverPage = false,
 }) => {
   const [corner, setCorner] = useState<Corner>('bottom-right');
   const [customPos, setCustomPos] = useState<{ x: number; y: number } | null>(null);
@@ -121,10 +125,21 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
     } catch {}
   };
 
-  const stylePosition: React.CSSProperties = customPos
+  const [playerHeight, setPlayerHeight] = useState(0);
+  useEffect(() => {
+    const el = playerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setPlayerHeight(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useReservePageBottom(dockOverPage && playerHeight > 0 ? playerHeight + 24 : 0);
+
+  const effectivePos = dockOverPage ? null : customPos;
+  const stylePosition: React.CSSProperties = effectivePos
     ? {
-        left: `${customPos.x}px`,
-        top: `${customPos.y}px`,
+        left: `${effectivePos.x}px`,
+        top: `${effectivePos.y}px`,
         width: `${size.width}px`,
       }
     : {
@@ -134,7 +149,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   return (
     <div
       ref={playerRef}
-      className={`floating-media-player ${customPos ? '' : corner}`}
+      className={`floating-media-player ${effectivePos ? '' : dockOverPage ? 'bottom-right' : corner}`}
       style={stylePosition}
     >
       {/* Draggable Header */}

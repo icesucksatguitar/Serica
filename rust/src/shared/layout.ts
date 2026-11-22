@@ -14,7 +14,7 @@ import type {
   SpaceRecord,
   TabEntry,
   TabSection,
-} from '../profiles/types';
+} from './profileTypes';
 
 export type LayoutSection = 'favorite' | TabSection;
 

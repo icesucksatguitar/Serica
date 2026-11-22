@@ -1104,3 +1104,22 @@ body.light .nsb-preview-globe {
 body.light .nsb-preview-url {
   color: var(--theme-fg-muted, #57534E);
 }
+
+/* Today section label and empty Pinned hint (sections were indistinguishable when Pinned was empty). */
+.nsb-today-section-header {
+  padding-top: 2px;
+  padding-bottom: 4px;
+}
+
+.nsb-section-empty-hint {
+  font-size: 11px;
+  color: var(--nsb-fg-faint);
+  padding: 2px 10px 6px;
+  user-select: none;
+  opacity: 0.8;
+}
+
+.nsb.collapsed .nsb-section-empty-hint,
+.nsb.collapsed .nsb-today-section-header {
+  display: none;
+}

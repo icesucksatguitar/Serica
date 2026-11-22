@@ -15,7 +15,7 @@ import {
   resolvePageColor,
   toCssHex,
   type Rgba,
-} from '../../main/topbar/color';
+} from '../shared/topbarColor';
 
 /** What the viewport reports for a tab: its `theme-color` meta value and the sampled top color. */
 export interface PageColorReport {

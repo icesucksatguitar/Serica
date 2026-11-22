@@ -9,7 +9,7 @@ import {
   X,
   Server,
 } from 'lucide-react';
-import { DOH_PROVIDERS } from '../../main/vpnPresets';
+import { DOH_PROVIDERS } from '../shared/vpnPresets';
 import type { DohProviderId, ProxyProtocol, VpnConfig, VpnMode, VpnStatus } from '../types';
 
 interface VpnModalProps {

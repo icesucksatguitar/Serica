@@ -1,13 +1,21 @@
+//! Neutrino browser backend (Rust + Tauri v2 + WebView2).
+
+mod app;
 mod commands;
+mod downloads;
+mod extensions;
 mod history;
 mod importer;
+mod mcp;
+mod model;
 mod settings;
 mod shields;
-mod spaces;
-mod state;
-mod tabs;
+mod store;
+mod tabhost;
+mod vpn;
+#[cfg(windows)]
+mod webview_win;
 
-use state::AppState;
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -17,55 +25,111 @@ pub fn run() {
         .with(tracing_subscriber::fmt::layer())
         .try_init();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_data_dir = app
+            let data_dir = app
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("com.neutrino.browser"));
-            let state = AppState::new(app_data_dir);
-            app.manage(state);
+            let shared = app::App::new(app.handle().clone(), data_dir);
+            app.manage(shared);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_browser_state,
-            commands::get_settings,
-            commands::update_settings,
-            commands::get_performance_status,
             commands::create_tab,
             commands::close_tab,
             commands::select_tab,
+            commands::reopen_closed_tab,
+            commands::cycle_tab,
             commands::update_tab,
             commands::toggle_pin_tab,
+            commands::pin_tab,
+            commands::unpin_tab,
             commands::toggle_sleep_tab,
             commands::reorder_tabs,
+            commands::duplicate_tab,
+            commands::move_tab,
+            commands::add_favorite,
+            commands::remove_favorite,
+            commands::create_folder,
+            commands::update_folder,
+            commands::delete_folder,
+            commands::move_tab_to_folder,
+            commands::navigate,
+            commands::site_action,
+            commands::open_external_url,
+            commands::set_viewport,
+            commands::viewport_freeze,
+            commands::viewport_thaw,
+            commands::find_in_page,
+            commands::set_zoom_factor,
+            commands::capture_tab_preview,
+            commands::get_tab_preview,
+            commands::open_devtools,
+            commands::get_media_state,
+            commands::media_control,
             commands::select_space,
             commands::create_space,
             commands::delete_space,
             commands::update_space,
             commands::reorder_space,
+            commands::list_profiles,
+            commands::create_profile,
+            commands::rename_profile,
+            commands::delete_profile,
+            commands::list_archive,
+            commands::restore_archived_tab,
+            commands::get_settings,
+            commands::update_settings,
+            commands::set_theme_mode,
+            commands::get_performance_status,
             commands::toggle_shields,
             commands::toggle_site_whitelist,
             commands::get_shield_stats,
             commands::reset_shield_stats,
+            commands::get_shields_info,
+            commands::update_filter_lists,
             commands::zen_optimize,
             commands::window_control,
             commands::get_history,
-            commands::clear_history,
+            commands::history_suggest,
             commands::delete_history_entry,
+            commands::clear_history,
             commands::get_vpn_status,
             commands::connect_vpn,
             commands::disconnect_vpn,
+            commands::update_vpn_config,
             commands::check_vpn_ip,
-            commands::capture_tab_preview,
-            commands::get_tab_preview,
             commands::mcp_call,
             commands::get_mcp_logs,
+            commands::assistant_open,
+            commands::assistant_bounds,
+            commands::assistant_close,
+            commands::assistant_insert_text,
             commands::passwords_status,
             commands::passwords_list,
+            commands::list_downloads,
+            commands::download_action,
+            commands::clear_downloads,
+            commands::open_downloads_folder,
+            commands::list_extensions,
+            commands::install_extension,
+            commands::set_extension_enabled,
+            commands::remove_extension,
+            commands::open_extension_page,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running neutrino browser");
-}
+        .build(tauri::generate_context!())
+        .expect("error while building neutrino browser");
 
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(shared) = handle.try_state::<app::Shared>() {
+                shared.notify(app::Notice::Quit);
+                shared.save_now();
+                tabhost::TabHost::close_all(&shared);
+            }
+        }
+    });
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TabState, Space } from '../types';
-import { SEARCH_ENGINES, SearchEngineId, buildSearchUrl } from '../../main/settings';
+import { SEARCH_ENGINES, SearchEngineId, buildSearchUrl } from '../shared/settings';
 
 interface CommandBarProps {
   isOpen: boolean;
@@ -303,6 +303,33 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       hint: 'Privacy',
       action: () => {
         onOpenShields?.();
+        onClose();
+      },
+    },
+    {
+      id: 'cmd-downloads',
+      title: '> View Downloads',
+      hint: 'Ctrl+J',
+      action: () => {
+        window.dispatchEvent(new CustomEvent('neutrino:open-downloads'));
+        onClose();
+      },
+    },
+    {
+      id: 'cmd-extensions',
+      title: '> Manage Extensions',
+      hint: 'Extensions',
+      action: () => {
+        window.dispatchEvent(new CustomEvent('neutrino:open-extensions'));
+        onClose();
+      },
+    },
+    {
+      id: 'cmd-web-store',
+      title: '> Open Chrome Web Store',
+      hint: 'Extensions',
+      action: () => {
+        onCreateTab('https://chromewebstore.google.com/');
         onClose();
       },
     },

@@ -5,8 +5,8 @@
 import {
   spaceSwitcherGroups,
   visibleTabsForSpace,
-} from '../../main/sidebar/layout';
-import type { ProfilesFile, SpaceRecord, TabEntry } from '../../main/profiles/types';
+} from '../shared/layout';
+import type { ProfilesFile, SpaceRecord, TabEntry } from '../shared/profileTypes';
 import type { BrowserAppState, FavoriteEntry, FolderRecord, MoveOp, Profile, Space, TabState } from '../types';
 
 /** Fields of the renderer state the sidebar reads. */

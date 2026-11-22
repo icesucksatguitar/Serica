@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability for the main window","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}
+{"default":{"identifier":"default","description":"App UI only. Tab and assistant webviews load remote sites and get no IPC access.","local":true,"webviews":["main"],"permissions":["core:default","opener:default"]}}
