@@ -9,7 +9,7 @@ use crate::app::{ui_emit, Shared, Shortcut, TabEvent};
 use crate::shields::hide_css;
 use base64::Engine as _;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use tauri::Webview;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -23,8 +23,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_ME
 struct Ctx {
     /// URL of the current (or pending) top-level document: the "source" for adblock.
     top_url: String,
-    /// Id of the document-created script holding this page's cosmetic CSS/scriptlets.
-    cosmetic_script: Option<String>,
+    /// Cosmetic CSS/scriptlet scripts registered per host. They are kept (each
+    /// checks its own hostname) so same-site navigations never race a re-add.
+    cosmetic_scripts: HashMap<String, Option<String>>,
+    /// Hosts whose scripts include scriptlets (must run before page scripts).
+    scriptlet_hosts: HashSet<String>,
+    /// Hosts this tab already reloaded once because the scriptlets missed the first load.
+    reloaded_for: HashSet<String>,
     exceptions: HashSet<String>,
     generichide: bool,
 }
@@ -184,6 +189,21 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 sender.CanGoBack(&mut back)?;
                 sender.CanGoForward(&mut fwd)?;
                 app.tab_event(&id, TabEvent::History { back: back.as_bool(), forward: fwd.as_bool() });
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    {
+        let ctx = ctx.clone();
+        core.add_ContentLoading(
+            &ContentLoadingEventHandler::create(Box::new(move |sender, args| {
+                let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let mut error_page = Default::default();
+                args.IsErrorPage(&mut error_page)?;
+                if !error_page.as_bool() {
+                    verify_scriptlets(&sender, &ctx);
+                }
                 Ok(())
             })),
             &mut token,
@@ -464,10 +484,10 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
 
 /// Registers this navigation's cosmetic CSS and scriptlets to run at document
 /// creation, replacing the previous navigation's script.
+/// Keep at most this many per-host cosmetic scripts per tab.
+const MAX_COSMETIC_SCRIPTS: usize = 48;
+
 unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell<Ctx>>, url: &str) {
-    if let Some(old) = ctx.borrow_mut().cosmetic_script.take() {
-        let _ = core.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(old));
-    }
     let res = app.shields.cosmetic(url);
     let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
     {
@@ -479,10 +499,22 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
     if host.is_empty() || (res.hide_selectors.is_empty() && res.injected_script.trim().is_empty()) {
         return;
     }
+    if ctx.borrow().cosmetic_scripts.contains_key(&host) {
+        return; // already registered for this host (or registering)
+    }
+    if ctx.borrow().cosmetic_scripts.len() >= MAX_COSMETIC_SCRIPTS {
+        let old: Vec<String> = ctx.borrow_mut().cosmetic_scripts.drain().filter_map(|(_, id)| id).collect();
+        for id in old {
+            let _ = core.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
+        }
+        ctx.borrow_mut().scriptlet_hosts.clear();
+    }
+    let has_scriptlets = !res.injected_script.trim().is_empty();
     let css = hide_css(res.hide_selectors.into_iter());
     let script = format!(
         r#"(function(){{
   if (window.top !== window || location.hostname !== {host}) return;
+  try {{ Object.defineProperty(window, '__neutrinoCosmetic', {{ value: {host} }}); }} catch (e) {{}}
   const css = {css};
   if (css) {{
     const add = () => {{ const s = document.createElement('style'); s.textContent = css; (document.head || document.documentElement).appendChild(s); }};
@@ -496,12 +528,52 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
         css = js_string(&css),
         scriptlets = res.injected_script
     );
+    {
+        let mut c = ctx.borrow_mut();
+        c.cosmetic_scripts.insert(host.clone(), None);
+        if has_scriptlets {
+            c.scriptlet_hosts.insert(host.clone());
+        }
+    }
     let ctx2 = ctx.clone();
     let _ = core.AddScriptToExecuteOnDocumentCreated(
         &HSTRING::from(script),
         &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |hr, id| {
+            let mut c = ctx2.borrow_mut();
             if hr.is_ok() {
-                ctx2.borrow_mut().cosmetic_script = Some(id);
+                c.cosmetic_scripts.insert(host, Some(id));
+            } else {
+                c.cosmetic_scripts.remove(&host);
+                c.scriptlet_hosts.remove(&host);
+            }
+            Ok(())
+        })),
+    );
+}
+
+/// When a page starts loading: if its site needs scriptlets (YouTube ads, etc.)
+/// but they were registered too late for this document, reload once so they run.
+unsafe fn verify_scriptlets(core: &ICoreWebView2, ctx: &Rc<RefCell<Ctx>>) {
+    let mut uri = PWSTR::null();
+    if core.Source(&mut uri).is_err() {
+        return;
+    }
+    let url = take(uri);
+    let Some(host) = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)) else { return };
+    {
+        let c = ctx.borrow();
+        if !c.scriptlet_hosts.contains(&host) || c.reloaded_for.contains(&host) {
+            return;
+        }
+    }
+    let (ctx2, core2) = (ctx.clone(), core.clone());
+    let check = format!("window.__neutrinoCosmetic === {}", js_string(&host));
+    let _ = core.ExecuteScript(
+        &HSTRING::from(check),
+        &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+            if hr.is_ok() && result.trim() == "false" && ctx2.borrow_mut().reloaded_for.insert(host.clone()) {
+                tracing::info!("scriptlets missed the first load of {host}; reloading once");
+                let _ = core2.Reload();
             }
             Ok(())
         })),

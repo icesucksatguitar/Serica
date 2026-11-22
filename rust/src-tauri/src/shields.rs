@@ -43,6 +43,10 @@ const LISTS: &[ListSource] = &[
 ];
 
 const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock-resources/master/dist/resources.json";
+/// uBlock Origin's scriptlets (set-constant, json-prune, trusted-*, …) converted
+/// by `rust/tools/build-ubo-scriptlets.mjs`. Brave's file above only holds
+/// Brave's extras, and most uBO rules (e.g. YouTube's) need these.
+const UBO_RESOURCES_URL: &str = "https://raw.githubusercontent.com/icesucksatguitar/neutrino/main/rust/resources/ubo-scriptlets.json";
 
 /// Always-available rules used until the downloaded lists are ready (and if
 /// the machine is offline on first start).
@@ -256,9 +260,19 @@ impl Shields {
 
     // ------------------------------------------------------------------ lists
 
+    /// Brave's resources plus uBlock Origin's scriptlets, de-duplicated by name.
     fn resources(&self) -> Option<Vec<Resource>> {
-        let text = std::fs::read_to_string(self.dir.join("resources.json")).ok()?;
-        serde_json::from_str(&text).ok()
+        let read = |file: &str| -> Vec<Resource> {
+            std::fs::read_to_string(self.dir.join(file)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<Resource> = Vec::new();
+        for r in read("ubo-resources.json").into_iter().chain(read("resources.json")) {
+            if seen.insert(r.name.clone()) {
+                out.push(r);
+            }
+        }
+        (!out.is_empty()).then_some(out)
     }
 
     fn load_cached(&self) {
@@ -346,10 +360,12 @@ impl Shields {
         if texts.is_empty() {
             return Err("no filter lists could be downloaded".into());
         }
-        if let Ok(r) = client.get(RESOURCES_URL).send().await.and_then(|r| r.error_for_status()) {
-            if let Ok(body) = r.text().await {
-                if serde_json::from_str::<Vec<Resource>>(&body).is_ok() {
-                    let _ = crate::store::write_atomic(&self.dir.join("resources.json"), body.as_bytes());
+        for (url, file) in [(RESOURCES_URL, "resources.json"), (UBO_RESOURCES_URL, "ubo-resources.json")] {
+            if let Ok(r) = client.get(url).send().await.and_then(|r| r.error_for_status()) {
+                if let Ok(body) = r.text().await {
+                    if serde_json::from_str::<Vec<Resource>>(&body).map(|v| !v.is_empty()).unwrap_or(false) {
+                        let _ = crate::store::write_atomic(&self.dir.join(file), body.as_bytes());
+                    }
                 }
             }
         }
@@ -470,5 +486,38 @@ mod tests {
         assert!(r.hide_selectors.contains("ytd-ad-slot-renderer"));
         let generic = s.class_id_selectors(&["adsbygoogle".into()], &[], &HashSet::new());
         assert!(generic.iter().any(|g| g.contains("adsbygoogle")));
+    }
+}
+
+#[cfg(test)]
+mod youtube_diag {
+    /// `NEUTRINO_ADBLOCK_DIR=<data>/adblock cargo test youtube_scriptlets -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn youtube_scriptlets() {
+        let dir = std::path::PathBuf::from(std::env::var("NEUTRINO_ADBLOCK_DIR").unwrap());
+        let read = |f: &str| -> Vec<serde_json::Value> {
+            std::fs::read_to_string(dir.join(f)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        };
+        let mut names = std::collections::HashSet::new();
+        for r in read("resources.json").iter().chain(read("ubo-resources.json").iter()) {
+            names.insert(r["name"].as_str().unwrap_or("").trim_end_matches(".js").to_string());
+            for a in r["aliases"].as_array().cloned().unwrap_or_default() {
+                names.insert(a.as_str().unwrap_or("").trim_end_matches(".js").to_string());
+            }
+        }
+        let mut missing = std::collections::BTreeMap::<String, usize>::new();
+        let mut total = 0;
+        for f in std::fs::read_dir(dir.join("lists")).unwrap() {
+            let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
+            for line in text.lines().filter(|l| l.contains("youtube.com") && l.contains("##+js(")) {
+                total += 1;
+                let name = line.split("##+js(").nth(1).unwrap().split([',', ')']).next().unwrap().trim().trim_end_matches(".js").to_string();
+                if !names.contains(&name) {
+                    *missing.entry(name).or_default() += 1;
+                }
+            }
+        }
+        println!("youtube +js rules: {total}; scriptlet names missing from resources: {missing:?}");
     }
 }
