@@ -55,25 +55,72 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
 
   const [scales, setScales] = useState<{ [id: string]: number }>({});
   const [isHoveredDock, setIsHoveredDock] = useState(false);
+  const revealedAtRef = useRef<number>(0);
+  const hideTimerRef = useRef<number | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
   useViewportOverlay(Boolean(isOnWebpage) && isHoveredDock);
-  // Entering the thin edge zone reveals the dock; if the pointer then moves away
-  // without entering the dock, no mouseleave fires on it, so un-reveal here.
+
+  const revealDock = useCallback(() => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    revealedAtRef.current = Date.now();
+    setIsHoveredDock(true);
+  }, []);
+
+  const scheduleHide = useCallback((delay = 220) => {
+    if (isAddModalOpen) return;
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+    }
+    hideTimerRef.current = window.setTimeout(() => {
+      const elapsed = Date.now() - revealedAtRef.current;
+      if (elapsed < 350) {
+        hideTimerRef.current = window.setTimeout(() => {
+          setIsHoveredDock(false);
+          hideTimerRef.current = null;
+        }, 350 - elapsed);
+      } else {
+        setIsHoveredDock(false);
+        hideTimerRef.current = null;
+      }
+    }, delay);
+  }, [isAddModalOpen]);
+
+  const cancelHide = useCallback(() => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isHoveredDock) return;
+    if (!isOnWebpage || !isHoveredDock) return;
     const onMove = (e: MouseEvent) => {
-      const rect = dockRef.current?.getBoundingClientRect();
-      const left = rect && rect.width > 0 ? rect.left : window.innerWidth - 80;
-      if (e.clientX < left - 24) setIsHoveredDock(false);
+      if (isAddModalOpen) return;
+      // Keep open if within 180px of right edge (covers track, magnified pins and tooltips)
+      const threshold = window.innerWidth - 180;
+      if (e.clientX < threshold) {
+        scheduleHide();
+      } else {
+        cancelHide();
+      }
     };
-    const onBlur = () => setIsHoveredDock(false);
+    const onBlur = () => {
+      if (!isAddModalOpen) scheduleHide();
+    };
     window.addEventListener('mousemove', onMove, { passive: true });
     window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('blur', onBlur);
+      if (hideTimerRef.current !== null) {
+        window.clearTimeout(hideTimerRef.current);
+      }
     };
-  }, [isHoveredDock]);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  }, [isOnWebpage, isHoveredDock, isAddModalOpen, scheduleHide, cancelHide]);
   const [newUrl, setNewUrl] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [hoveredPinId, setHoveredPinId] = useState<string | null>(null);
@@ -183,7 +230,8 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
       {isOnWebpage && (
         <div
           className="right-pins-edge-hover-zone"
-          onMouseEnter={() => setIsHoveredDock(true)}
+          onMouseEnter={revealDock}
+          onMouseMove={revealDock}
         />
       )}
       <aside
@@ -191,13 +239,17 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           isOnWebpage ? (isHoveredDock ? 'revealed' : 'autohidden') : ''
         }`}
         ref={dockRef}
-        onMouseEnter={() => setIsHoveredDock(true)}
+        onMouseEnter={() => {
+          cancelHide();
+          setIsHoveredDock(true);
+        }}
         onMouseMove={(e) => {
+          cancelHide();
           setIsHoveredDock(true);
           handleMouseMove(e);
         }}
         onMouseLeave={() => {
-          setIsHoveredDock(false);
+          scheduleHide();
           handleMouseLeave();
         }}
         aria-label="Pinned Websites Dock"

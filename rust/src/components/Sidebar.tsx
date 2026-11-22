@@ -283,6 +283,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // --- Auto-hide (R12.4) -----------------------------------------------------
   const [pointerX, setPointerX] = useState<number | null>(null);
   const [overSidebar, setOverSidebar] = useState(false);
+  const [autoHideRevealed, setAutoHideRevealed] = useState(false);
+  const autoHideRevealedAtRef = useRef<number>(0);
+  const autoHideTimerRef = useRef<number | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [folderMenu, setFolderMenu] = useState<FolderMenuState | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -290,10 +293,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  const isMenuOrDragOpen = menu !== null || folderMenu !== null || drag.dragging;
+
+  const revealSidebar = useCallback(() => {
+    if (autoHideTimerRef.current !== null) {
+      window.clearTimeout(autoHideTimerRef.current);
+      autoHideTimerRef.current = null;
+    }
+    autoHideRevealedAtRef.current = Date.now();
+    setAutoHideRevealed(true);
+  }, []);
+
+  const scheduleHideSidebar = useCallback((delay = 200) => {
+    if (menu !== null || folderMenu !== null || drag.dragging) return;
+    if (autoHideTimerRef.current !== null) {
+      window.clearTimeout(autoHideTimerRef.current);
+    }
+    autoHideTimerRef.current = window.setTimeout(() => {
+      const elapsed = Date.now() - autoHideRevealedAtRef.current;
+      if (elapsed < 350) {
+        autoHideTimerRef.current = window.setTimeout(() => {
+          setAutoHideRevealed(false);
+          autoHideTimerRef.current = null;
+        }, 350 - elapsed);
+      } else {
+        setAutoHideRevealed(false);
+        autoHideTimerRef.current = null;
+      }
+    }, delay);
+  }, [menu, folderMenu, drag.dragging]);
+
+  const cancelHideSidebar = useCallback(() => {
+    if (autoHideTimerRef.current !== null) {
+      window.clearTimeout(autoHideTimerRef.current);
+      autoHideTimerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!autoHide) return;
-    const onMove = (e: MouseEvent) => setPointerX(e.clientX);
-    const onLeave = () => setPointerX(null);
+    const targetWidth = (expanded ? (sidebarWidth ?? 240) : 56) + 24;
+    const onMove = (e: MouseEvent) => {
+      setPointerX(e.clientX);
+      if (e.clientX <= SIDEBAR_EDGE_PX) {
+        revealSidebar();
+      } else if (e.clientX > targetWidth && !overSidebar) {
+        scheduleHideSidebar();
+      } else {
+        cancelHideSidebar();
+      }
+    };
+    const onLeave = () => {
+      setPointerX(null);
+      scheduleHideSidebar(220);
+    };
     window.addEventListener('mousemove', onMove, { passive: true });
     document.documentElement.addEventListener('mouseleave', onLeave);
     window.addEventListener('blur', onLeave);
@@ -301,8 +354,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       window.removeEventListener('mousemove', onMove);
       document.documentElement.removeEventListener('mouseleave', onLeave);
       window.removeEventListener('blur', onLeave);
+      if (autoHideTimerRef.current !== null) {
+        window.clearTimeout(autoHideTimerRef.current);
+      }
     };
-  }, [autoHide]);
+  }, [autoHide, expanded, sidebarWidth, overSidebar, revealSidebar, scheduleHideSidebar, cancelHideSidebar]);
 
   useEffect(() => {
     if (!folderMenu) return;
@@ -322,7 +378,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // An open context menu keeps an auto-hidden sidebar visible.
   // An active drag keeps it visible too.
-  const visible = sidebarVisibility(autoHide, pointerX, overSidebar || menu !== null || folderMenu !== null || drag.dragging);
+  const targetWidth = (expanded ? (sidebarWidth ?? 240) : 56) + 24;
+  const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed;
+  const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive, targetWidth);
 
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
@@ -819,12 +877,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {autoHide && !visible && (
+      {autoHide && (
         <div
           className="nsb-edge-zone"
           aria-hidden="true"
-          onMouseEnter={(e) => setPointerX(e.clientX)}
-          onMouseMove={(e) => setPointerX(e.clientX)}
+          onMouseEnter={(e) => {
+            setPointerX(e.clientX);
+            revealSidebar();
+          }}
+          onMouseMove={(e) => {
+            setPointerX(e.clientX);
+            revealSidebar();
+          }}
         />
       )}
       <aside
@@ -836,8 +900,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           '--nsb-width-expanded': `${sidebarWidth ?? 240}px`,
           '--nsb-space-color': activeSpace?.color ?? 'var(--theme-accent)',
         } as React.CSSProperties}
-        onMouseEnter={() => setOverSidebar(true)}
-        onMouseLeave={() => setOverSidebar(false)}
+        onMouseEnter={() => {
+          cancelHideSidebar();
+          setOverSidebar(true);
+        }}
+        onMouseLeave={() => {
+          setOverSidebar(false);
+          scheduleHideSidebar();
+        }}
       >
         {expanded && (
           <div

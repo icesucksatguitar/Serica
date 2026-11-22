@@ -259,11 +259,12 @@ export function sidebarVisibility(
   autoHide: boolean,
   pointerX: number | null,
   overSidebar: boolean,
+  activeWidth: number = SIDEBAR_EDGE_PX,
 ): boolean {
   if (!autoHide) return true;
   if (overSidebar) return true;
   return (
-    pointerX !== null && Number.isFinite(pointerX) && pointerX >= 0 && pointerX <= SIDEBAR_EDGE_PX
+    pointerX !== null && Number.isFinite(pointerX) && pointerX >= 0 && pointerX <= activeWidth
   );
 }
 

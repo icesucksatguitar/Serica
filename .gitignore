@@ -30,6 +30,7 @@ env/
 
 # Agent / editor workspace files
 .kiro/
+launchvid/
 
 # OS & Temp
 Thumbs.db

@@ -6455,7 +6455,7 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
 /* Right edge hover trigger on active web pages */
 .right-pins-edge-hover-zone {
   position: fixed;
-  top: 44px;
+  top: var(--app-content-top, 44px);
   right: 0;
   bottom: 0;
   width: 6px;
@@ -6465,7 +6465,8 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
 
 .vertical-pins-dock-container {
   position: fixed;
-  right: 14px;
+  right: 0;
+  padding-right: 14px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 150;
