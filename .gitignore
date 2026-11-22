@@ -19,6 +19,7 @@ yarn-error.log*
 **/*.rs.bk
 **/Cargo.lock
 rust/src-tauri/target/
+rust/src-tauri/target-*/
 
 # Python & Cache
 **/__pycache__/
