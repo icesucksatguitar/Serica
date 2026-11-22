@@ -33,13 +33,40 @@ struct ListSource {
     trusted: bool,
 }
 
+/// Brave's default desktop filter set, from brave/adblock-resources
+/// `filter_lists/list_catalog.json` (default-enabled lists): "Brave Default
+/// Adblock Filters", "Brave Default Privacy Filters", "Brave First Party
+/// Adblock Filters" and "Cookie notice blocker". Android/iOS-only lists are left
+/// out. uBlock Origin and Brave lists may use trusted scriptlets.
 const LISTS: &[ListSource] = &[
+    ListSource { name: "ublock-filters", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt", trusted: true },
+    ListSource { name: "ublock-filters-2020", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2020.txt", trusted: true },
+    ListSource { name: "ublock-filters-2021", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2021.txt", trusted: true },
+    ListSource { name: "ublock-filters-2022", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2022.txt", trusted: true },
+    ListSource { name: "ublock-filters-2023", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2023.txt", trusted: true },
+    ListSource { name: "ublock-filters-2024", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2024.txt", trusted: true },
+    ListSource { name: "ublock-filters-2025", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2025.txt", trusted: true },
+    ListSource { name: "ublock-filters-2026", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-2026.txt", trusted: true },
+    ListSource { name: "ublock-filters-general", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters-general.txt", trusted: true },
+    ListSource { name: "ublock-badware", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt", trusted: true },
+    ListSource { name: "ublock-resource-abuse", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/resource-abuse.txt", trusted: true },
+    ListSource { name: "ublock-unbreak", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt", trusted: true },
+    ListSource { name: "ublock-quick-fixes", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt", trusted: true },
+    ListSource { name: "ublock-link-shorteners", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/ubo-link-shorteners.txt", trusted: true },
     ListSource { name: "easylist", url: "https://easylist.to/easylist/easylist.txt", trusted: false },
+    ListSource { name: "urlhaus", url: "https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-agh-online.txt", trusted: false },
+    ListSource { name: "brave-unbreak", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-unbreak.txt", trusted: true },
+    ListSource { name: "brave-specific", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-specific.txt", trusted: true },
+    ListSource { name: "brave-social", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-social.txt", trusted: true },
+    ListSource { name: "brave-lists-unbreak", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-unbreak.txt", trusted: true },
+    ListSource { name: "brave-sugarcoat", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-sugarcoat.txt", trusted: true },
     ListSource { name: "easyprivacy", url: "https://easylist.to/easylist/easyprivacy.txt", trusted: false },
-    ListSource { name: "ublock-filters", url: "https://ublockorigin.github.io/uAssets/filters/filters.txt", trusted: true },
-    ListSource { name: "ublock-privacy", url: "https://ublockorigin.github.io/uAssets/filters/privacy.txt", trusted: true },
-    ListSource { name: "ublock-unbreak", url: "https://ublockorigin.github.io/uAssets/filters/unbreak.txt", trusted: true },
-    ListSource { name: "ublock-quick-fixes", url: "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt", trusted: true },
+    ListSource { name: "ublock-privacy", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt", trusted: true },
+    ListSource { name: "brave-firstparty", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-firstparty.txt", trusted: true },
+    ListSource { name: "brave-firstparty-regional", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-firstparty-regional.txt", trusted: true },
+    ListSource { name: "fanboy-cookiemonster", url: "https://secure.fanboy.co.nz/fanboy-cookiemonster_ubo.txt", trusted: false },
+    ListSource { name: "ublock-annoyances-cookies", url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances-cookies.txt", trusted: true },
+    ListSource { name: "brave-cookie-specific", url: "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-cookie-specific.txt", trusted: true },
 ];
 
 const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock-resources/master/dist/resources.json";
@@ -295,8 +322,12 @@ impl Shields {
     }
 
     fn needs_refresh(&self) -> bool {
+        // A list added to the catalog, or scriptlets never fetched, can't wait for the next refresh.
+        let lists_dir = self.dir.join("lists");
+        let incomplete = LISTS.iter().any(|l| !lists_dir.join(format!("{}.txt", l.name)).exists())
+            || !self.dir.join("ubo-resources.json").exists();
         let info = self.info.lock();
-        info.engine != "full" || info.last_updated.map(|t| now_ms() - t > REFRESH_AFTER_MS).unwrap_or(true)
+        incomplete || info.engine != "full" || info.last_updated.map(|t| now_ms() - t > REFRESH_AFTER_MS).unwrap_or(true)
     }
 
     /// Downloads lists and rebuilds the engine on a background thread.
@@ -344,7 +375,7 @@ impl Shields {
                     None
                 }
             };
-            let text = match fetched.filter(|t| t.len() > 1000) {
+            let text = match fetched.filter(|t| !t.trim().is_empty() && !t.trim_start().starts_with('<')) {
                 Some(t) => {
                     let _ = crate::store::write_atomic(&path, t.as_bytes());
                     t
