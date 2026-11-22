@@ -413,7 +413,8 @@ const MEDIA_STATE_JS: &str = r#"(() => {
   const d = m.duration;
   const live = d === Infinity || isNaN(d);
   return { hasVideo: m.tagName === 'VIDEO', isPlaying: !m.paused && !m.ended, currentTime: m.currentTime || 0,
-           duration: live ? 0 : (d || 0), volume: m.muted ? 0 : (m.volume ?? 1), tabTitle: document.title || 'Media' };
+           duration: live ? 0 : (d || 0), volume: m.muted ? 0 : (m.volume ?? 1), tabTitle: document.title || 'Media',
+           inPip: !!document.pictureInPictureElement };
 })()"#;
 
 #[tauri::command]
@@ -436,6 +437,14 @@ pub async fn media_control(tab_id: String, action: String, value: Option<f64>, a
         ("play", _) => "m.play();".to_string(),
         ("pause", _) => "m.pause();".to_string(),
         ("toggle", _) => "if (m.paused) m.play(); else m.pause();".to_string(),
+        ("pip", _) => {
+            let _ = wv.eval(crate::tabhost::PIP_ENTER_JS);
+            return Ok(());
+        }
+        ("exit-pip", _) => {
+            let _ = wv.eval(crate::tabhost::PIP_EXIT_JS);
+            return Ok(());
+        }
         ("seek", Some(v)) if v.is_finite() => format!("m.currentTime = {};", v.max(0.0)),
         ("volume", Some(v)) if v.is_finite() => format!("m.muted = false; m.volume = {};", v.clamp(0.0, 1.0)),
         ("mute", _) => {

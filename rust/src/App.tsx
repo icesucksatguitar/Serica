@@ -891,9 +891,11 @@ const handleVpnCheckIp = useCallback(async () => {
   }
 }, []);
 
+// The controls panel stands in for the video; hide it while the video has its own PiP window.
 const shouldShowMiniPlayer =
   activeMediaState &&
   activeMediaState.isPlaying &&
+  !activeMediaState.inPip &&
   activeMediaState.tabId !== state.activeTabId;
 
 // Command_Bar submission: in new-tab mode (Ctrl+T / sidebar new tab control) a URL or search
@@ -1291,6 +1293,9 @@ return (
           onVolume={handleMediaVolume}
           onGoToTab={handleGoToMediaTab}
           onClose={handleCloseMediaPlayer}
+          onPictureInPicture={() =>
+            setMediaCommand({ action: 'pip', tabId: activeMediaState!.tabId, timestamp: Date.now() })
+          }
           dockOverPage={isWebpage}
         />
       </Suspense>

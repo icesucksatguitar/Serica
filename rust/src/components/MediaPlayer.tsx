@@ -3,6 +3,7 @@ import {
   Volume2,
   VolumeX,
   ExternalLink,
+  PictureInPicture2,
   GripHorizontal,
   Video,
   Music,
@@ -20,6 +21,8 @@ interface MediaPlayerProps {
   onVolume: (vol: number) => void;
   onGoToTab: (tabId: string) => void;
   onClose: () => void;
+  /** Pops the video out into a native picture-in-picture window. */
+  onPictureInPicture?: () => void;
   /** Over a live web page the player docks bottom-right and the page shrinks to make room. */
   dockOverPage?: boolean;
 }
@@ -33,6 +36,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   onVolume,
   onGoToTab,
   onClose,
+  onPictureInPicture,
   dockOverPage = false,
 }) => {
   const [corner, setCorner] = useState<Corner>('bottom-right');
@@ -167,6 +171,16 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
         </div>
 
         <div className="media-header-actions" onPointerDown={(e) => e.stopPropagation()}>
+          {mediaState.hasVideo && onPictureInPicture && (
+            <button
+              className="media-header-btn"
+              onClick={onPictureInPicture}
+              title="Pop out video (picture-in-picture)"
+              aria-label="Pop out video"
+            >
+              <PictureInPicture2 size={13} />
+            </button>
+          )}
           {/* Go back to tab button */}
           <button
             className="media-header-btn"
@@ -188,10 +202,17 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
       {/* Video / Graphic Screen */}
       <div className="media-video-container">
-        <div className="media-placeholder-graphic">
-          {mediaState.hasVideo ? <Video size={28} /> : <Music size={28} />}
-          <span>{mediaState.isPlaying ? 'Media Playing in Background' : 'Media Paused'}</span>
-        </div>
+        {mediaState.hasVideo && onPictureInPicture ? (
+          <button type="button" className="media-placeholder-graphic media-popout-target" onClick={onPictureInPicture}>
+            <PictureInPicture2 size={28} />
+            <span>Pop out video</span>
+          </button>
+        ) : (
+          <div className="media-placeholder-graphic">
+            {mediaState.hasVideo ? <Video size={28} /> : <Music size={28} />}
+            <span>{mediaState.isPlaying ? 'Media Playing in Background' : 'Media Paused'}</span>
+          </div>
+        )}
       </div>
 
       {/* Controls Body */}

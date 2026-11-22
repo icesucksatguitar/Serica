@@ -11020,3 +11020,23 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   height: 32px;
   border-radius: var(--radius-full);
 }
+
+/* Media controls: the video area pops the video out into picture-in-picture. */
+.media-popout-target {
+  width: 100%;
+  height: 100%;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.media-popout-target:hover,
+.media-popout-target:focus-visible {
+  color: var(--theme-fg, var(--text-main));
+  background: color-mix(in srgb, var(--theme-fg, #fff) 6%, transparent);
+  outline: none;
+}

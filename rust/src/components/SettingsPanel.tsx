@@ -542,6 +542,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="settings-divider" />
 
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">Video mini player</span>
+                      <span className="settings-hint">
+                        Keep watching in a floating picture-in-picture window when you switch away from a playing video
+                      </span>
+                    </div>
+                    <SettingsSwitch
+                      checked={settings.autoPictureInPicture}
+                      label="Video mini player"
+                      onChange={(next) => onUpdateSettings({ autoPictureInPicture: next })}
+                    />
+                  </div>
+
+                  <div className="settings-divider" />
+
                   <div className="settings-row-text" style={{ marginTop: 4 }}>
                     <span className="settings-row-label">Archive tabs after</span>
                     <span className="settings-hint">{ARCHIVE_INTERVAL_HINT}</span>

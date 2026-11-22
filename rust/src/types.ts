@@ -118,6 +118,8 @@ export interface ActiveMediaState {
   duration: number;
   volume: number;
   hasVideo: boolean;
+  /** The tab's video is showing in a native picture-in-picture window. */
+  inPip?: boolean;
 }
 
 export interface ShieldStats {

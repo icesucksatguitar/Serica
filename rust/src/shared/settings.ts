@@ -74,6 +74,8 @@ export function resolveReducedEffectsActive(
 export interface BrowserSettings {
   adblockEnabled: boolean;
   zenSleepEnabled: boolean;
+  /** Pop a playing video into picture-in-picture when switching away from its tab. */
+  autoPictureInPicture: boolean;
   searchEngine: SearchEngineId;
   reducedEffectsMode?: ReducedEffectsMode;
   spaceThemes?: SpaceThemesMap;
@@ -95,6 +97,7 @@ export const ARCHIVE_INTERVAL_OPTIONS: readonly ArchiveIntervalHours[] = Object.
 export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   adblockEnabled: true,
   zenSleepEnabled: true,
+  autoPictureInPicture: true,
   searchEngine: 'google' as SearchEngineId,
   reducedEffectsMode: 'auto' as ReducedEffectsMode,
   archiveIntervalHours: 12 as ArchiveIntervalHours,
@@ -206,6 +209,10 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     adblockEnabled: typeof source.adblockEnabled === 'boolean' ? source.adblockEnabled : DEFAULT_SETTINGS.adblockEnabled,
     zenSleepEnabled:
       typeof source.zenSleepEnabled === 'boolean' ? source.zenSleepEnabled : DEFAULT_SETTINGS.zenSleepEnabled,
+    autoPictureInPicture:
+      typeof source.autoPictureInPicture === 'boolean'
+        ? source.autoPictureInPicture
+        : DEFAULT_SETTINGS.autoPictureInPicture,
     searchEngine: normalizeSearchEngine(source.searchEngine),
     reducedEffectsMode: normalizeReducedEffectsMode(source.reducedEffectsMode),
     spaceThemes: buildSpaceThemes(source.spaceThemes, source),

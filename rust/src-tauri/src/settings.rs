@@ -55,6 +55,9 @@ pub struct BrowserSettings {
     pub sidebar_auto_hide: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f64,
+    /// Pop a playing video into picture-in-picture when switching away from its tab.
+    #[serde(default = "yes")]
+    pub auto_picture_in_picture: bool,
     /// Local MCP endpoint for external agents (off by default).
     #[serde(default)]
     pub mcp_server_enabled: bool,
@@ -125,6 +128,7 @@ impl BrowserSettings {
             ("sidebarAutoHide", Value::is_boolean),
             ("sidebarWidth", Value::is_number),
             ("mcpServerEnabled", Value::is_boolean),
+            ("autoPictureInPicture", Value::is_boolean),
             ("mcpServerPort", Value::is_u64),
         ];
         for (key, ok) in typed {

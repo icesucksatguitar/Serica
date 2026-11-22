@@ -278,6 +278,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
               duration: res.duration,
               volume: res.volume,
               hasVideo: res.hasVideo,
+              inPip: Boolean((res as { inPip?: boolean }).inPip),
             }
           : null,
       );

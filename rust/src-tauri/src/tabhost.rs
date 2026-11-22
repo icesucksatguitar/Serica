@@ -36,6 +36,31 @@ pub struct TabView {
     pub shown: bool,
 }
 
+/// Puts the largest playing video into native picture-in-picture.
+pub const PIP_ENTER_JS: &str = r#"(() => {
+  if (document.pictureInPictureElement || !document.pictureInPictureEnabled) return false;
+  const vs = Array.from(document.querySelectorAll('video')).filter((v) => !v.paused && !v.ended && v.readyState >= 2 && !v.disablePictureInPicture);
+  if (!vs.length) return false;
+  vs.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
+  const v = vs[0];
+  if (v.clientWidth * v.clientHeight < 200 * 112) return false;
+  v.requestPictureInPicture().catch(() => {});
+  return true;
+})()"#;
+
+/// Brings a picture-in-picture video back into its page. Runs right as the tab
+/// is shown, so it waits until the document is actually visible.
+pub const PIP_EXIT_JS: &str = r#"(() => {
+  const exit = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); };
+  if (document.visibilityState === 'visible') { exit(); return; }
+  const onVisible = () => {
+    if (document.visibilityState !== 'visible') return;
+    document.removeEventListener('visibilitychange', onVisible);
+    exit();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+})()"#;
+
 pub struct TabHost {
     pub views: HashMap<String, TabView>,
     pub bounds: Option<Bounds>,
@@ -189,15 +214,16 @@ impl TabHost {
             url: String,
             live: bool,
             profile: String,
+            media: bool,
         }
-        let (wants, active): (HashMap<String, Want>, Option<String>) = {
+        let (wants, active, auto_pip): (HashMap<String, Want>, Option<String>, bool) = {
             let s = app.store.lock();
             let wants = s
                 .tabs
                 .iter()
-                .map(|t| (t.id.clone(), Want { url: t.url.clone(), live: t.wants_webview(), profile: s.space_profile(&t.space_id) }))
+                .map(|t| (t.id.clone(), Want { url: t.url.clone(), live: t.wants_webview(), profile: s.space_profile(&t.space_id), media: t.has_active_media }))
                 .collect();
-            (wants, s.active_tab_id.clone())
+            (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture)
         };
         let mut host = app.host.lock();
 
@@ -245,11 +271,17 @@ impl TabHost {
                 if !v.shown {
                     let _ = v.webview.show();
                     v.shown = true;
+                    // Returning to a tab brings its mini-player video back into the page.
+                    let _ = v.webview.eval(PIP_EXIT_JS);
                 }
             } else if v.shown {
                 // Snapshot the page we're leaving for hover previews.
                 if previous.as_ref() == Some(id) {
                     previews_to_capture.push((id.clone(), v.webview.clone()));
+                    // Leaving a playing video: keep watching it in a mini player.
+                    if auto_pip && wants.get(id).map(|w| w.media).unwrap_or(false) {
+                        let _ = v.webview.eval(PIP_ENTER_JS);
+                    }
                 }
                 let _ = v.webview.hide();
                 v.shown = false;
