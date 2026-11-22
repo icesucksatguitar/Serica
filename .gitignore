@@ -1,14 +1,11 @@
 # ==============================================================================
 # Neutrino Browser - Git Ignore (Root)
-# Covers both electron/ and rust/ (Tauri) workspaces
 # ==============================================================================
 
-# Node / Electron / Web Frontend
+# Node / Web Frontend
 **/node_modules/
 **/dist/
 **/dist-*/
-**/dist-renderer/
-**/dist-main/
 **/release/
 **/out/
 **/.vite/
@@ -22,8 +19,6 @@ yarn-error.log*
 **/*.rs.bk
 **/Cargo.lock
 rust/src-tauri/target/
-native/target/
-electron/native/target/
 
 # Python & Cache
 **/__pycache__/
@@ -32,6 +27,9 @@ electron/native/target/
 venv/
 env/
 
+# Agent / editor workspace files
+.kiro/
+
 # OS & Temp
 Thumbs.db
 [Dd]esktop.ini
@@ -39,7 +37,6 @@ Thumbs.db
 *.tmp
 *.temp
 scratch/
-electron/scratch/
 rust/scratch/
 **/tests/*.png
 

@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-NEUTRINO BROWSER - UNIFIED MULTI-ENVIRONMENT BUILD & RELEASE ORCHESTRATOR
+NEUTRINO BROWSER - BUILD & RELEASE SCRIPT
 ==============================================================================
-Builds, versions, and packages both the Electron and Rust (Tauri v2) releases
-into a unified root release directory:
+Builds, versions, and stages the Rust (Tauri v2) release:
 
   release/
-  ├── electron/        <- Packaged standalone Windows Electron application
-  ├── rust/            <- Packaged standalone Windows Tauri/Rust application
-  └── manifest.json    <- Live manifest recording current versions & timestamps
+  ├── rust/            <- Standalone Windows executable (Neutrino.exe) + icons
+  └── manifest.json    <- Current version, size and build time
 
 Usage:
-  python build.py --env [rust|electron|all] --bump [major|minor|patch|none]
-  python build.py -e rust -b patch
-  python build.py -e electron -b minor
-  python build.py --env all --bump patch --clean
+  python build.py --bump [major|minor|patch|none] [--clean] [--run]
+  python build.py -b patch
 """
 
 import os
@@ -32,11 +28,14 @@ from pathlib import Path
 if os.name == "nt":
     os.system("")
 
+cargo_bin_dir = Path.home() / ".cargo" / "bin"
+if cargo_bin_dir.exists() and str(cargo_bin_dir) not in os.environ.get("PATH", ""):
+    sep = ";" if os.name == "nt" else ":"
+    os.environ["PATH"] = f"{cargo_bin_dir}{sep}{os.environ.get('PATH', '')}"
+
 ROOT_DIR = Path(__file__).resolve().parent
-ELECTRON_DIR = ROOT_DIR / "electron"
 RUST_DIR = ROOT_DIR / "rust"
 RELEASE_DIR = ROOT_DIR / "release"
-ELECTRON_RELEASE_DIR = RELEASE_DIR / "electron"
 RUST_RELEASE_DIR = RELEASE_DIR / "rust"
 MANIFEST_FILE = RELEASE_DIR / "manifest.json"
 
@@ -113,42 +112,6 @@ def bump_semver(ver_str: str, bump_type: str) -> str:
     elif bump_type == "patch":
         return f"{major}.{minor}.{patch + 1}"
     raise ValueError(f"Unknown bump type: {bump_type}")
-
-
-def get_electron_version() -> str:
-    pkg_path = ELECTRON_DIR / "package.json"
-    if not pkg_path.exists():
-        return "0.0.0"
-    with open(pkg_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("version", "0.0.0")
-
-
-def set_electron_version(new_ver: str):
-    # 1. electron/package.json
-    pkg_path = ELECTRON_DIR / "package.json"
-    if pkg_path.exists():
-        with open(pkg_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data["version"] = new_ver
-        with open(pkg_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
-
-    # 2. electron/package-lock.json
-    lock_path = ELECTRON_DIR / "package-lock.json"
-    if lock_path.exists():
-        try:
-            with open(lock_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            data["version"] = new_ver
-            if "packages" in data and "" in data["packages"]:
-                data["packages"][""]["version"] = new_ver
-            with open(lock_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.write("\n")
-        except Exception as e:
-            log_warn(f"Failed to update electron/package-lock.json: {e}")
 
 
 def get_rust_version() -> str:
@@ -251,90 +214,6 @@ def update_manifest(env_name: str, version: str, exe_rel_path: str, size_bytes: 
 
 
 # ==============================================================================
-# Electron Build & Packaging
-# ==============================================================================
-
-def build_electron(bump_type: str, clean: bool = False) -> bool:
-    log_header("BUILDING ELECTRON ENVIRONMENT")
-    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-
-    # Version Handling
-    current_ver = get_electron_version()
-    new_ver = bump_semver(current_ver, bump_type)
-    if new_ver != current_ver:
-        log_info(f"Incrementing Electron version: {BOLD}{current_ver}{RESET} -> {GREEN}{BOLD}{new_ver}{RESET}")
-        set_electron_version(new_ver)
-    else:
-        log_info(f"Electron version: {BOLD}{current_ver}{RESET} (no change)")
-
-    if clean:
-        log_info("Cleaning previous Electron build artifacts...")
-        shutil.rmtree(ELECTRON_DIR / "dist-main", ignore_errors=True)
-        shutil.rmtree(ELECTRON_DIR / "dist-renderer", ignore_errors=True)
-        shutil.rmtree(ELECTRON_DIR / "release", ignore_errors=True)
-        shutil.rmtree(ELECTRON_RELEASE_DIR, ignore_errors=True)
-
-    # 1. Compile Main & Renderer
-    log_info("Compiling Vite renderer & TypeScript main process...")
-    if not run_cmd([npm_cmd, "run", "build"], cwd=ELECTRON_DIR):
-        log_error("Electron build (vite + tsc) failed.")
-        return False
-
-    # 2. Package standalone bundle
-    log_info("Packaging standalone Windows Electron application...")
-    pack_ok = run_cmd([npm_cmd, "run", "package"], cwd=ELECTRON_DIR)
-
-    # 3. Stage into unified root release/electron
-    src_pack_dir = ELECTRON_DIR / "release" / "Neutrino-win32-x64"
-    if not src_pack_dir.exists():
-        src_pack_dir = ROOT_DIR / "release" / "Neutrino-win32-x64"
-
-    if not pack_ok:
-        if src_pack_dir.exists():
-            log_warn("electron-packager could not query external prebuilts (offline/sandbox).")
-            log_info(f"Using existing packaged template at {src_pack_dir} and syncing freshly compiled app code...")
-            app_dir = src_pack_dir / "resources" / "app"
-            if app_dir.exists():
-                shutil.copytree(ELECTRON_DIR / "dist-main", app_dir / "dist-main", dirs_exist_ok=True)
-                shutil.copytree(ELECTRON_DIR / "dist-renderer", app_dir / "dist-renderer", dirs_exist_ok=True)
-                pkg_src = ELECTRON_DIR / "package.json"
-                if pkg_src.exists():
-                    shutil.copy2(pkg_src, app_dir / "package.json")
-                log_success("Updated existing standalone bundle with latest compiled app code.")
-        else:
-            log_error("electron-packager failed and no existing packaged bundle was found.")
-            return False
-
-    if not src_pack_dir.exists():
-        log_error(f"Could not locate packaged output at {src_pack_dir}")
-        return False
-
-    ELECTRON_RELEASE_DIR.mkdir(parents=True, exist_ok=True)
-    log_info(f"Staging Electron release to {ELECTRON_RELEASE_DIR}...")
-    
-    # Sync files into release/electron/
-    for item in src_pack_dir.iterdir():
-        dest = ELECTRON_RELEASE_DIR / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, dest)
-
-    exe_path = ELECTRON_RELEASE_DIR / "Neutrino.exe"
-    if not exe_path.exists():
-        log_error(f"Expected executable not found at {exe_path}")
-        return False
-
-    size_bytes = exe_path.stat().st_size
-    log_success(f"Electron release packaged successfully!")
-    log_success(f"Executable: {BOLD}{exe_path}{RESET} ({round(size_bytes / (1024 * 1024), 2)} MB)")
-
-    rel_exe = str(exe_path.relative_to(ROOT_DIR))
-    update_manifest("electron", new_ver, rel_exe, size_bytes)
-    return True
-
-
-# ==============================================================================
 # Rust (Tauri v2) Build & Packaging
 # ==============================================================================
 
@@ -363,8 +242,11 @@ def build_rust(bump_type: str, clean: bool = False) -> bool:
         return False
 
     # 2. Build Rust native core via Cargo
-    log_info("Building Rust native binary (cargo build --release)...")
-    cargo_cmd = ["cargo", "build", "--release"]
+    log_info("Building Rust native binary (cargo build --release --features custom-protocol)...")
+    cargo_bin = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / ("cargo.exe" if os.name == "nt" else "cargo"))
+    # Without `custom-protocol` the exe loads the UI from the Vite dev server
+    # (devUrl) and shows a blank window when it is not running.
+    cargo_cmd = [cargo_bin, "build", "--release", "--features", "custom-protocol"]
     cargo_cwd = RUST_DIR / "src-tauri"
     if not run_cmd(cargo_cmd, cwd=cargo_cwd):
         log_error("Cargo release build failed.")
@@ -440,7 +322,6 @@ def launch_release(env_name: str):
         return False
     log_info(f"Launching {env_name} release: {exe_path}")
     env = os.environ.copy()
-    env.pop("ELECTRON_RUN_AS_NODE", None)
     subprocess.Popen([str(exe_path)], env=env)
     return True
 
@@ -451,21 +332,14 @@ def launch_release(env_name: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Neutrino Browser - Unified Multi-Environment Build Orchestrator",
+        description="Neutrino Browser - build and stage the Rust (Tauri v2) release",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python build.py --env rust --bump none
-  python build.py --env electron --bump patch
-  python build.py --env all --bump minor --clean
-  python build.py --env rust --run
+  python build.py --bump none
+  python build.py --bump patch --clean
+  python build.py --run
         """
-    )
-    parser.add_argument(
-        "-e", "--env",
-        choices=["rust", "electron", "all", "both"],
-        default="all",
-        help="Target environment to build (rust, electron, or all/both). Default: all"
     )
     parser.add_argument(
         "-b", "--bump",
@@ -481,41 +355,26 @@ Examples:
     parser.add_argument(
         "--run",
         action="store_true",
-        help="Launch the target application after successful build"
+        help="Launch the application after a successful build"
     )
 
     args = parser.parse_args()
 
-    # Normalize env choice
-    target_env = "all" if args.env in ("all", "both") else args.env
-
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
-    print(f"{BOLD}{MAGENTA}       NEUTRINO BROWSER - MULTI-ENVIRONMENT BUILD SYSTEM        {RESET}")
+    print(f"{BOLD}{MAGENTA}              NEUTRINO BROWSER - BUILD SYSTEM                   {RESET}")
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
-    log_info(f"Target Environment: {BOLD}{target_env.upper()}{RESET}")
     log_info(f"Version Bump Mode : {BOLD}{args.bump.upper()}{RESET}")
     log_info(f"Clean Build       : {BOLD}{args.clean}{RESET}")
 
-    success = True
-
-    if target_env in ("electron", "all"):
-        if not build_electron(args.bump, args.clean):
-            success = False
-
-    if target_env in ("rust", "all"):
-        if not build_rust(args.bump, args.clean):
-            success = False
-
-    if success:
-        print_summary()
-        log_success("All requested build operations completed successfully!")
-        if args.run:
-            launch_env = "rust" if target_env == "rust" else "electron"
-            launch_release(launch_env)
-        return 0
-    else:
-        log_error("Build operations encountered errors.")
+    if not build_rust(args.bump, args.clean):
+        log_error("Build failed.")
         return 1
+
+    print_summary()
+    log_success("Build completed successfully!")
+    if args.run:
+        launch_release("rust")
+    return 0
 
 
 if __name__ == "__main__":
