@@ -7,6 +7,7 @@ import { selectSpaceByIndex } from './shared/layout';
 import { FloatingUrlPill } from './components/FloatingUrlPill';
 import { BrowserViewport } from './components/BrowserViewport';
 import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
+import { TopTabStrip } from './components/TopTabStrip';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile } from './components/WelcomeModal';
@@ -224,13 +225,14 @@ export function App() {
     }
   });
 
-  const handleWelcomeComplete = (profile: UserProfile) => {
+  const handleWelcomeComplete = (profile: UserProfile, prefs?: { tabLayout: 'sidebar' | 'top' }) => {
     setUserProfile(profile);
     setIsWelcomeOpen(false);
     void updateSettings({
       userProfile: profile,
       onboardingCompleted: true,
       theme: isDarkMode ? 'dark' : 'light',
+      tabLayout: prefs?.tabLayout ?? 'sidebar',
     });
   };
 
@@ -913,8 +915,11 @@ const handleCommandBarNavigate = (url: string) => {
 const activeTabInSpace = activeTab && activeTab.spaceId === state.activeSpaceId ? activeTab : undefined;
 const activeProfilePartition = activeTabInSpace?.partition ?? activeProfile?.partition;
 
+// Tab layout: Arc-style sidebar (default) or a horizontal strip under the top bar.
+const topTabs = settings.tabLayout === 'top';
+const showTopTabs = topTabs && !isHtmlFullscreen;
 // Sidebar placement: docked (not auto-hide) pushes the web canvas right; hidden in HTML fullscreen.
-const showSidebar = !isHtmlFullscreen;
+const showSidebar = !isHtmlFullscreen && !topTabs;
 const sidebarAutoHide = settings.sidebarAutoHide;
 const isSidebarDocked = showSidebar && !sidebarAutoHide;
 
@@ -949,14 +954,28 @@ useViewportOverlay(
 const shellStyle = {
   '--app-sidebar-width': isSidebarDocked ? (sidebarExpanded ? `${sidebarWidth}px` : '56px') : '0px',
   '--app-top-offset': isWebpage ? '44px' : '60px',
+  // Where the page starts on web pages: below the top bar, plus the tab strip in top-tabs mode.
+  '--app-content-top': showTopTabs ? '82px' : '44px',
 } as React.CSSProperties;
 
 return (
-  <div className="arc-app-shell radical-minimalism-shell" style={shellStyle}>
+  <div className={`arc-app-shell radical-minimalism-shell${showTopTabs ? ' top-tabs-mode' : ''}`} style={shellStyle}>
     <div className="space-grain-overlay" aria-hidden="true" />
     {/* Frameless Top Drag Bar */}
     {!isHtmlFullscreen && (
       <div className={`macos-window-drag-bar ${isWebpage ? 'on-webpage' : ''}`} />
+    )}
+
+    {showTopTabs && (
+      <TopTabStrip
+        state={state}
+        onWebpage={isWebpage}
+        tint={isWebpage && isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : undefined}
+        onSelectTab={(id) => browser.selectTab(id)}
+        onCloseTab={(id) => closeTab(id)}
+        onSelectSpace={handleSelectSpace}
+        onNewTab={openNewTabCommandBar}
+      />
     )}
 
     {/* Arc-style Sidebar: favorites, pinned, Today and Space_Switcher (R12.1) */}
@@ -1017,7 +1036,8 @@ return (
           </button>
         </div>
 
-        {/* Dedicated Spaces & Tabs Toggle Pill (Opaque) */}
+        {/* Dedicated Spaces & Tabs Toggle Pill (Opaque); top-tabs mode shows spaces in the strip */}
+        {!topTabs && (
         <button
           className={`macos-tabs-toggle-pill ${sidebarExpanded ? 'active' : ''}`}
           onClick={toggleSidebar}
@@ -1042,6 +1062,7 @@ return (
             {currentSpaceTabs.length}
           </span>
         </button>
+        )}
 
         {/* Compact Site Navigation Controls */}
         <div className="site-nav-controls" role="group" aria-label="Site controls">

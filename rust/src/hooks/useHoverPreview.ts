@@ -14,7 +14,7 @@ import type { SidebarItemRef } from '../utils/sidebarModel';
 export interface HoverPreview {
   state: HoverPreviewState | null;
   /** Mouse handlers for a sidebar item; they never prevent default, so drag handlers still run. */
-  itemProps: (item: SidebarItemRef) => {
+  itemProps: (item: SidebarItemRef, placement?: 'side' | 'below') => {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) => void;
     onMouseLeave: () => void;
     onPointerDown: () => void;
@@ -48,10 +48,10 @@ export function useHoverPreview(suppressed: boolean): HoverPreview {
   }, [ctrl]);
 
   const itemProps = useCallback(
-    (item: SidebarItemRef) => ({
+    (item: SidebarItemRef, placement?: 'side' | 'below') => ({
       onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
         const r = e.currentTarget.getBoundingClientRect();
-        ctrl.enterItem(previewTargetFor(item, { top: r.top, bottom: r.bottom, left: r.left, right: r.right }));
+        ctrl.enterItem(previewTargetFor(item, { top: r.top, bottom: r.bottom, left: r.left, right: r.right, placement }));
       },
       onMouseLeave: () => ctrl.leaveItem(),
       // A press (click or drag start) closes the card.

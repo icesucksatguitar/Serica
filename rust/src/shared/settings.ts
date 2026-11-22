@@ -71,11 +71,15 @@ export function resolveReducedEffectsActive(
   return Boolean(gpuDisabledFlag) || isSoftwareGpuStatus(gpuStatus);
 }
 
+export type TabLayout = 'sidebar' | 'top';
+
 export interface BrowserSettings {
   adblockEnabled: boolean;
   zenSleepEnabled: boolean;
   /** Pop a playing video into picture-in-picture when switching away from its tab. */
   autoPictureInPicture: boolean;
+  /** Vertical sidebar with hover previews, or a horizontal strip of tabs under the top bar. */
+  tabLayout: TabLayout;
   searchEngine: SearchEngineId;
   reducedEffectsMode?: ReducedEffectsMode;
   spaceThemes?: SpaceThemesMap;
@@ -98,6 +102,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   adblockEnabled: true,
   zenSleepEnabled: true,
   autoPictureInPicture: true,
+  tabLayout: 'sidebar' as TabLayout,
   searchEngine: 'google' as SearchEngineId,
   reducedEffectsMode: 'auto' as ReducedEffectsMode,
   archiveIntervalHours: 12 as ArchiveIntervalHours,
@@ -213,6 +218,7 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
       typeof source.autoPictureInPicture === 'boolean'
         ? source.autoPictureInPicture
         : DEFAULT_SETTINGS.autoPictureInPicture,
+    tabLayout: source.tabLayout === 'top' ? 'top' : 'sidebar',
     searchEngine: normalizeSearchEngine(source.searchEngine),
     reducedEffectsMode: normalizeReducedEffectsMode(source.reducedEffectsMode),
     spaceThemes: buildSpaceThemes(source.spaceThemes, source),

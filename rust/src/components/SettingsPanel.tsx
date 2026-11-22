@@ -1,6 +1,8 @@
 import React, { useEffect, useId, useState } from 'react';
 import {
   Puzzle,
+  PanelLeft,
+  PanelTop,
   X,
   Moon,
   Sun,
@@ -336,6 +338,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <Sun size={13} aria-hidden="true" />
                         Light
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-divider" />
+
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">Tab layout</span>
+                      <span className="settings-hint">Vertical sidebar with hover previews, or tabs along the top</span>
+                    </div>
+                    <div className="settings-segmented" role="radiogroup" aria-label="Tab layout">
+                      {([
+                        ['sidebar', 'Sidebar', PanelLeft],
+                        ['top', 'Top tabs', PanelTop],
+                      ] as const).map(([value, label, Icon]) => {
+                        const active = (settings.tabLayout ?? 'sidebar') === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            aria-label={label}
+                            className={`settings-segment${active ? ' active' : ''}`}
+                            onClick={() => {
+                              if (!active) onUpdateSettings({ tabLayout: value });
+                            }}
+                          >
+                            <Icon size={13} aria-hidden="true" />
+                            {label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 

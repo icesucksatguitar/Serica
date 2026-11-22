@@ -9,10 +9,34 @@ export interface UserProfile {
   mode: 'minimal' | 'architect';
 }
 
+export type WelcomeTabLayout = 'sidebar' | 'top';
+
 interface WelcomeModalProps {
   isOpen: boolean;
-  onComplete: (profile: UserProfile) => void;
+  onComplete: (profile: UserProfile, prefs: { tabLayout: WelcomeTabLayout }) => void;
 }
+
+/** Tiny diagram of a browser window for the tab-layout choice. */
+const LayoutDiagram: React.FC<{ layout: WelcomeTabLayout }> = ({ layout }) => (
+  <div className={`welcome-layout-diagram ${layout}`} aria-hidden="true">
+    <div className="wld-topbar" />
+    {layout === 'top' ? (
+      <div className="wld-tabs">
+        <span className="active" />
+        <span />
+        <span />
+      </div>
+    ) : (
+      <div className="wld-sidebar">
+        <span className="active" />
+        <span />
+        <span />
+        <span />
+      </div>
+    )}
+    <div className="wld-page" />
+  </div>
+);
 
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }) => {
   const [step, setStep] = useState<1 | 2>(1);
@@ -21,6 +45,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }
   const [email, setEmail] = useState('');
   const [theme, setTheme] = useState<'obsidian' | 'charcoal' | 'slate'>('obsidian');
   const [mode, setMode] = useState<'minimal' | 'architect'>('minimal');
+  const [tabLayout, setTabLayout] = useState<WelcomeTabLayout>('sidebar');
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
@@ -62,7 +87,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }
       localStorage.setItem('neutrino_theme_variant', theme);
     } catch {}
 
-    onComplete(profile);
+    onComplete(profile, { tabLayout });
   };
 
   return (
@@ -227,6 +252,37 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }
                   </div>
                   {theme === 'slate' && <Check size={14} className="theme-check" />}
                 </div>
+              </div>
+
+              {/* Tab layout (changeable later in Settings -> Appearance) */}
+              <div className="welcome-section-label" style={{ marginTop: '16px' }}>Tabs</div>
+              <div className="welcome-layout-grid" role="radiogroup" aria-label="Tab layout">
+                {([
+                  ['sidebar', 'Sidebar', 'Vertical tabs with hover previews'],
+                  ['top', 'Top tabs', 'A classic tab strip above the page'],
+                ] as const).map(([value, title, desc]) => (
+                  <div
+                    key={value}
+                    role="radio"
+                    aria-checked={tabLayout === value}
+                    tabIndex={0}
+                    className={`welcome-layout-card ${tabLayout === value ? 'selected' : ''}`}
+                    onClick={() => setTabLayout(value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setTabLayout(value);
+                      }
+                    }}
+                  >
+                    <LayoutDiagram layout={value} />
+                    <div>
+                      <div className="mode-title">{title}</div>
+                      <div className="mode-desc">{desc}</div>
+                    </div>
+                    {tabLayout === value && <Check size={14} className="theme-check" />}
+                  </div>
+                ))}
               </div>
 
               {/* Layout Mode */}

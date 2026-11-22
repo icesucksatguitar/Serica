@@ -29,6 +29,8 @@ export interface AnchorRect {
   bottom: number;
   left: number;
   right: number;
+  /** Where the card goes: beside the anchor (sidebar, default) or below it (top tab strip). */
+  placement?: 'side' | 'below';
 }
 
 export interface PreviewTarget {
@@ -98,6 +100,13 @@ export function previewCardPosition(
   viewport: { width: number; height: number },
   size: { width: number; height: number } = { width: PREVIEW_CARD_WIDTH, height: PREVIEW_CARD_HEIGHT },
 ): { left: number; top: number } {
+  const maxLeft = Math.max(VIEWPORT_MARGIN, viewport.width - size.width - VIEWPORT_MARGIN);
+  if (anchor.placement === 'below') {
+    return {
+      left: Math.min(Math.max(VIEWPORT_MARGIN, anchor.left), maxLeft),
+      top: Math.max(VIEWPORT_MARGIN, anchor.bottom + CARD_GAP),
+    };
+  }
   let left = anchor.right + CARD_GAP;
   if (left + size.width > viewport.width - VIEWPORT_MARGIN) {
     left = Math.max(VIEWPORT_MARGIN, anchor.left - CARD_GAP - size.width);

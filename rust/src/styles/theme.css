@@ -5642,8 +5642,8 @@ input:focus-visible {
 
 /* Offset web canvas below top header so window controls & tabs never collide with website navigation */
 .arc-viewport-container.edge-to-edge.with-site-top-offset {
-  top: 44px;
-  height: calc(100vh - 44px);
+  top: var(--app-content-top, 44px);
+  height: calc(100vh - var(--app-content-top, 44px));
 }
 
 .arc-web-canvas-frame.seamless {
@@ -11039,4 +11039,324 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   color: var(--theme-fg, var(--text-main));
   background: color-mix(in srgb, var(--theme-fg, #fff) 6%, transparent);
   outline: none;
+}
+
+/* ==========================================================================
+   TOP TAB STRIP (Settings -> Appearance -> Tab layout: Top tabs)
+   ========================================================================== */
+.top-tab-strip {
+  position: fixed;
+  top: 60px;
+  left: 0;
+  right: 0;
+  height: 38px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 9990;
+  color: var(--theme-fg);
+  -webkit-app-region: no-drag;
+}
+
+/* Under a web page's solid top bar the strip is part of the same chrome. */
+.top-tab-strip.on-webpage {
+  top: 44px;
+  background: var(--theme-bg-canvas);
+  border-bottom: 1px solid var(--border);
+}
+
+.ttab-spaces {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ttab-space {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--theme-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
+}
+
+.ttab-space:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--theme-fg) 8%, transparent);
+}
+
+.ttab-space.active {
+  opacity: 1;
+  background: var(--theme-surface);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  cursor: default;
+}
+
+.ttab-divider {
+  width: 1px;
+  height: 18px;
+  flex-shrink: 0;
+  background: var(--border-strong);
+}
+
+.ttab-divider.small {
+  height: 14px;
+  margin: 0 2px;
+}
+
+.ttab-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ttab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.ttab {
+  position: relative;
+  flex: 0 1 200px;
+  min-width: 96px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px 0 10px;
+  border-radius: 9px;
+  color: var(--theme-fg);
+  font-size: 12.5px;
+  cursor: pointer;
+  outline: none;
+  opacity: 0.72;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
+}
+
+.ttab:hover,
+.ttab:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--theme-fg) 7%, transparent);
+}
+
+.ttab.active {
+  opacity: 1;
+  background: var(--theme-surface);
+  box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-sm);
+  font-weight: 500;
+}
+
+.ttab.pinned {
+  flex: 0 0 34px;
+  min-width: 34px;
+  justify-content: center;
+  padding: 0;
+}
+
+.ttab.sleeping .ttab-favicon,
+.ttab.sleeping .ttab-title {
+  opacity: 0.5;
+}
+
+.ttab-favicon {
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+.ttab-favicon-fallback {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ttab-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ttab-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--theme-fg);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+
+.ttab:hover .ttab-close,
+.ttab.active .ttab-close,
+.ttab:focus-within .ttab-close {
+  opacity: 0.7;
+}
+
+.ttab-close:hover {
+  opacity: 1 !important;
+  background: color-mix(in srgb, var(--theme-fg) 12%, transparent);
+}
+
+.ttab-new {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--theme-fg);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.ttab-new:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--theme-fg) 8%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ttab,
+  .ttab-close,
+  .ttab-space {
+    transition: none;
+  }
+}
+
+/* Onboarding: tab layout choice */
+.welcome-layout-grid {
+  display: flex;
+  gap: 10px;
+}
+
+.welcome-layout-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.18s ease;
+}
+
+.welcome-layout-card:hover,
+.welcome-layout-card:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.welcome-layout-card.selected {
+  border-color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 1px #FFFFFF;
+}
+
+.welcome-layout-card .theme-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* A 56x40 browser window: top bar, then either a sidebar or a tab strip. */
+.welcome-layout-diagram {
+  flex-shrink: 0;
+  width: 56px;
+  height: 40px;
+  display: grid;
+  grid-template-rows: 6px auto 1fr;
+  grid-template-columns: auto 1fr;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.wld-topbar {
+  grid-column: 1 / -1;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.welcome-layout-diagram.sidebar .wld-sidebar {
+  grid-row: 2 / 4;
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.welcome-layout-diagram.sidebar .wld-page {
+  grid-row: 2 / 4;
+}
+
+.welcome-layout-diagram.top .wld-tabs {
+  grid-column: 1 / -1;
+  height: 5px;
+  display: flex;
+  gap: 2px;
+}
+
+.welcome-layout-diagram.top .wld-page {
+  grid-column: 1 / -1;
+}
+
+.wld-sidebar span {
+  height: 3px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.wld-tabs span {
+  width: 11px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.wld-sidebar span.active,
+.wld-tabs span.active {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.wld-page {
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Under a tinted top bar, the strip takes the same page color; one seamless chrome block. */
+.top-tab-strip.on-webpage.topbar-tinted {
+  background: var(--topbar-tint-bg);
+  color: var(--topbar-tint-fg);
+}
+
+.top-tabs-mode .floating-top-chrome-capsule.on-webpage {
+  border-bottom-color: transparent;
 }
