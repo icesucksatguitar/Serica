@@ -37,6 +37,13 @@
       "icons/128x128.png",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "upgradeCode": "A9A139A1-D012-5D8E-9A62-712E63D396AB"
+      }
+    },
+    "publisher": "Serica",
+    "shortDescription": "Serica, an open-source Arc-style browser for Windows"
   }
 }

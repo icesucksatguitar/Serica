@@ -73,7 +73,7 @@ const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock-res
 /// uBlock Origin's scriptlets (set-constant, json-prune, trusted-*, …) converted
 /// by `rust/tools/build-ubo-scriptlets.mjs`. Brave's file above only holds
 /// Brave's extras, and most uBO rules (e.g. YouTube's) need these.
-const UBO_RESOURCES_URL: &str = "https://raw.githubusercontent.com/icesucksatguitar/neutrino/main/rust/resources/ubo-scriptlets.json";
+const UBO_RESOURCES_URL: &str = "https://raw.githubusercontent.com/icesucksatguitar/Serica/main/rust/resources/ubo-scriptlets.json";
 
 /// Always-available rules used until the downloaded lists are ready (and if
 /// the machine is offline on first start).

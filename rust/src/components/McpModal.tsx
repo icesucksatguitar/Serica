@@ -149,10 +149,10 @@ export const McpModal: React.FC<McpModalProps> = ({
   const [logs, setLogs] = useState<any[]>([]);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  // Personalized time-based greeting for Yash (Claude serif italic)
+  // Time-based greeting with the user's name (Claude serif italic)
   const getGreeting = useCallback((): string => {
     const hour = new Date().getHours();
-    let name = 'Yash';
+    let name = '';
     try {
       const stored = (localStorage.getItem('serica_user_name') || localStorage.getItem('neutrino_user_name'));
       if (stored) name = stored;
@@ -164,13 +164,10 @@ export const McpModal: React.FC<McpModalProps> = ({
         }
       }
     } catch { }
-    if (hour >= 0 && hour < 12) {
-      return `Good morning, ${name}`;
-    } else if (hour >= 12 && hour < 17) {
-      return `Good afternoon, ${name}`;
-    } else {
-      return `Good evening, ${name}`;
-    }
+    const who = name ? `, ${name}` : '';
+    if (hour < 12) return `Good morning${who}`;
+    if (hour < 17) return `Good afternoon${who}`;
+    return `Good evening${who}`;
   }, []);
 
   const [greeting, setGreeting] = useState<string>(getGreeting);
@@ -561,7 +558,7 @@ export const McpModal: React.FC<McpModalProps> = ({
           </div>
         </div>
 
-        {/* Personalized Time-Based Greeting for Yash */}
+        {/* Time-based greeting */}
         <div className="mcp-greeting-banner">
           <span className="mcp-greeting-text">{greeting}</span>
         </div>

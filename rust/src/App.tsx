@@ -10,7 +10,7 @@ import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
 import { TopTabStrip } from './components/TopTabStrip';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
-import type { UserProfile } from './components/WelcomeModal';
+import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
 import { useViewportOverlay } from './hooks/useViewportOverlay';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
@@ -225,15 +225,37 @@ export function App() {
     }
   });
 
-  const handleWelcomeComplete = (profile: UserProfile, prefs?: { tabLayout: 'sidebar' | 'top' }) => {
+  const handleWelcomeComplete = (profile: UserProfile, prefs: WelcomePrefs) => {
     setUserProfile(profile);
     setIsWelcomeOpen(false);
+    const dockPins: PinnedSite[] = prefs.dockSites.map((s) => ({ id: `pin-${s.id}`, title: s.title, url: s.url }));
+    // The chosen theme goes to every space; Theme Studio can change each one later.
+    const spaceThemes = Object.fromEntries(
+      state.spaces.map((s) => [s.id, { ...prefs.spaceTheme, points: prefs.spaceTheme.points.map((p) => ({ ...p })) }]),
+    );
+    const palette = applySpaceThemeToRoot(prefs.spaceTheme, osPrefersDark);
+    triggerThemeCrossFade();
+    try {
+      localStorage.setItem('serica_user_profile', JSON.stringify(profile));
+      localStorage.setItem('serica_onboarding_completed', 'true');
+      localStorage.setItem('serica_pinned_sites', JSON.stringify(dockPins));
+    } catch { }
     void updateSettings({
       userProfile: profile,
       onboardingCompleted: true,
-      theme: isDarkMode ? 'dark' : 'light',
-      tabLayout: prefs?.tabLayout ?? 'sidebar',
+      theme: palette.effectiveMode,
+      tabLayout: prefs.tabLayout,
+      textScale: prefs.textScale,
+      rightPinsDockVisible: prefs.dockVisible,
+      pinnedSites: dockPins,
+      spaceThemes: { ...(settings.spaceThemes || {}), ...spaceThemes },
     });
+    if (prefs.sidebarSites.length > 0) {
+      void window.serica?.addPinnedSites?.(
+        prefs.sidebarSites.map((s) => ({ url: s.url, title: s.title })),
+        state.activeSpaceId,
+      );
+    }
   };
 
   // Display name edited in the Settings panel; same key and shape WelcomeModal writes.
@@ -366,6 +388,8 @@ export function App() {
 
   const lastIpcThemeModeRef = useRef<string | null>(null);
   useEffect(() => {
+    // Onboarding previews its theme choice on the root; leave it alone until it finishes.
+    if (isWelcomeOpen) return;
     const palette = applySpaceThemeToRoot(activeSpaceTheme, osPrefersDark);
     const nextDark = palette.effectiveMode === 'dark';
     setIsDarkMode((prev) => (prev === nextDark ? prev : nextDark));
@@ -379,7 +403,7 @@ export function App() {
       lastIpcThemeModeRef.current = desiredIpcMode;
       void window.serica?.setThemeMode?.(desiredIpcMode);
     }
-  }, [activeSpaceTheme, osPrefersDark]);
+  }, [activeSpaceTheme, osPrefersDark, isWelcomeOpen]);
 
   const handleChangeSpaceTheme = useCallback(
     (nextTheme: SpaceTheme, options?: { immediateSave?: boolean; animateTransition?: boolean }) => {
@@ -1118,6 +1142,7 @@ return (
         url={activeTab?.url}
         isLoading={activeTab?.isLoading}
         zoomFactor={activeTab?.zoomFactor}
+        defaultZoom={settings.textScale}
         onClick={() => setIsCommandBarOpen(true)}
         onResetZoom={() => window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'reset' }))}
         onOpenFind={() => dispatchSiteAction('open-find')}
@@ -1281,6 +1306,7 @@ return (
           userName={userProfile?.name}
           onFullscreenChange={setIsHtmlFullscreen}
           onPageColor={handlePageColor}
+          defaultZoom={settings.textScale}
           insetLeft={sidebarAutoHide && showSidebar ? 8 : 0}
           insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
         />
@@ -1301,6 +1327,7 @@ return (
         isOnWebpage={isWebpage}
         persistedPins={Array.isArray(settings.pinnedSites) ? (settings.pinnedSites as PinnedSite[]) : undefined}
         onPersistPins={(pins) => void updateSettings({ pinnedSites: pins })}
+        onHideDock={() => void updateSettings({ rightPinsDockVisible: false })}
       />
     )}
 
@@ -1497,6 +1524,7 @@ return (
       <Suspense fallback={null}>
         <WelcomeModal
           isOpen={isWelcomeOpen}
+          onPreviewTextScale={(textScale) => void updateSettings({ textScale })}
           onComplete={handleWelcomeComplete}
         />
       </Suspense>

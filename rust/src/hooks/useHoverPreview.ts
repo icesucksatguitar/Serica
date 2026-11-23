@@ -1,6 +1,7 @@
 // React binding for the sidebar hover preview controller (R18.1, R18.2).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { addSettledBlurListener } from '../utils/settledBlur';
 import type React from 'react';
 import {
   createHoverPreview,
@@ -39,10 +40,9 @@ export function useHoverPreview(suppressed: boolean): HoverPreview {
   useEffect(() => ctrl.setSuppressed(suppressed), [ctrl, suppressed]);
 
   useEffect(() => {
-    const hide = () => ctrl.hide();
-    window.addEventListener('blur', hide);
+    const removeBlur = addSettledBlurListener(() => ctrl.hide());
     return () => {
-      window.removeEventListener('blur', hide);
+      removeBlur();
       ctrl.dispose();
     };
   }, [ctrl]);

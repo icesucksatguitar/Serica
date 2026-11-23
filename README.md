@@ -12,11 +12,13 @@
 
 <img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
 
-### [⬇ Download the latest release](https://github.com/icesucksatguitar/Serica/releases/latest)
+### [⬇ Download Serica for Windows (.msi)](https://github.com/icesucksatguitar/Serica/releases/latest/download/Serica-Setup-x64.msi)
 
-Get the **`.msi` installer** (adds Start menu and desktop shortcuts), or the portable `.exe` if you'd rather not install anything.
+The installer adds Start menu and desktop shortcuts. Prefer not to install anything? Grab the portable `.exe` from the [releases page](https://github.com/icesucksatguitar/Serica/releases/latest).
 
 </div>
+
+> **Coming from Neutrino?** Serica is the new name for Neutrino. The installer replaces Neutrino and keeps your tabs, spaces, settings and logins.
 
 > **Windows SmartScreen:** Serica isn't code-signed yet, so Windows may say it "protected your PC" from an unrecognized app. Click **More info → Run anyway**. The installer also asks for administrator approval, because it installs to Program Files for all users. You can review the source and build it yourself instead (see [Building from source](#building-from-source)).
 
@@ -26,12 +28,21 @@ Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that p
 
 ## Features
 
+### Set up in a minute
+<img src="docs/screenshots/onboarding.png" alt="First-run setup asking for a theme, with a live preview behind the dialog" width="820">
+
+The first launch asks what to call you, whether you want a sidebar or top tabs, your theme (dark, light or match the system), your text size, which sites go in the dock and which apps to pin. Everything can be changed later in Settings.
+
 ### Spaces and the sidebar
 <img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
 - **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Each space can use its own profile, so cookies and logins stay separate.
 - **Vertical sidebar** with **Pinned** tabs, folders and a **Today** section. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
-- **Tab previews** on hover, a favorites dock, and a media mini player for audio playing in another tab.
+- **Tab previews** on hover, and a media mini player for audio playing in another tab.
+- Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
+
+### Website dock
+One-click sites on the right edge of the window. On web pages it stays tucked away until you move the cursor to the right edge. Right-click the dock to add a site or hide it; turn it back on in Settings → Appearance.
 
 ### Command palette
 <img src="docs/screenshots/command-palette.png" alt="Command palette listing open tabs across spaces" width="820">
@@ -57,6 +68,7 @@ Background tabs that sit idle for 10 minutes are put to sleep to free memory, an
 Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.io) endpoint so agents can control the browser. See [Connect Claude to Serica](#connect-claude-to-serica).
 
 ### Also included
+- **Text size** for the whole browser (Small, Default, Large, Larger) in Settings → Appearance; new web pages open at the same size.
 - **Chrome Web Store extensions.** Open an extension's store page and press **Add to Serica**, then manage extensions at `serica://extensions`.
 - **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel and retry.
 - **Privacy tunnel:** DNS-over-HTTPS, Tor (SOCKS5) or your own SOCKS5/HTTP proxy, with an optional kill switch.
@@ -122,6 +134,13 @@ cd Serica
 python build.py --bump none     # or: --bump patch | minor | major, --clean, --run
 ```
 
+MSI installer (written to `rust/src-tauri/target/release/bundle/msi/`):
+
+```bash
+cd Serica/rust
+npx tauri build --bundles msi
+```
+
 Tests:
 
 ```bash
@@ -135,7 +154,7 @@ Architecture notes and module overview: [`rust/README.md`](rust/README.md).
 
 ## How this was built
 
-I designed and directed Serica. AI coding agents wrote much of the implementation, and I [FILL IN: what you debugged or wrote yourself].
+I designed and directed Serica. AI coding agents wrote much of the implementation.
 
 ## Contributing
 

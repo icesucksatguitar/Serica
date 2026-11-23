@@ -685,6 +685,37 @@ body.sidebar-resizing-active .arc-viewport-container {
   font-size: 13px;
   max-height: 70vh;
   overflow-y: auto;
+  transform-origin: top left;
+  animation: nsb-menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes nsb-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pin-dock-menu {
+  transform-origin: top right;
+}
+
+.pin-dock-menu-hint {
+  padding: 6px 8px 4px;
+  margin-top: 2px;
+  border-top: 1px solid var(--theme-border, rgba(255, 255, 255, 0.1));
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nsb-menu {
+    animation: none;
+  }
 }
 
 .nsb-menu-item {

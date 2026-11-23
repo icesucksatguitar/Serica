@@ -21,6 +21,11 @@ yarn-error.log*
 rust/src-tauri/target/
 rust/src-tauri/target-*/
 
+# Secrets (API keys and tokens belong in .env, never in the repo)
+.env
+.env.*
+!.env.example
+
 # Python & Cache
 **/__pycache__/
 *.py[cod]

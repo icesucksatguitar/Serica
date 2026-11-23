@@ -24,6 +24,7 @@ import {
 import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
 import { PasswordsSettings } from './PasswordsSettings';
+import { TEXT_SCALE_OPTIONS } from '../shared/settings';
 
 export type SettingsTabId =
   | 'appearance'
@@ -65,7 +66,7 @@ export const ARCHIVE_INTERVAL_LABELS: Readonly<Record<string, string>> = Object.
 
 export const ARCHIVE_INTERVAL_HINT = 'Closes inactive Today tabs and keeps them in the archive';
 export const SIDEBAR_AUTO_HIDE_HINT = 'Hides the sidebar until the pointer reaches the left edge';
-export const RIGHT_PINS_DOCK_HINT = 'Shows the pinned sites dock on the right edge';
+export const RIGHT_PINS_DOCK_HINT = 'One-click sites on the right edge. On web pages, move the cursor to the edge to reveal it';
 
 const archiveIntervalLabel = (value: ArchiveIntervalHours): string =>
   ARCHIVE_INTERVAL_LABELS[String(value)];
@@ -378,6 +379,35 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="settings-row">
                     <div className="settings-row-text">
+                      <span className="settings-row-label">Text size</span>
+                      <span className="settings-hint">Scales the browser interface and new web pages</span>
+                    </div>
+                    <div className="settings-segmented" role="radiogroup" aria-label="Text size">
+                      {TEXT_SCALE_OPTIONS.map(({ value, label }) => {
+                        const active = Math.abs((settings.textScale ?? 1) - value) < 0.001;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            aria-label={label}
+                            className={`settings-segment${active ? ' active' : ''}`}
+                            onClick={() => {
+                              if (!active) onUpdateSettings({ textScale: value });
+                            }}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="settings-divider" />
+
+                  <div className="settings-row">
+                    <div className="settings-row-text">
                       <span className="settings-row-label">Colors</span>
                       <span className="settings-hint">Customize space colors, gradients, and ambient glows</span>
                     </div>
@@ -437,7 +467,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="settings-row">
                     <div className="settings-row-text">
-                      <span className="settings-row-label">Right pins dock</span>
+                      <span className="settings-row-label">Website dock</span>
                       <span className="settings-hint">{RIGHT_PINS_DOCK_HINT}</span>
                     </div>
                     <SettingsSwitch

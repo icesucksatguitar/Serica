@@ -30,7 +30,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
         if (parsed.name) return parsed.name;
       }
     } catch {}
-    return 'Yash';
+    return '';
   });
 
   useEffect(() => {
@@ -48,13 +48,10 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   // Calculate greeting: Good morning / Good afternoon / Good evening *name*
   const getGreeting = useCallback((): string => {
     const hour = new Date().getHours();
-    if (hour >= 0 && hour < 12) {
-      return `Good morning, ${displayName}`;
-    } else if (hour >= 12 && hour < 17) {
-      return `Good afternoon, ${displayName}`;
-    } else {
-      return `Good evening, ${displayName}`;
-    }
+    const who = displayName ? `, ${displayName}` : '';
+    if (hour < 12) return `Good morning${who}`;
+    if (hour < 17) return `Good afternoon${who}`;
+    return `Good evening${who}`;
   }, [displayName]);
 
   useEffect(() => {

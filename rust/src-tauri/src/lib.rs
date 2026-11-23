@@ -21,11 +21,32 @@ mod webview_win;
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Serica was called Neutrino up to v0.4.1 (identifier `com.neutrino.browser`).
+/// Moves an existing Neutrino profile (tabs, settings, logins, and the UI's
+/// localStorage) to the Serica folders once, before any webview is created.
+#[cfg(windows)]
+fn migrate_legacy_data() {
+    for var in ["APPDATA", "LOCALAPPDATA"] {
+        let Some(base) = std::env::var_os(var).map(std::path::PathBuf::from) else { continue };
+        let old = base.join("com.neutrino.browser");
+        let new = base.join("com.serica.browser");
+        if !old.is_dir() || new.exists() {
+            continue;
+        }
+        match std::fs::rename(&old, &new) {
+            Ok(()) => tracing::info!("migrated {} to {}", old.display(), new.display()),
+            Err(e) => tracing::warn!("could not migrate {}: {e}", old.display()),
+        }
+    }
+}
+
 pub fn run() {
     let _ = tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with(tracing_subscriber::fmt::layer())
         .try_init();
+    #[cfg(windows)]
+    migrate_legacy_data();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -38,6 +59,10 @@ pub fn run() {
                 window_state::attach(&window, data_dir.join("window.json"));
             }
             let shared = app::App::new(app.handle().clone(), data_dir);
+            let scale = shared.settings().text_scale;
+            if (scale - 1.0).abs() > 0.001 {
+                commands::apply_ui_zoom(&shared, scale);
+            }
             app.manage(shared);
             Ok(())
         })
@@ -52,6 +77,7 @@ pub fn run() {
             commands::toggle_pin_tab,
             commands::pin_tab,
             commands::unpin_tab,
+            commands::add_pinned_sites,
             commands::toggle_sleep_tab,
             commands::reorder_tabs,
             commands::duplicate_tab,

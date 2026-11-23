@@ -73,6 +73,19 @@ export function resolveReducedEffectsActive(
 
 export type TabLayout = 'sidebar' | 'top';
 
+/** Text size: scales the interface and is the default zoom for new pages. */
+export const TEXT_SCALE_OPTIONS: readonly { value: number; label: string }[] = Object.freeze([
+  { value: 0.9, label: 'Small' },
+  { value: 1, label: 'Default' },
+  { value: 1.1, label: 'Large' },
+  { value: 1.25, label: 'Larger' },
+]);
+
+function normalizeTextScale(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  return TEXT_SCALE_OPTIONS.reduce((best, o) => (Math.abs(o.value - value) < Math.abs(best - value) ? o.value : best), 1);
+}
+
 export interface BrowserSettings {
   adblockEnabled: boolean;
   zenSleepEnabled: boolean;
@@ -90,6 +103,7 @@ export interface BrowserSettings {
   sidebarExpanded: boolean;
   sidebarAutoHide: boolean;
   sidebarWidth?: number;
+  textScale: number;
   [unknownKey: string]: unknown; // kept as saved, e.g. the legacy `theme` key
 }
 
@@ -110,6 +124,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   sidebarExpanded: true,
   sidebarAutoHide: false,
   sidebarWidth: 240,
+  textScale: 1,
 });
 
 function isArchiveIntervalHours(value: unknown): value is ArchiveIntervalHours {
@@ -230,5 +245,6 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     rightPinsDockVisible: boolOr(source.rightPinsDockVisible, DEFAULT_SETTINGS.rightPinsDockVisible),
     sidebarExpanded: boolOr(source.sidebarExpanded, DEFAULT_SETTINGS.sidebarExpanded),
     sidebarAutoHide: boolOr(source.sidebarAutoHide, DEFAULT_SETTINGS.sidebarAutoHide),
+    textScale: normalizeTextScale(source.textScale),
   };
 }

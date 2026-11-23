@@ -55,6 +55,9 @@ pub struct BrowserSettings {
     pub sidebar_auto_hide: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f64,
+    /// Text size: scales the browser interface and is the default zoom for new pages.
+    #[serde(default = "default_text_scale")]
+    pub text_scale: f64,
     /// Pop a playing video into picture-in-picture when switching away from its tab.
     #[serde(default = "yes")]
     pub auto_picture_in_picture: bool,
@@ -72,6 +75,10 @@ fn yes() -> bool {
 }
 fn default_sidebar_width() -> f64 {
     240.0
+}
+pub const TEXT_SCALES: [f64; 4] = [0.9, 1.0, 1.1, 1.25];
+fn default_text_scale() -> f64 {
+    1.0
 }
 fn default_mcp_port() -> u16 {
     crate::mcp_http::DEFAULT_PORT
@@ -127,6 +134,7 @@ impl BrowserSettings {
             ("sidebarExpanded", Value::is_boolean),
             ("sidebarAutoHide", Value::is_boolean),
             ("sidebarWidth", Value::is_number),
+            ("textScale", Value::is_number),
             ("mcpServerEnabled", Value::is_boolean),
             ("autoPictureInPicture", Value::is_boolean),
             ("mcpServerPort", Value::is_u64),
@@ -171,6 +179,13 @@ impl BrowserSettings {
             self.sidebar_width = default_sidebar_width();
         }
         self.sidebar_width = self.sidebar_width.clamp(160.0, 520.0);
+        // Snap to the offered sizes (also replaces NaN/inf with the default).
+        let requested = if self.text_scale.is_finite() { self.text_scale } else { default_text_scale() };
+        self.text_scale = TEXT_SCALES
+            .iter()
+            .copied()
+            .min_by(|a, b| (a - requested).abs().total_cmp(&(b - requested).abs()))
+            .unwrap_or(1.0);
         let mut seen = std::collections::HashSet::new();
         self.shield_whitelist = self
             .shield_whitelist
@@ -182,7 +197,7 @@ impl BrowserSettings {
         for k in [
             "adblockEnabled", "zenSleepEnabled", "searchEngine", "reducedEffectsMode", "spaceThemes",
             "customThemePresets", "shieldWhitelist", "archiveIntervalHours", "rightPinsDockVisible",
-            "sidebarExpanded", "sidebarAutoHide", "sidebarWidth",
+            "sidebarExpanded", "sidebarAutoHide", "sidebarWidth", "textScale",
         ] {
             self.extra.remove(k);
         }
@@ -233,6 +248,18 @@ impl BrowserSettings {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn text_scale_snaps_to_offered_sizes() {
+        assert_eq!(BrowserSettings::from_value(json!({})).text_scale, 1.0);
+        assert_eq!(BrowserSettings::from_value(json!({ "textScale": 1.12 })).text_scale, 1.1);
+        assert_eq!(BrowserSettings::from_value(json!({ "textScale": 9 })).text_scale, 1.25);
+        assert_eq!(BrowserSettings::from_value(json!({ "textScale": "big" })).text_scale, 1.0);
+        let mut s = BrowserSettings::default();
+        s.apply_patch(&json!({ "textScale": 0.9 }));
+        assert_eq!(s.text_scale, 0.9);
+        assert!(s.extra.get("textScale").is_none());
+    }
 
     #[test]
     fn bad_typed_key_does_not_reset_everything() {

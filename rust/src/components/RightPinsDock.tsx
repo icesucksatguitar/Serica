@@ -1,6 +1,7 @@
 import { useViewportOverlay } from '../hooks/useViewportOverlay';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, X, Globe, ExternalLink } from 'lucide-react';
+import { Plus, X, Globe, EyeOff } from 'lucide-react';
+import { addSettledBlurListener } from '../utils/settledBlur';
 
 export interface PinnedSite {
   id: string;
@@ -17,11 +18,15 @@ const DEFAULT_PINS: PinnedSite[] = [
   { id: 'pin-notion', title: 'Notion', url: 'https://www.notion.so' },
 ];
 
+const DOCK_MENU_WIDTH = 200;
+
 interface RightPinsDockProps {
   onNavigate: (url: string) => void;
   isOnWebpage?: boolean;
   persistedPins?: PinnedSite[];
   onPersistPins?: (pins: PinnedSite[]) => void;
+  /** Hides the dock (Settings → Appearance brings it back). */
+  onHideDock?: () => void;
 }
 
 export const RightPinsDock: React.FC<RightPinsDockProps> = ({
@@ -29,23 +34,24 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   isOnWebpage = false,
   persistedPins,
   onPersistPins,
+  onHideDock,
 }) => {
+  // A saved list wins even when empty (the user removed every site);
+  // the defaults are only for a profile that never saved one.
   const [pins, setPins] = useState<PinnedSite[]>(() => {
-    if (Array.isArray(persistedPins) && persistedPins.length > 0) {
-      return persistedPins;
-    }
+    if (Array.isArray(persistedPins)) return persistedPins;
     try {
       const saved = (localStorage.getItem('serica_pinned_sites') || localStorage.getItem('neutrino_pinned_sites'));
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
     return DEFAULT_PINS;
   });
 
   useEffect(() => {
-    if (Array.isArray(persistedPins) && persistedPins.length > 0) {
+    if (Array.isArray(persistedPins)) {
       setPins(persistedPins);
       try {
         localStorage.setItem('serica_pinned_sites', JSON.stringify(persistedPins));
@@ -58,8 +64,12 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   const revealedAtRef = useRef<number>(0);
   const hideTimerRef = useRef<number | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const keepOpen = isAddModalOpen || menuPos !== null;
 
-  useViewportOverlay(Boolean(isOnWebpage) && isHoveredDock);
+  // Pages are native views above the HTML UI: cover the page while the dock,
+  // its menu or the add dialog is up so they stay visible and clickable.
+  useViewportOverlay((Boolean(isOnWebpage) && isHoveredDock) || keepOpen);
 
   const revealDock = useCallback(() => {
     if (hideTimerRef.current !== null) {
@@ -71,7 +81,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   }, []);
 
   const scheduleHide = useCallback((delay = 220) => {
-    if (isAddModalOpen) return;
+    if (keepOpen) return;
     if (hideTimerRef.current !== null) {
       window.clearTimeout(hideTimerRef.current);
     }
@@ -87,7 +97,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         hideTimerRef.current = null;
       }
     }, delay);
-  }, [isAddModalOpen]);
+  }, [keepOpen]);
 
   const cancelHide = useCallback(() => {
     if (hideTimerRef.current !== null) {
@@ -99,7 +109,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   useEffect(() => {
     if (!isOnWebpage || !isHoveredDock) return;
     const onMove = (e: MouseEvent) => {
-      if (isAddModalOpen) return;
+      if (keepOpen) return;
       // Keep open if within 180px of right edge (covers track, magnified pins and tooltips)
       const threshold = window.innerWidth - 180;
       if (e.clientX < threshold) {
@@ -108,19 +118,35 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         cancelHide();
       }
     };
-    const onBlur = () => {
-      if (!isAddModalOpen) scheduleHide();
-    };
+    const removeBlur = addSettledBlurListener(() => {
+      if (!keepOpen) scheduleHide(0);
+    });
     window.addEventListener('mousemove', onMove, { passive: true });
-    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('blur', onBlur);
+      removeBlur();
       if (hideTimerRef.current !== null) {
         window.clearTimeout(hideTimerRef.current);
       }
     };
-  }, [isOnWebpage, isHoveredDock, isAddModalOpen, scheduleHide, cancelHide]);
+  }, [isOnWebpage, isHoveredDock, keepOpen, scheduleHide, cancelHide]);
+
+  // Dock context menu: closes on any outside press, Escape or focus loss.
+  useEffect(() => {
+    if (!menuPos) return;
+    const close = () => setMenuPos(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    const removeBlur = addSettledBlurListener(close);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', onKey);
+      removeBlur();
+    };
+  }, [menuPos]);
   const [newUrl, setNewUrl] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [hoveredPinId, setHoveredPinId] = useState<string | null>(null);
@@ -172,7 +198,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   }, [pins]);
 
   const handleMouseLeave = () => {
-    setIsHoveredDock(false);
     setScales({});
     setHoveredPinId(null);
   };
@@ -246,11 +271,20 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         onMouseMove={(e) => {
           cancelHide();
           setIsHoveredDock(true);
-          handleMouseMove(e);
+          if (!menuPos) handleMouseMove(e);
         }}
         onMouseLeave={() => {
           scheduleHide();
           handleMouseLeave();
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          cancelHide();
+          setScales({});
+          setHoveredPinId(null);
+          // Open beside the dock, never over it.
+          const left = dockRef.current?.querySelector('.vertical-pins-dock-track')?.getBoundingClientRect().left ?? e.clientX;
+          setMenuPos({ x: Math.max(8, left - DOCK_MENU_WIDTH - 10), y: Math.max(8, Math.min(e.clientY - 16, window.innerHeight - 124)) });
         }}
         aria-label="Pinned Websites Dock"
       >
@@ -270,7 +304,9 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                   zIndex: Math.round(scale * 10),
                 }}
                 onClick={() => onNavigate(pin.url)}
-                onMouseEnter={() => setHoveredPinId(pin.id)}
+                onMouseEnter={() => {
+                  if (!menuPos) setHoveredPinId(pin.id);
+                }}
                 onMouseLeave={() => setHoveredPinId(null)}
                 title={pin.title}
               >
@@ -335,6 +371,45 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           </div>
         </div>
       </aside>
+
+      {menuPos && (
+        <div
+          className="nsb-menu pin-dock-menu"
+          role="menu"
+          style={{ left: menuPos.x, top: menuPos.y, width: DOCK_MENU_WIDTH }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="nsb-menu-item"
+            onClick={() => {
+              setMenuPos(null);
+              setIsAddModalOpen(true);
+            }}
+          >
+            <Plus size={13} />
+            <span>Add website</span>
+          </button>
+          {onHideDock && (
+            <button
+              type="button"
+              role="menuitem"
+              className="nsb-menu-item"
+              onClick={() => {
+                setMenuPos(null);
+                setIsHoveredDock(false);
+                onHideDock();
+              }}
+            >
+              <EyeOff size={13} />
+              <span>Hide dock</span>
+            </button>
+          )}
+          <div className="pin-dock-menu-hint">Turn it back on in Settings</div>
+        </div>
+      )}
 
       {/* Add Website Pin Modal */}
       {isAddModalOpen && (

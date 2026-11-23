@@ -5,6 +5,8 @@ export interface FloatingUrlPillProps {
   url?: string;
   isLoading?: boolean;
   zoomFactor?: number;
+  /** Zoom of an untouched page (the text size setting). */
+  defaultZoom?: number;
   onClick: () => void;
   onResetZoom?: () => void;
   onOpenFind?: () => void;
@@ -14,6 +16,7 @@ export interface FloatingUrlPillProps {
     url,
     isLoading = false,
     zoomFactor = 1.0,
+    defaultZoom = 1.0,
     onClick,
     onResetZoom,
     onOpenFind,
@@ -59,7 +62,7 @@ export interface FloatingUrlPillProps {
       onResetZoom?.();
     };
 
-    const showZoomBadge = isWebUrl && Math.abs(zoomFactor - 1.0) > 0.01 && Boolean(onResetZoom);
+    const showZoomBadge = isWebUrl && Math.abs(zoomFactor - defaultZoom) > 0.01 && Boolean(onResetZoom);
 
     return (
       <div

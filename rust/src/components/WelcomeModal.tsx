@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowRight, Check, Sparkles, User, Mail, Shield, Palette, Layout } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, Monitor, Moon, PanelLeft, PanelTop, Sun } from 'lucide-react';
+import { SPACE_THEME_PRESETS, type SpaceTheme, type SpaceThemeMode } from '../shared/spaceTheme';
+import { TEXT_SCALE_OPTIONS } from '../shared/settings';
+import { applySpaceThemeToRoot } from '../utils/applySpaceTheme';
+import '../styles/onboarding.css';
 
 export interface UserProfile {
   name: string;
+  /** Always null: Serica keeps no account. Kept for profiles saved by older versions. */
   email: string | null;
   isGuest: boolean;
   theme: 'obsidian' | 'charcoal' | 'slate';
@@ -11,329 +16,464 @@ export interface UserProfile {
 
 export type WelcomeTabLayout = 'sidebar' | 'top';
 
-interface WelcomeModalProps {
-  isOpen: boolean;
-  onComplete: (profile: UserProfile, prefs: { tabLayout: WelcomeTabLayout }) => void;
+export interface WelcomeSite {
+  id: string;
+  title: string;
+  url: string;
 }
 
-/** Tiny diagram of a browser window for the tab-layout choice. */
+export interface WelcomePrefs {
+  tabLayout: WelcomeTabLayout;
+  /** Theme for every space (preset colors with the chosen light/dark/auto mode). */
+  spaceTheme: SpaceTheme;
+  textScale: number;
+  dockVisible: boolean;
+  dockSites: WelcomeSite[];
+  sidebarSites: WelcomeSite[];
+}
+
+interface WelcomeModalProps {
+  isOpen: boolean;
+  /** Live preview of the text size while choosing (zooms the interface). */
+  onPreviewTextScale?: (scale: number) => void;
+  onComplete: (profile: UserProfile, prefs: WelcomePrefs) => void;
+}
+
+export const WELCOME_SITES: readonly WelcomeSite[] = [
+  { id: 'youtube', title: 'YouTube', url: 'https://www.youtube.com' },
+  { id: 'github', title: 'GitHub', url: 'https://github.com' },
+  { id: 'x', title: 'X', url: 'https://x.com' },
+  { id: 'reddit', title: 'Reddit', url: 'https://www.reddit.com' },
+  { id: 'notion', title: 'Notion', url: 'https://www.notion.so' },
+  { id: 'gmail', title: 'Gmail', url: 'https://mail.google.com' },
+  { id: 'chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com' },
+  { id: 'claude', title: 'Claude', url: 'https://claude.ai' },
+  { id: 'spotify', title: 'Spotify', url: 'https://open.spotify.com' },
+  { id: 'whatsapp', title: 'WhatsApp', url: 'https://web.whatsapp.com' },
+  { id: 'netflix', title: 'Netflix', url: 'https://www.netflix.com' },
+  { id: 'figma', title: 'Figma', url: 'https://www.figma.com' },
+  { id: 'linear', title: 'Linear', url: 'https://linear.app' },
+  { id: 'discord', title: 'Discord', url: 'https://discord.com/app' },
+  { id: 'drive', title: 'Drive', url: 'https://drive.google.com' },
+  { id: 'calendar', title: 'Calendar', url: 'https://calendar.google.com' },
+];
+
+const DEFAULT_DOCK = ['youtube', 'github', 'x', 'reddit', 'notion'];
+
+const STEPS = ['name', 'tabs', 'theme', 'size', 'dock', 'pins'] as const;
+type Step = (typeof STEPS)[number];
+
+const S_PATH =
+  'M 182 84 C 170 64, 146 56, 124 56 C 96 56, 74 72, 74 96 C 74 122, 100 128, 128 134 C 158 140, 184 148, 184 176 C 184 202, 158 214, 128 214 C 102 214, 82 204, 70 184';
+
+/** The Serica mark: a light-trail S on the app-icon tile. */
+const SericaMark: React.FC = () => (
+  <div className="onb-mark" aria-hidden="true">
+    <svg viewBox="0 0 256 256" width="100%" height="100%">
+      <path className="onb-mark-s" d={S_PATH} pathLength={1} />
+    </svg>
+  </div>
+);
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+const SiteIcon: React.FC<{ site: WelcomeSite }> = ({ site }) => {
+  const [failed, setFailed] = useState(false);
+  return failed ? (
+    <span className="onb-site-letter">{site.title.charAt(0)}</span>
+  ) : (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${hostOf(site.url)}&sz=64`}
+      alt=""
+      width={22}
+      height={22}
+      draggable={false}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
+const SitePicker: React.FC<{ selected: Set<string>; onToggle: (id: string) => void; label: string }> = ({
+  selected,
+  onToggle,
+  label,
+}) => (
+  <div className="onb-sites" role="group" aria-label={label}>
+    {WELCOME_SITES.map((site) => {
+      const on = selected.has(site.id);
+      return (
+        <button
+          key={site.id}
+          type="button"
+          className={`onb-site${on ? ' selected' : ''}`}
+          aria-pressed={on}
+          onClick={() => onToggle(site.id)}
+        >
+          <span className="onb-site-icon">
+            <SiteIcon site={site} />
+          </span>
+          <span className="onb-site-title">{site.title}</span>
+          <span className="onb-site-check" aria-hidden="true">
+            <Check size={10} strokeWidth={3} />
+          </span>
+        </button>
+      );
+    })}
+  </div>
+);
+
 const LayoutDiagram: React.FC<{ layout: WelcomeTabLayout }> = ({ layout }) => (
-  <div className={`welcome-layout-diagram ${layout}`} aria-hidden="true">
-    <div className="wld-topbar" />
+  <div className={`onb-diagram ${layout}`} aria-hidden="true">
+    <div className="onb-diagram-bar" />
     {layout === 'top' ? (
-      <div className="wld-tabs">
+      <div className="onb-diagram-tabs">
         <span className="active" />
         <span />
         <span />
       </div>
     ) : (
-      <div className="wld-sidebar">
+      <div className="onb-diagram-side">
         <span className="active" />
         <span />
         <span />
         <span />
       </div>
     )}
-    <div className="wld-page" />
+    <div className="onb-diagram-page" />
   </div>
 );
 
-export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onComplete }) => {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [authMode, setAuthMode] = useState<'signup' | 'guest'>('signup');
+function presetGradient(theme: SpaceTheme): string {
+  const [a, b, c] = theme.points.map((p) => p.color);
+  return `radial-gradient(120% 120% at 20% 15%, ${b ?? a} 0%, transparent 60%), linear-gradient(135deg, ${a} 0%, ${c ?? a} 100%)`;
+}
+
+function osPrefersDark(): boolean {
+  return typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)').matches : true;
+}
+
+export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onPreviewTextScale, onComplete }) => {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [direction, setDirection] = useState<'fwd' | 'back'>('fwd');
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [theme, setTheme] = useState<'obsidian' | 'charcoal' | 'slate'>('obsidian');
-  const [mode, setMode] = useState<'minimal' | 'architect'>('minimal');
   const [tabLayout, setTabLayout] = useState<WelcomeTabLayout>('sidebar');
-  const [error, setError] = useState('');
+  const [presetId, setPresetId] = useState(SPACE_THEME_PRESETS[0].id);
+  const [mode, setMode] = useState<SpaceThemeMode>('dark');
+  const [textScale, setTextScale] = useState(1);
+  const [dockVisible, setDockVisible] = useState(true);
+  const [dock, setDock] = useState<Set<string>>(() => new Set(DEFAULT_DOCK));
+  const [pins, setPins] = useState<Set<string>>(() => new Set());
+  const [leaving, setLeaving] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  const step: Step = STEPS[stepIndex];
+  const trimmedName = name.trim();
+  const isLast = stepIndex === STEPS.length - 1;
+
+  const spaceTheme = useMemo<SpaceTheme>(() => {
+    const preset = SPACE_THEME_PRESETS.find((p) => p.id === presetId) ?? SPACE_THEME_PRESETS[0];
+    return { ...preset.theme, points: preset.theme.points.map((p) => ({ ...p })), mode };
+  }, [presetId, mode]);
+
+  // Live preview: the browser behind the dialog takes the chosen theme.
+  useEffect(() => {
+    if (isOpen) applySpaceThemeToRoot(spaceTheme, osPrefersDark());
+  }, [isOpen, spaceTheme]);
+
+  useEffect(() => {
+    if (isOpen && step === 'name') {
+      const t = window.setTimeout(() => nameRef.current?.focus(), 380);
+      return () => window.clearTimeout(t);
+    }
+  }, [isOpen, step]);
 
   if (!isOpen) return null;
 
-  const handleNextStep = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (authMode === 'signup') {
-      if (!email.trim() || !email.includes('@')) {
-        setError('Please enter a valid email address');
-        return;
-      }
-      if (!name.trim()) {
-        const derived = email.split('@')[0];
-        setName(derived.charAt(0).toUpperCase() + derived.slice(1));
-      }
-    } else {
-      if (!name.trim()) {
-        setName('Yash');
-      }
-    }
-    setError('');
-    setStep(2);
+  const canContinue = step !== 'name' || trimmedName.length > 0;
+
+  const go = (delta: 1 | -1) => {
+    setDirection(delta > 0 ? 'fwd' : 'back');
+    setStepIndex((i) => Math.max(0, Math.min(STEPS.length - 1, i + delta)));
   };
 
-  const handleFinish = () => {
-    const finalName = name.trim() || (authMode === 'guest' ? 'Guest' : 'User');
+  const pick = (ids: Set<string>) => WELCOME_SITES.filter((s) => ids.has(s.id));
+
+  const finish = () => {
+    if (leaving) return;
     const profile: UserProfile = {
-      name: finalName,
-      email: authMode === 'signup' ? email.trim() : null,
-      isGuest: authMode === 'guest',
-      theme,
-      mode,
+      name: trimmedName,
+      email: null,
+      isGuest: true,
+      theme: 'obsidian',
+      mode: 'minimal',
     };
-
-    try {
-      localStorage.setItem('neutrino_user_profile', JSON.stringify(profile));
-      localStorage.setItem('neutrino_onboarding_completed', 'true');
-      localStorage.setItem('neutrino_dark_theme', 'true');
-      localStorage.setItem('neutrino_theme_variant', theme);
-    } catch {}
-
-    onComplete(profile, { tabLayout });
+    const prefs: WelcomePrefs = {
+      tabLayout,
+      spaceTheme,
+      textScale,
+      dockVisible,
+      dockSites: pick(dock),
+      sidebarSites: pick(pins),
+    };
+    // Let the dialog fade out before the browser takes over.
+    setLeaving(true);
+    window.setTimeout(() => onComplete(profile, prefs), 240);
   };
+
+  const next = () => {
+    if (!canContinue) {
+      nameRef.current?.focus();
+      return;
+    }
+    if (isLast) finish();
+    else go(1);
+  };
+
+  const toggle = (set: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
+    set((prev) => {
+      const out = new Set(prev);
+      if (out.has(id)) out.delete(id);
+      else out.add(id);
+      return out;
+    });
+
+  const chooseScale = (value: number) => {
+    setTextScale(value);
+    onPreviewTextScale?.(value);
+  };
+
+  let body: React.ReactNode;
+  switch (step) {
+    case 'name':
+      body = (
+        <>
+          <SericaMark />
+          <h1 className="onb-title">
+            Welcome to <em>Serica</em>
+          </h1>
+          <p className="onb-sub">A calm, fast browser that stays out of your way. Let's set it up in a minute.</p>
+          <label className="onb-label" htmlFor="onb-name">
+            What should we call you?
+          </label>
+          <input
+            id="onb-name"
+            ref={nameRef}
+            className="onb-input"
+            type="text"
+            autoComplete="given-name"
+            spellCheck={false}
+            maxLength={40}
+            placeholder="Your name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <p className="onb-hint">Used for your greeting on the new-tab page. It never leaves this computer.</p>
+        </>
+      );
+      break;
+    case 'tabs':
+      body = (
+        <>
+          <h1 className="onb-title">
+            Nice to meet you, <em>{trimmedName}</em>.
+          </h1>
+          <p className="onb-sub">How do you like your tabs?</p>
+          <div className="onb-cards two" role="radiogroup" aria-label="Tab layout">
+            {([
+              ['sidebar', 'Sidebar', 'Vertical tabs with pinned tabs, folders and hover previews', PanelLeft],
+              ['top', 'Top tabs', 'A classic tab strip above the page', PanelTop],
+            ] as const).map(([value, title, desc, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={tabLayout === value}
+                className={`onb-card${tabLayout === value ? ' selected' : ''}`}
+                onClick={() => setTabLayout(value)}
+              >
+                <LayoutDiagram layout={value} />
+                <span className="onb-card-title">
+                  <Icon size={14} aria-hidden="true" />
+                  {title}
+                </span>
+                <span className="onb-card-desc">{desc}</span>
+              </button>
+            ))}
+          </div>
+          <p className="onb-hint">You can switch any time in Settings → Appearance.</p>
+        </>
+      );
+      break;
+    case 'theme':
+      body = (
+        <>
+          <h1 className="onb-title">
+            Pick a <em>look</em>.
+          </h1>
+          <p className="onb-sub">Every space gets this theme. You can give each space its own colors later in Theme Studio.</p>
+          <div className="onb-segmented" role="radiogroup" aria-label="Appearance">
+            {([
+              ['dark', 'Dark', Moon],
+              ['light', 'Light', Sun],
+              ['auto', 'Match system', Monitor],
+            ] as const).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={mode === value}
+                className={`onb-segment${mode === value ? ' active' : ''}`}
+                onClick={() => setMode(value)}
+              >
+                <Icon size={13} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="onb-themes" role="radiogroup" aria-label="Theme">
+            {SPACE_THEME_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={presetId === p.id}
+                title={p.description}
+                className={`onb-theme${presetId === p.id ? ' selected' : ''}`}
+                onClick={() => setPresetId(p.id)}
+              >
+                <span className="onb-theme-swatch" style={{ background: presetGradient(p.theme) }} />
+                <span className="onb-theme-name">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      );
+      break;
+    case 'size':
+      body = (
+        <>
+          <h1 className="onb-title">
+            Comfortable <em>text size</em>?
+          </h1>
+          <p className="onb-sub">Scales the browser and how big web pages open. Try one: the whole window follows.</p>
+          <div className="onb-cards four" role="radiogroup" aria-label="Text size">
+            {TEXT_SCALE_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={Math.abs(textScale - value) < 0.001}
+                className={`onb-card onb-size${Math.abs(textScale - value) < 0.001 ? ' selected' : ''}`}
+                onClick={() => chooseScale(value)}
+              >
+                <span className="onb-size-sample" style={{ fontSize: `${Math.round(22 * value)}px` }}>
+                  Aa
+                </span>
+                <span className="onb-card-title">{label}</span>
+                <span className="onb-card-desc">{Math.round(value * 100)}%</span>
+              </button>
+            ))}
+          </div>
+          <p className="onb-hint">Change it later in Settings → Appearance → Text size.</p>
+        </>
+      );
+      break;
+    case 'dock':
+      body = (
+        <>
+          <h1 className="onb-title">
+            Your <em>dock</em>.
+          </h1>
+          <p className="onb-sub">
+            One-click sites on the right edge of the window. On web pages it tucks away until you move the cursor to the
+            right edge.
+          </p>
+          <div className="onb-toggle-row">
+            <span>Show the website dock</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={dockVisible}
+              aria-label="Show the website dock"
+              className={`onb-switch${dockVisible ? ' on' : ''}`}
+              onClick={() => setDockVisible((v) => !v)}
+            >
+              <span className="onb-switch-thumb" />
+            </button>
+          </div>
+          <div className={`onb-collapsible${dockVisible ? '' : ' collapsed'}`} aria-hidden={!dockVisible}>
+            <SitePicker selected={dock} onToggle={toggle(setDock)} label="Dock sites" />
+          </div>
+        </>
+      );
+      break;
+    case 'pins':
+      body = (
+        <>
+          <h1 className="onb-title">
+            Pin your <em>apps</em>.
+          </h1>
+          <p className="onb-sub">
+            Pinned tabs stay in the {tabLayout === 'top' ? 'tab strip' : 'sidebar'} and load only when you open them.
+            Pick as many as you like, or none.
+          </p>
+          <SitePicker selected={pins} onToggle={toggle(setPins)} label="Pinned tabs" />
+        </>
+      );
+      break;
+  }
 
   return (
-    <div className="welcome-modal-backdrop">
-      <div className="welcome-modal-dialog">
-        {/* Glow ambient background aura (monochromatic) */}
-        <div className="welcome-ambient-glow" />
-
-        {/* Progress Dots */}
-        <div className="welcome-step-indicator">
-          <span className={`step-dot ${step === 1 ? 'active' : 'completed'}`} />
-          <span className={`step-dot ${step === 2 ? 'active' : ''}`} />
+    <div className={`onb-backdrop${leaving ? ' leaving' : ''}`}>
+      <div
+        className="onb-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Set up Serica"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
+            e.preventDefault();
+            next();
+          }
+        }}
+      >
+        <div className="onb-glow" aria-hidden="true" />
+        <div className="onb-progress" aria-hidden="true">
+          {STEPS.map((s, i) => (
+            <span key={s} className={i < stepIndex ? 'done' : i === stepIndex ? 'current' : ''} />
+          ))}
         </div>
-
-        {step === 1 ? (
-          <form className="welcome-step-content" onSubmit={handleNextStep}>
-            <div className="welcome-brand-badge">
-              <span className="welcome-dot" />
-              <span className="welcome-brand-title">NEUTRINO</span>
-            </div>
-
-            <h1 className="welcome-headline">The web is the product.</h1>
-            <p className="welcome-subtext">
-              Zero clutter, radical restraint, and instant performance. Set up your workspace to begin.
-            </p>
-
-            {/* Account Type Selector */}
-            <div className="welcome-auth-switch">
-              <button
-                type="button"
-                className={`welcome-switch-btn ${authMode === 'signup' ? 'active' : ''}`}
-                onClick={() => {
-                  setAuthMode('signup');
-                  setError('');
-                }}
-              >
-                <Mail size={14} />
-                <span>Create Account</span>
-              </button>
-              <button
-                type="button"
-                className={`welcome-switch-btn ${authMode === 'guest' ? 'active' : ''}`}
-                onClick={() => {
-                  setAuthMode('guest');
-                  setError('');
-                }}
-              >
-                <User size={14} />
-                <span>Continue as Guest</span>
-              </button>
-            </div>
-
-            {/* Input Fields */}
-            <div className="welcome-fields-group">
-              {authMode === 'signup' ? (
-                <>
-                  <div className="welcome-field">
-                    <label htmlFor="user-email">Email Address</label>
-                    <input
-                      id="user-email"
-                      type="email"
-                      autoFocus
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setError('');
-                      }}
-                      className="welcome-input"
-                    />
-                  </div>
-                  <div className="welcome-field">
-                    <label htmlFor="user-name">Your Name</label>
-                    <input
-                      id="user-name"
-                      type="text"
-                      placeholder="How should Serica address you?"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="welcome-input"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="welcome-field">
-                  <label htmlFor="guest-name">What should we call you?</label>
-                  <input
-                    id="guest-name"
-                    type="text"
-                    autoFocus
-                    placeholder="Enter your name (e.g. Yash)"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      setError('');
-                    }}
-                    className="welcome-input"
-                  />
-                  <span className="welcome-field-hint">
-                    Guest mode stores your profile strictly on your local machine.
-                  </span>
-                </div>
-              )}
-
-              {error && <div className="welcome-error-msg">{error}</div>}
-            </div>
-
-            {/* Next Step Action */}
-            <button type="submit" className="welcome-primary-btn">
-              <span>Personalize Workspace</span>
-              <ArrowRight size={16} />
-            </button>
-          </form>
-        ) : (
-          <div className="welcome-step-content">
-            <div className="welcome-brand-badge">
-              <Palette size={13} />
-              <span className="welcome-brand-title">ATMOSPHERE</span>
-            </div>
-
-            <h1 className="welcome-headline">Craft your aesthetic.</h1>
-            <p className="welcome-subtext">
-              Fine-tune the monochromatic palette and interface density to match your focus.
-            </p>
-
-            <div className="welcome-options-container">
-              {/* Palette Choice */}
-              <div className="welcome-section-label">Select Dark Theme</div>
-              <div className="welcome-theme-cards">
-                <div
-                  className={`welcome-theme-card ${theme === 'obsidian' ? 'selected' : ''}`}
-                  onClick={() => setTheme('obsidian')}
-                >
-                  <div className="theme-swatch obsidian-swatch" />
-                  <div className="theme-card-info">
-                    <span className="theme-name">Obsidian</span>
-                    <span className="theme-desc">Deep pure black (#08080A)</span>
-                  </div>
-                  {theme === 'obsidian' && <Check size={14} className="theme-check" />}
-                </div>
-
-                <div
-                  className={`welcome-theme-card ${theme === 'charcoal' ? 'selected' : ''}`}
-                  onClick={() => setTheme('charcoal')}
-                >
-                  <div className="theme-swatch charcoal-swatch" />
-                  <div className="theme-card-info">
-                    <span className="theme-name">Charcoal</span>
-                    <span className="theme-desc">Velvety matte (#101014)</span>
-                  </div>
-                  {theme === 'charcoal' && <Check size={14} className="theme-check" />}
-                </div>
-
-                <div
-                  className={`welcome-theme-card ${theme === 'slate' ? 'selected' : ''}`}
-                  onClick={() => setTheme('slate')}
-                >
-                  <div className="theme-swatch slate-swatch" />
-                  <div className="theme-card-info">
-                    <span className="theme-name">Slate Carbon</span>
-                    <span className="theme-desc">Tactile graphite (#16161A)</span>
-                  </div>
-                  {theme === 'slate' && <Check size={14} className="theme-check" />}
-                </div>
-              </div>
-
-              {/* Tab layout (changeable later in Settings -> Appearance) */}
-              <div className="welcome-section-label" style={{ marginTop: '16px' }}>Tabs</div>
-              <div className="welcome-layout-grid" role="radiogroup" aria-label="Tab layout">
-                {([
-                  ['sidebar', 'Sidebar', 'Vertical tabs with hover previews'],
-                  ['top', 'Top tabs', 'A classic tab strip above the page'],
-                ] as const).map(([value, title, desc]) => (
-                  <div
-                    key={value}
-                    role="radio"
-                    aria-checked={tabLayout === value}
-                    tabIndex={0}
-                    className={`welcome-layout-card ${tabLayout === value ? 'selected' : ''}`}
-                    onClick={() => setTabLayout(value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setTabLayout(value);
-                      }
-                    }}
-                  >
-                    <LayoutDiagram layout={value} />
-                    <div>
-                      <div className="mode-title">{title}</div>
-                      <div className="mode-desc">{desc}</div>
-                    </div>
-                    {tabLayout === value && <Check size={14} className="theme-check" />}
-                  </div>
-                ))}
-              </div>
-
-              {/* Layout Mode */}
-              <div className="welcome-section-label" style={{ marginTop: '16px' }}>Interface Density</div>
-              <div className="welcome-mode-grid">
-                <div
-                  className={`welcome-mode-pill ${mode === 'minimal' ? 'selected' : ''}`}
-                  onClick={() => setMode('minimal')}
-                >
-                  <Layout size={15} />
-                  <div>
-                    <div className="mode-title">Radical Minimal</div>
-                    <div className="mode-desc">Edge-to-edge, floating chrome</div>
-                  </div>
-                </div>
-
-                <div
-                  className={`welcome-mode-pill ${mode === 'architect' ? 'selected' : ''}`}
-                  onClick={() => setMode('architect')}
-                >
-                  <Sparkles size={15} />
-                  <div>
-                    <div className="mode-title">Architect</div>
-                    <div className="mode-desc">Includes vertical website dock</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Finish Action */}
-            <div className="welcome-footer-row">
-              <button
-                type="button"
-                className="welcome-secondary-btn"
-                onClick={() => setStep(1)}
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                className="welcome-primary-btn"
-                onClick={handleFinish}
-              >
-                <span>Enter Serica</span>
-                <Check size={16} />
-              </button>
-            </div>
+        <div className="onb-body">
+          <div key={step} className={`onb-step ${direction}`}>
+            {body}
           </div>
-        )}
+        </div>
+        <div className="onb-footer">
+          <button
+            type="button"
+            className={`onb-back${stepIndex === 0 ? ' hidden' : ''}`}
+            onClick={() => go(-1)}
+            tabIndex={stepIndex === 0 ? -1 : 0}
+            aria-hidden={stepIndex === 0}
+          >
+            <ArrowLeft size={14} />
+            Back
+          </button>
+          <span className="onb-count">
+            {stepIndex + 1} of {STEPS.length}
+          </span>
+          <button type="button" className="onb-next" onClick={next} disabled={!canContinue}>
+            {isLast ? 'Enter Serica' : 'Continue'}
+            {isLast ? <Check size={15} /> : <ArrowRight size={15} />}
+          </button>
+        </div>
       </div>
     </div>
   );
 };
-

@@ -24,6 +24,8 @@ interface BrowserViewportProps {
   onFullscreenChange?: (isFullscreen: boolean) => void;
   /** Page color of the active tab for the top bar tint (theme-color meta). */
   onPageColor?: (tabId: string, report: PageColorReport) => void;
+  /** Zoom of an untouched page (the text size setting); Ctrl+0 returns to it. */
+  defaultZoom?: number;
   /** Strips at the page edges kept free for hover-reveal zones (auto-hide sidebar, pins dock). */
   insetLeft?: number;
   insetRight?: number;
@@ -33,7 +35,7 @@ interface BrowserViewportProps {
 const FIND_BAR_INSET = 62;
 
 function isWebUrl(url: string | undefined): url is string {
-  return !!url && url !== 'about:blank' && !url.startsWith('neutrino://');
+  return !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
 }
 
 function hostnameOf(url: string): string {
@@ -62,10 +64,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   onPageColor,
   insetLeft = 0,
   insetRight = 0,
+  defaultZoom = 1,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
   activeTabRef.current = activeTab;
+  const defaultZoomRef = useRef(defaultZoom);
+  defaultZoomRef.current = defaultZoom;
 
   const [isFindOpen, setIsFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -210,8 +215,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     };
     const onZoom = (e: Event) => {
       const dir = (e as CustomEvent<'in' | 'out' | 'reset'>).detail;
-      const current = activeTabRef.current?.zoomFactor ?? 1;
-      const next = dir === 'reset' ? 1 : dir === 'in' ? Math.min(3, current + 0.1) : dir === 'out' ? Math.max(0.3, current - 0.1) : current;
+      const current = activeTabRef.current?.zoomFactor ?? defaultZoomRef.current;
+      const next = dir === 'reset' ? defaultZoomRef.current : dir === 'in' ? Math.min(3, current + 0.1) : dir === 'out' ? Math.max(0.3, current - 0.1) : current;
       void window.serica?.setZoomFactor?.(Math.round(next * 10) / 10);
     };
     const unsubEsc = window.serica?.onEscapePressed?.(() => closeFindBar());
@@ -374,7 +379,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
               <span>{showUnloaded ? 'Pinned tab' : 'Zen Memory Saver'}</span>
             </div>
             <h2 className="zen-sleeping-title">
-              {activeTab.title && !activeTab.title.startsWith('neutrino://') ? activeTab.title : 'Tab is Sleeping'}
+              {activeTab.title && !/^(serica|neutrino):\/\//.test(activeTab.title) ? activeTab.title : 'Tab is Sleeping'}
             </h2>
             <div className="zen-sleeping-url-pill">
               <Globe size={12} className="zen-sleeping-globe" />

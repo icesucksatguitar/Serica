@@ -431,7 +431,8 @@ impl Store {
     /// Creates a Today tab. `after` inserts it right after an opener tab.
     pub fn create_tab(&mut self, url: Option<String>, space_id: Option<String>, activate: bool, after: Option<&str>) -> TabState {
         let space_id = space_id.filter(|s| self.space(s).is_some()).unwrap_or_else(|| self.active_space_id.clone());
-        let tab = TabState::new(&space_id, url);
+        let mut tab = TabState::new(&space_id, url);
+        tab.zoom_factor = Some(self.settings.text_scale);
         let index = after.and_then(|a| {
             let list = self.list(&space_id, Section::Today);
             list.iter().position(|&i| self.tabs[i].id == a).map(|p| p as i64 + 1)
@@ -653,6 +654,20 @@ impl Store {
             }
         }
         Some(needs_reload)
+    }
+
+    /// Adds a site as a pinned tab that loads when first opened (onboarding).
+    pub fn add_pinned_site(&mut self, url: String, title: String, favicon: Option<String>, space_id: Option<String>) -> Option<TabState> {
+        let tab = self.create_tab(Some(url), space_id, false, None);
+        if let Some(t) = self.tab_mut(&tab.id) {
+            t.title = title;
+            t.favicon = favicon;
+            t.unloaded = true;
+        }
+        if !self.set_pinned(&tab.id, true) {
+            return None;
+        }
+        self.tab(&tab.id).cloned()
     }
 
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> bool {
@@ -1008,6 +1023,29 @@ mod tests {
 
     fn today_ids(s: &Store, space: &str) -> Vec<String> {
         s.list(space, Section::Today).into_iter().map(|i| s.tabs[i].id.clone()).collect()
+    }
+
+    #[test]
+    fn pinned_site_is_added_unloaded_without_activation() {
+        let mut s = store();
+        let active = s.active_tab_id.clone();
+        let space = s.active_space_id.clone();
+        let tab = s
+            .add_pinned_site("https://mail.google.com/".into(), "Gmail".into(), None, Some(space.clone()))
+            .expect("pinned");
+        assert_eq!(tab.section(), Section::Pinned);
+        assert!(tab.unloaded);
+        assert_eq!(tab.title, "Gmail");
+        assert_eq!(s.active_tab_id, active);
+        assert!(s.list(&space, Section::Pinned).iter().any(|&i| s.tabs[i].id == tab.id));
+    }
+
+    #[test]
+    fn new_tabs_open_at_the_text_size() {
+        let mut s = store();
+        s.settings.text_scale = 1.25;
+        let tab = s.create_tab(Some("https://a.com".into()), None, false, None);
+        assert_eq!(tab.zoom_factor, Some(1.25));
     }
 
     #[test]

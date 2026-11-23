@@ -76,6 +76,8 @@ export const tauriBridge = {
   moveTab: (op: any) => invoke<any>('move_tab', { op }),
   pinTab: (tabId: string) => invoke<any>('pin_tab', { tabId }),
   unpinTab: (tabId: string) => invoke<any>('unpin_tab', { tabId }),
+  addPinnedSites: (sites: { url: string; title: string }[], spaceId?: string) =>
+    invoke<number>('add_pinned_sites', { sites, spaceId: spaceId ?? null }),
   addFavorite: (tabId: string) => invoke<any>('add_favorite', { tabId }),
   removeFavorite: (favoriteId: string) => invoke<any>('remove_favorite', { favoriteId }),
   duplicateTab: (id: string, spaceId?: string) => invoke<any>('duplicate_tab', { id, spaceId: spaceId ?? null }),

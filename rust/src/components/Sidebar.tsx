@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRightLeft,
   BookOpen,
@@ -31,11 +31,12 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { sidebarVisibility } from '../shared/layout';
+import { SIDEBAR_EDGE_PX, sidebarVisibility } from '../shared/layout';
 import { useSpaceSwipe } from '../hooks/useSpaceSwipe';
 import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
+import { addSettledBlurListener } from '../utils/settledBlur';
 import { useViewportOverlay } from '../hooks/useViewportOverlay';
 import {
   buildSidebarView,
@@ -349,11 +350,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     document.documentElement.addEventListener('mouseleave', onLeave);
-    window.addEventListener('blur', onLeave);
+    const removeBlur = addSettledBlurListener(onLeave);
     return () => {
       window.removeEventListener('mousemove', onMove);
       document.documentElement.removeEventListener('mouseleave', onLeave);
-      window.removeEventListener('blur', onLeave);
+      removeBlur();
       if (autoHideTimerRef.current !== null) {
         window.clearTimeout(autoHideTimerRef.current);
       }
@@ -367,11 +368,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (e.key === 'Escape') close();
     };
     window.addEventListener('mousedown', close);
-    window.addEventListener('blur', close);
+    const removeBlur = addSettledBlurListener(close);
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('mousedown', close);
-      window.removeEventListener('blur', close);
+      removeBlur();
       window.removeEventListener('keydown', onKey);
     };
   }, [folderMenu]);
@@ -445,11 +446,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (e.key === 'Escape') close();
     };
     window.addEventListener('mousedown', close);
-    window.addEventListener('blur', close);
+    const removeBlur = addSettledBlurListener(close);
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('mousedown', close);
-      window.removeEventListener('blur', close);
+      removeBlur();
       window.removeEventListener('keydown', onKey);
     };
   }, [menu]);

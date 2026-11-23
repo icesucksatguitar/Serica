@@ -8,7 +8,7 @@ use crate::store::MoveOp;
 use crate::tabhost::{Bounds, TabHost};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 
 type R<T> = Result<T, String>;
 
@@ -99,6 +99,28 @@ pub async fn toggle_pin_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
 #[tauri::command]
 pub async fn pin_tab(tab_id: String, app: State<'_, Shared>) -> R<Value> {
     Ok(if app.mutate(|s| s.set_pinned(&tab_id, true)) { ok() } else { err("not-found") })
+}
+
+#[derive(serde::Deserialize)]
+pub struct PinnedSiteInput {
+    url: String,
+    title: String,
+}
+
+/// Pins sites in a space without loading them (chosen during onboarding).
+#[tauri::command]
+pub async fn add_pinned_sites(sites: Vec<PinnedSiteInput>, space_id: Option<String>, app: State<'_, Shared>) -> R<usize> {
+    let sites: Vec<(String, String, Option<String>)> = sites
+        .into_iter()
+        .take(24)
+        .filter_map(|s| {
+            let parsed = url::Url::parse(&s.url).ok().filter(|u| matches!(u.scheme(), "http" | "https"))?;
+            let favicon = parsed.host_str().map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=64"));
+            let title: String = s.title.trim().chars().take(80).collect();
+            Some((parsed.to_string(), if title.is_empty() { parsed.host_str().unwrap_or_default().to_string() } else { title }, favicon))
+        })
+        .collect();
+    Ok(app.mutate(|s| sites.into_iter().filter_map(|(u, t, f)| s.add_pinned_site(u, t, f, space_id.clone())).count()))
 }
 
 #[tauri::command]
@@ -308,7 +330,9 @@ pub async fn open_external_url(url: String) -> R<bool> {
 #[tauri::command]
 pub async fn set_viewport(x: f64, y: f64, width: f64, height: f64, app: State<'_, Shared>) -> R<()> {
     if [x, y, width, height].iter().all(|v| v.is_finite()) {
-        TabHost::set_bounds(app.inner(), Bounds { x, y, w: width.max(0.0), h: height.max(0.0) });
+        // The UI reports CSS px; the interface is zoomed by the text size.
+        let z = app.settings().text_scale;
+        TabHost::set_bounds(app.inner(), Bounds { x: x * z, y: y * z, w: (width * z).max(0.0), h: (height * z).max(0.0) });
     }
     Ok(())
 }
@@ -577,14 +601,51 @@ pub async fn get_settings(app: State<'_, Shared>) -> R<BrowserSettings> {
 
 #[tauri::command]
 pub async fn update_settings(patch: Value, app: State<'_, Shared>) -> R<BrowserSettings> {
-    let updated = {
+    let (updated, old_scale) = {
         let mut s = app.store.lock();
+        let old = s.settings.text_scale;
         s.settings.apply_patch(&patch);
-        s.settings.clone()
+        (s.settings.clone(), old)
     };
+    if (updated.text_scale - old_scale).abs() > 0.001 {
+        apply_text_scale(app.inner(), old_scale, updated.text_scale);
+    }
     app.shields.configure(updated.adblock_enabled, &updated.shield_whitelist);
     app.notify(Notice::Settings);
     Ok(updated)
+}
+
+/// Zooms the interface to the text size.
+pub fn apply_ui_zoom(app: &Shared, scale: f64) {
+    if let Some(main) = app.handle.get_webview("main") {
+        let _ = main.set_zoom(scale);
+    }
+}
+
+/// A new text size: zooms the interface, and moves pages still at the old
+/// default size to the new one (pages the user zoomed by hand keep their zoom).
+fn apply_text_scale(app: &Shared, old: f64, new: f64) {
+    apply_ui_zoom(app, new);
+    let moved: Vec<String> = {
+        let mut s = app.store.lock();
+        s.tabs
+            .iter_mut()
+            .filter(|t| t.zoom_factor.map(|z| (z - old).abs() < 0.001).unwrap_or(true))
+            .map(|t| {
+                t.zoom_factor = Some(new);
+                t.id.clone()
+            })
+            .collect()
+    };
+    for id in moved {
+        if let Some(wv) = TabHost::webview(app, &id) {
+            #[cfg(windows)]
+            crate::webview_win::set_zoom(&wv, new);
+            #[cfg(not(windows))]
+            let _ = wv.set_zoom(new);
+        }
+    }
+    app.notify(Notice::State);
 }
 
 #[tauri::command]
@@ -817,14 +878,17 @@ pub async fn get_mcp_logs(app: State<'_, Shared>) -> R<Vec<Value>> {
 #[tauri::command]
 pub async fn assistant_open(url: String, x: f64, y: f64, width: f64, height: f64, app: State<'_, Shared>) -> R<()> {
     let app = app.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || TabHost::assistant_open(&app, &url, Bounds { x, y, w: width, h: height }))
+    let z = app.settings().text_scale;
+    let b = Bounds { x: x * z, y: y * z, w: width * z, h: height * z };
+    tauri::async_runtime::spawn_blocking(move || TabHost::assistant_open(&app, &url, b))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn assistant_bounds(x: f64, y: f64, width: f64, height: f64, app: State<'_, Shared>) -> R<()> {
-    TabHost::assistant_bounds(app.inner(), Bounds { x, y, w: width, h: height });
+    let z = app.settings().text_scale;
+    TabHost::assistant_bounds(app.inner(), Bounds { x: x * z, y: y * z, w: width * z, h: height * z });
     Ok(())
 }
 

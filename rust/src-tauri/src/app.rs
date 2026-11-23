@@ -97,7 +97,7 @@ pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
     if lower.starts_with("javascript:") || lower.starts_with("vbscript:") {
         return None;
     }
-    if lower.starts_with("serica://") || lower.starts_with("serica://") || lower == "about:blank" {
+    if lower.starts_with("serica://") || lower.starts_with("neutrino://") || lower == "about:blank" {
         return Some(lower);
     }
     for scheme in ["http://", "https://", "chrome-extension://", "file://", "about:", "data:", "view-source:", "edge://", "mailto:"] {

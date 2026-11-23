@@ -309,6 +309,7 @@ export interface SericaAPI {
   moveTab?: (op: MoveOp) => Promise<IpcResult<{ needsReload: boolean }>>;
   pinTab?: (tabId: string) => Promise<IpcResult>;
   unpinTab?: (tabId: string) => Promise<IpcResult>;
+  addPinnedSites?: (sites: { url: string; title: string }[], spaceId?: string) => Promise<number>;
   addFavorite?: (tabId: string) => Promise<IpcResult>;
   removeFavorite?: (favoriteId: string) => Promise<IpcResult>;
   duplicateTab?: (id: string, spaceId?: string) => Promise<IpcResult<{ tab: TabState }>>;

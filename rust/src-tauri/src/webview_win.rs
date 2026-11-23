@@ -221,6 +221,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 let url = take(uri);
                 app.tab_event(&id, TabEvent::Loaded { url, success: ok.as_bool() });
                 read_theme_color(&app, &id, &sender);
+                crate::tabhost::TabHost::capture_after_load(&app, id.clone());
                 Ok(())
             })),
             &mut token,

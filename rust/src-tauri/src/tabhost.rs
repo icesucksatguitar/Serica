@@ -215,13 +215,23 @@ impl TabHost {
             live: bool,
             profile: String,
             media: bool,
+            zoom: f64,
         }
         let (wants, active, auto_pip): (HashMap<String, Want>, Option<String>, bool) = {
             let s = app.store.lock();
             let wants = s
                 .tabs
                 .iter()
-                .map(|t| (t.id.clone(), Want { url: t.url.clone(), live: t.wants_webview(), profile: s.space_profile(&t.space_id), media: t.has_active_media }))
+                .map(|t| {
+                    let want = Want {
+                        url: t.url.clone(),
+                        live: t.wants_webview(),
+                        profile: s.space_profile(&t.space_id),
+                        media: t.has_active_media,
+                        zoom: t.zoom_factor.filter(|z| z.is_finite() && *z > 0.0).unwrap_or(s.settings.text_scale),
+                    };
+                    (t.id.clone(), want)
+                })
                 .collect();
             (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture)
         };
@@ -251,6 +261,10 @@ impl TabHost {
                     let (url, profile) = (w.url.clone(), w.profile.clone());
                     if let Some(wv) = host.create(app, id, &url, &profile) {
                         let _ = wv.hide();
+                        #[cfg(windows)]
+                        if (w.zoom - 1.0).abs() > 0.001 {
+                            crate::webview_win::set_zoom(&wv, w.zoom);
+                        }
                         host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false });
                     }
                 }
@@ -336,10 +350,43 @@ impl TabHost {
         }
     }
 
+    /// Snapshots a tab for hover previews shortly after its page loads, while
+    /// it is on screen. (A tab is hidden the moment it's left, and WebView2
+    /// can't capture a hidden view, so the switch itself is too late.)
+    #[cfg(windows)]
+    pub fn capture_after_load(app: &Shared, tab_id: String) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            let wv = {
+                let host = app.host.lock();
+                match host.views.get(&tab_id) {
+                    Some(v) if host.visible && v.shown => v.webview.clone(),
+                    _ => return,
+                }
+            };
+            let app2 = app.clone();
+            crate::webview_win::capture(&wv, move |img| {
+                if let Some(img) = img {
+                    app2.host.lock().previews.insert(tab_id, img);
+                }
+            });
+        });
+    }
+
     pub fn set_visible(app: &Shared, visible: bool) {
-        app.host.lock().visible = visible;
+        // Only a page that was on screen can hold keyboard focus. Moving focus
+        // when the UI already has it makes the UI document blur and refocus,
+        // which closes menus and hover cards that listen for window blur.
+        let page_was_shown = {
+            let active = app.store.lock().active_tab_id.clone();
+            let mut host = app.host.lock();
+            let shown = host.visible && active.as_ref().and_then(|id| host.views.get(id)).is_some_and(|v| v.shown);
+            host.visible = visible;
+            shown
+        };
         Self::reconcile(app);
-        if !visible {
+        if !visible && page_was_shown {
             // Give keyboard focus back to the UI (command bar, dialogs).
             if let Some(main) = app.handle.get_webview("main") {
                 let _ = main.set_focus();
