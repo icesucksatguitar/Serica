@@ -65,7 +65,6 @@ export const ARCHIVE_INTERVAL_LABELS: Readonly<Record<string, string>> = Object.
 });
 
 export const ARCHIVE_INTERVAL_HINT = 'Closes inactive Today tabs and keeps them in the archive';
-export const SIDEBAR_AUTO_HIDE_HINT = 'Hides the sidebar until the pointer reaches the left edge';
 export const RIGHT_PINS_DOCK_HINT = 'One-click sites on the right edge. On web pages, move the cursor to the edge to reveal it';
 
 const archiveIntervalLabel = (value: ArchiveIntervalHours): string =>
@@ -451,20 +450,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
 
                 <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Auto-hide sidebar</span>
-                      <span className="settings-hint">{SIDEBAR_AUTO_HIDE_HINT}</span>
-                    </div>
-                    <SettingsSwitch
-                      checked={settings.sidebarAutoHide}
-                      label="Auto-hide sidebar"
-                      onChange={(next) => onUpdateSettings({ sidebarAutoHide: next })}
-                    />
-                  </div>
-
-                  <div className="settings-divider" />
-
                   <div className="settings-row">
                     <div className="settings-row-text">
                       <span className="settings-row-label">Website dock</span>

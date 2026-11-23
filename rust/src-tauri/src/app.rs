@@ -130,6 +130,7 @@ impl App {
         let shields = Shields::new(data_dir.join("adblock"), store.shield_stats.clone());
         shields.configure(store.settings.adblock_enabled, &store.settings.shield_whitelist);
         let vpn = Vpn::new(data_dir.join("vpn.json"));
+        let net = (vpn.needs_proxy(), vpn.webrtc_guard_active());
         let port = vpn.start_proxy();
         let (tx, rx) = mpsc::channel();
         let app = Arc::new(App {
@@ -141,7 +142,7 @@ impl App {
             extensions: Extensions::new(data_dir.join("extensions")),
             downloads: Downloads::new(data_dir.join("downloads.json")),
             mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
-            host: Mutex::new(TabHost::new(data_dir.join("webdata"), port)),
+            host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
             tx: Mutex::new(tx),

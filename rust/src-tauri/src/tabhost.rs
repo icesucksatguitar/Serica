@@ -71,6 +71,12 @@ pub struct TabHost {
     pub assistant: Option<(Webview, Bounds)>,
     data_root: PathBuf,
     proxy_port: Option<u16>,
+    /// Network setup the current page webviews were created with:
+    /// (routed through the local tunnel proxy, WebRTC guard script).
+    net: (bool, bool),
+    /// Failed creations in a row (a profile's browser process may still be
+    /// shutting down after a network change); creation is retried a few times.
+    create_failures: u32,
 }
 
 /// Runs in every tab's top frame: reports CSS classes/ids for Brave's generic
@@ -110,7 +116,7 @@ fn sanitize(s: &str) -> String {
 }
 
 impl TabHost {
-    pub fn new(data_root: PathBuf, proxy_port: Option<u16>) -> Self {
+    pub fn new(data_root: PathBuf, proxy_port: Option<u16>, net: (bool, bool)) -> Self {
         Self {
             views: HashMap::new(),
             bounds: None,
@@ -120,6 +126,8 @@ impl TabHost {
             assistant: None,
             data_root,
             proxy_port,
+            net,
+            create_failures: 0,
         }
     }
 
@@ -129,7 +137,9 @@ impl TabHost {
 
     fn browser_args(&self) -> String {
         let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
-        if let Some(p) = self.proxy_port {
+        // Pages connect directly unless the VPN needs the tunnel: a proxy turns
+        // off HTTP/3 and Chromium's own DNS and connection racing.
+        if let (true, Some(p)) = (self.net.0, self.proxy_port) {
             args.push_str(&format!(" --proxy-server=http://127.0.0.1:{p}"));
         }
         args
@@ -143,7 +153,7 @@ impl TabHost {
             .browser_extensions_enabled(true)
             .initialization_script(PAGE_SCRIPT)
             .initialization_script(crate::extensions::WEBSTORE_SCRIPT);
-        if app.vpn.webrtc_guard_active() {
+        if self.net.1 {
             b = b.initialization_script_for_all_frames(crate::vpn::WEBRTC_GUARD_JS);
         }
         if let Some(tab_id) = tab_id {
@@ -187,11 +197,17 @@ impl TabHost {
         let window = app.handle.get_window("main")?;
         let parsed = url::Url::parse(url).ok()?;
         let label = format!("tab-{}-{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed), sanitize(tab_id));
-        let builder = self.builder(app, label, parsed, profile, Some(tab_id));
+        // On Windows the page starts blank so its adblock scripts can be
+        // registered before the first load (see `webview_win::attach`).
+        #[cfg(windows)]
+        let start = url::Url::parse("about:blank").ok()?;
+        #[cfg(not(windows))]
+        let start = parsed.clone();
+        let builder = self.builder(app, label, start, profile, Some(tab_id));
         match window.add_child(builder, LogicalPosition::new(bounds.x, bounds.y), LogicalSize::new(bounds.w.max(1.0), bounds.h.max(1.0))) {
             Ok(wv) => {
                 #[cfg(windows)]
-                crate::webview_win::attach(app, tab_id, profile, &wv);
+                crate::webview_win::attach(app, tab_id, profile, &wv, Some(parsed.to_string()));
                 Some(wv)
             }
             Err(e) => {
@@ -254,18 +270,23 @@ impl TabHost {
             }
         }
 
+        let mut retry = false;
         // Lazily create the active tab's webview.
         if let Some(id) = &active {
             if let Some(w) = wants.get(id) {
                 if w.live && !host.views.contains_key(id) && !is_internal_url(&w.url) {
                     let (url, profile) = (w.url.clone(), w.profile.clone());
                     if let Some(wv) = host.create(app, id, &url, &profile) {
+                        host.create_failures = 0;
                         let _ = wv.hide();
                         #[cfg(windows)]
                         if (w.zoom - 1.0).abs() > 0.001 {
                             crate::webview_win::set_zoom(&wv, w.zoom);
                         }
                         host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false });
+                    } else if host.create_failures < 20 {
+                        host.create_failures += 1;
+                        retry = true;
                     }
                 }
             }
@@ -302,6 +323,13 @@ impl TabHost {
             }
         }
         drop(host);
+        if retry {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                let _ = tauri::async_runtime::spawn_blocking(move || Self::reconcile(&app)).await;
+            });
+        }
         #[cfg(windows)]
         for (id, wv) in previews_to_capture {
             let app = app.clone();
@@ -348,6 +376,28 @@ impl TabHost {
         if first {
             Self::reconcile(app);
         }
+    }
+
+    /// Recreates page webviews when the VPN changes how they must connect
+    /// (direct or through the tunnel proxy). Browser arguments are fixed per
+    /// WebView2 environment, so open pages reload once.
+    pub fn sync_network(app: &Shared) {
+        let want = (app.vpn.needs_proxy(), app.vpn.webrtc_guard_active());
+        {
+            let mut host = app.host.lock();
+            if host.net == want {
+                return;
+            }
+            host.net = want;
+            host.create_failures = 0;
+            for (_, v) in host.views.drain() {
+                let _ = v.webview.close();
+            }
+            if let Some((wv, _)) = host.assistant.take() {
+                let _ = wv.close();
+            }
+        }
+        Self::reconcile(app);
     }
 
     /// Snapshots a tab for hover previews shortly after its page loads, while

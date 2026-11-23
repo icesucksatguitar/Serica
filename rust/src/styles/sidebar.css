@@ -78,20 +78,55 @@ body.sidebar-resizing-active .arc-viewport-container {
   padding-right: 6px;
 }
 
-/* Auto-hide: the sidebar floats over the page and slides in from the left edge. */
+/* The sidebar floats over the page, full height, and slides in from the left
+   edge. It is opaque and has no backdrop blur so the slide stays at 60fps. */
 .nsb.autohide {
   position: fixed;
   top: 0;
   bottom: 0;
   left: 0;
-  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.35);
-  z-index: 1200;
+  padding-top: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 9%, transparent), transparent 260px),
+    var(--theme-bg-canvas, #0c0d10);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-right: 1px solid var(--nsb-border);
+  box-shadow: 18px 0 48px rgba(0, 0, 0, 0.32), 1px 0 0 rgba(255, 255, 255, 0.02);
+  z-index: 10100;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    box-shadow 320ms ease;
+}
+
+[data-theme="light"] .nsb.autohide {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 7%, transparent), transparent 260px),
+    var(--theme-bg-canvas, #f7f4ef);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 18px 0 48px rgba(40, 30, 20, 0.16);
 }
 
 .nsb.autohide.hidden {
-  transform: translateX(calc(-100% - 2px));
+  transform: translate3d(calc(-100% - 24px), 0, 0);
   opacity: 0;
+  box-shadow: none;
   pointer-events: none;
+  transition:
+    transform 260ms cubic-bezier(0.4, 0, 0.6, 1),
+    opacity 200ms ease 60ms,
+    box-shadow 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nsb.autohide,
+  .nsb.autohide.hidden {
+    transition: opacity 120ms ease;
+  }
 }
 
 .nsb-edge-zone {
@@ -100,7 +135,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   bottom: 0;
   left: 0;
   width: 8px; /* SIDEBAR_EDGE_PX */
-  z-index: 1199;
+  z-index: 10090;
   background: transparent;
 }
 
@@ -110,7 +145,57 @@ body.sidebar-resizing-active .arc-viewport-container {
   align-items: center;
   gap: 6px;
   min-height: 28px;
+  /* The sidebar covers the top-left of the window: its header moves the window. */
+  -webkit-app-region: drag;
+}
+
+.nsb-header button {
   -webkit-app-region: no-drag;
+}
+
+/* + New Tab, at the top of Today */
+.nsb-new-tab {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 34px;
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--nsb-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.nsb-new-tab:hover {
+  background: var(--nsb-hover);
+  color: var(--nsb-fg);
+}
+
+.nsb-new-tab:active {
+  transform: scale(0.985);
+}
+
+.nsb-new-tab span {
+  flex: 1;
+}
+
+.nsb-new-tab-kbd {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--nsb-fg-faint);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.nsb-new-tab:hover .nsb-new-tab-kbd {
+  opacity: 1;
 }
 
 .nsb-space-title {
@@ -673,7 +758,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 /* Context menu */
 .nsb-menu {
   position: fixed;
-  z-index: 2000;
+  z-index: 10300;
   display: flex;
   flex-direction: column;
   padding: 4px;
@@ -833,7 +918,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 1000;
+  z-index: 10250;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -866,7 +951,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 /* Hover page preview (R18.1, R18.6). Above the auto-hide sidebar, below the context menu. */
 .nsb-preview {
   position: fixed;
-  z-index: 1300;
+  z-index: 10200;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;

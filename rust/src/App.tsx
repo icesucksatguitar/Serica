@@ -8,11 +8,12 @@ import { FloatingUrlPill } from './components/FloatingUrlPill';
 import { BrowserViewport } from './components/BrowserViewport';
 import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
 import { TopTabStrip } from './components/TopTabStrip';
+import { ToolsMenu } from './components/ToolsMenu';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { useViewportOverlay } from './hooks/useViewportOverlay';
+import { prewarmViewport, useViewportOverlay } from './hooks/useViewportOverlay';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -24,14 +25,9 @@ import {
   Home,
   X,
   Shield,
-  Moon,
-  Sun,
-  Sparkles,
-  Palette,
-  Settings,
-  History,
   Lock,
   Download,
+  Plus,
 } from 'lucide-react';
 import { useDownloads, aggregateProgress, isActiveDownload } from './hooks/useDownloads';
 import {
@@ -133,22 +129,13 @@ export function App() {
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
 
-  // Sidebar (R12): expanded/collapsed and auto-hide persist through the settings IPC (R12.5).
-  // Ctrl+E (`toggle-tabs`) toggles expanded/collapsed (R12.3, decision A2).
-  const sidebarExpanded = settings.sidebarExpanded;
-  const sidebarExpandedRef = useRef(sidebarExpanded);
-  sidebarExpandedRef.current = sidebarExpanded;
-  const setSidebarExpanded = useCallback(
-    (next: boolean) => {
-      if (next === sidebarExpandedRef.current) return;
-      sidebarExpandedRef.current = next;
-      void updateSettings({ sidebarExpanded: next });
-    },
-    [updateSettings]
-  );
-  const toggleSidebar = useCallback(() => {
-    setSidebarExpanded(!sidebarExpandedRef.current);
-  }, [setSidebarExpanded]);
+  // Sidebar: a full-height panel that floats over the page. It starts hidden and
+  // opens from the toolbar button, Ctrl+S / Ctrl+E or the left edge of the window.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const setSidebarExpanded = useCallback((next: boolean) => setSidebarOpen(next), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   // New tab control / Ctrl+T (R12.8): the Command_Bar opens in "new tab" mode and its
   // submission creates a Today tab in the Active_Space instead of navigating the current tab.
@@ -944,8 +931,8 @@ const topTabs = settings.tabLayout === 'top';
 const showTopTabs = topTabs && !isHtmlFullscreen;
 // Sidebar placement: docked (not auto-hide) pushes the web canvas right; hidden in HTML fullscreen.
 const showSidebar = !isHtmlFullscreen && !topTabs;
-const sidebarAutoHide = settings.sidebarAutoHide;
-const isSidebarDocked = showSidebar && !sidebarAutoHide;
+// Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
+const contentTop = isHtmlFullscreen ? 0 : showTopTabs ? 82 : 44;
 
 const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
   const saved = (settings as any).sidebarWidth;
@@ -976,8 +963,7 @@ useViewportOverlay(
 );
 
 const shellStyle = {
-  '--app-sidebar-width': isSidebarDocked ? (sidebarExpanded ? `${sidebarWidth}px` : '56px') : '0px',
-  '--app-top-offset': isWebpage ? '44px' : '60px',
+    '--app-top-offset': isWebpage ? '44px' : '60px',
   // Where the page starts on web pages: below the top bar, plus the tab strip in top-tabs mode.
   '--app-content-top': showTopTabs ? '82px' : '44px',
 } as React.CSSProperties;
@@ -1008,8 +994,10 @@ return (
         className="app-sidebar"
         state={state}
         actions={{ ...browser, selectSpace: handleSelectSpace, openCommandBar: openNewTabCommandBar }}
-        expanded={sidebarExpanded}
-        autoHide={sidebarAutoHide}
+        expanded
+        autoHide
+        pinnedOpen={sidebarOpen}
+        onRequestClose={closeSidebar}
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}
@@ -1027,47 +1015,21 @@ return (
 
     {/* Top Chrome Header Bar (Solid dedicated header on web pages, floating on newtab) */}
     <div
-      className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}`}
+      className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}${toolsOpen ? ' tools-open' : ''}`}
       style={isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : undefined}
       data-topbar-tint={isTopBarTinted && topBarTint ? topBarTint.source : 'default'}
     >
-      {/* Top Left: macOS Frameless Window Controls & Tabs Switcher (Opaque) */}
-      <aside className="macos-window-controls-cluster" aria-label="Window Controls">
-        <div className="macos-traffic-lights">
-          <button
-            className="traffic-light close"
-            onClick={() => window.serica?.windowControl('close')}
-            title="Close"
-            aria-label="Close"
-          >
-            <span className="traffic-glyph">✕</span>
-          </button>
-          <button
-            className="traffic-light minimize"
-            onClick={() => window.serica?.windowControl('minimize')}
-            title="Minimize"
-            aria-label="Minimize"
-          >
-            <span className="traffic-glyph">−</span>
-          </button>
-          <button
-            className="traffic-light maximize"
-            onClick={() => window.serica?.windowControl('maximize')}
-            title="Maximize"
-            aria-label="Maximize"
-          >
-            <span className="traffic-glyph">+</span>
-          </button>
-        </div>
-
-        {/* Dedicated Spaces & Tabs Toggle Pill (Opaque); top-tabs mode shows spaces in the strip */}
+      {/* Top left: sidebar toggle, site navigation and new tab */}
+      <aside className="macos-window-controls-cluster" aria-label="Navigation">
         {!topTabs && (
         <button
-          className={`macos-tabs-toggle-pill ${sidebarExpanded ? 'active' : ''}`}
+          className={`macos-tabs-toggle-pill ${sidebarOpen ? 'active' : ''}`}
+          data-sidebar-toggle
+          onPointerEnter={prewarmViewport}
           onClick={toggleSidebar}
-          title={sidebarExpanded ? 'Collapse sidebar (Ctrl+S)' : 'Expand sidebar (Ctrl+S)'}
+          title={sidebarOpen ? 'Hide sidebar (Ctrl+S)' : 'Show sidebar (Ctrl+S)'}
           aria-label="Toggle sidebar"
-          aria-pressed={sidebarExpanded}
+          aria-pressed={sidebarOpen}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -1135,6 +1097,15 @@ return (
             <Home size={13.5} strokeWidth={2.1} />
           </button>
         </div>
+        <button
+          type="button"
+          className="minimal-icon-btn topbar-new-tab-btn"
+          onClick={openNewTabCommandBar}
+          title="New tab (Ctrl+T)"
+          aria-label="New tab"
+        >
+          <Plus size={16} />
+        </button>
       </aside>
 
       {/* Top Center Floating URL Pill */}
@@ -1148,23 +1119,19 @@ return (
         onOpenFind={() => dispatchSiteAction('open-find')}
       />
 
-      {/* Top Right Controls: Modern Vector Icons (Monochromatic) */}
+      {/* Top right: status pills and the browser menu, then the window controls */}
       <div className="minimal-top-right-cluster">
-        <button
-          className={`minimal-pill-btn vpn-top-pill ${vpnStatus?.state === 'connected' ? 'vpn-connected' : vpnStatus?.state === 'error' ? 'vpn-error' : ''}`}
-          onClick={() => setIsVpnModalOpen(!isVpnModalOpen)}
-          title={
-            vpnStatus?.state === 'connected'
-              ? `VPN Tunnel Active (${vpnStatus.activeProxyRule || vpnStatus.config.mode})`
-              : vpnStatus?.state === 'error'
-                ? `VPN Error: ${vpnStatus.lastError || 'Check tunnel'}`
-                : 'Built-in VPN & Privacy Tunnel'
-          }
-          aria-label="Built-in VPN"
-        >
-          <Lock size={13} className="modern-btn-icon" />
-          <span>{vpnStatus?.state === 'connected' ? 'VPN ON' : 'VPN'}</span>
-        </button>
+        {vpnStatus?.state === 'connected' && (
+          <button
+            className="minimal-pill-btn vpn-top-pill vpn-connected"
+            onClick={() => setIsVpnModalOpen(!isVpnModalOpen)}
+            title={`VPN Tunnel Active (${vpnStatus.activeProxyRule || vpnStatus.config.mode})`}
+            aria-label="Built-in VPN"
+          >
+            <Lock size={13} className="modern-btn-icon" />
+            <span>VPN ON</span>
+          </button>
+        )}
 
         {(() => {
           const activeHost = (() => {
@@ -1236,59 +1203,55 @@ return (
           </button>
         )}
 
-        <button
-          className="minimal-icon-btn"
-          onClick={() => setIsHistoryModalOpen((prev) => !prev)}
-          title="Browsing History (Ctrl+H)"
-          aria-label="Browsing History"
-        >
-          <History size={15} />
-        </button>
-
-        <button
-          className="minimal-icon-btn"
-          onClick={() => {
+        <ToolsMenu
+          isDarkMode={isDarkMode}
+          vpnOn={vpnStatus?.state === 'connected'}
+          onHistory={() => setIsHistoryModalOpen(true)}
+          onDownloads={() => setIsDownloadsOpen(true)}
+          onAssistants={() => {
             setMcpInitialTab('assistants');
             setIsMcpModalOpen(true);
           }}
-          title="AI Assistants & Tools (Claude, ChatGPT, Gemini, Local)"
-          aria-label="AI Assistants & Tools"
-        >
-          <Sparkles size={15} />
-        </button>
+          onVpn={() => setIsVpnModalOpen(true)}
+          onThemeStudio={() => setIsThemeModalOpen(true)}
+          onToggleDarkMode={toggleDarkMode}
+          onSettings={openSettings}
+          onOpenChange={setToolsOpen}
+        />
 
-        <button
-          className="minimal-icon-btn"
-          onClick={toggleDarkMode}
-          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          aria-label="Toggle Dark Mode"
-        >
-          {isDarkMode ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-
-        <button
-          className="minimal-icon-btn"
-          onClick={() => setIsThemeModalOpen(true)}
-          title="Themes & Appearance"
-          aria-label="Themes & Appearance"
-        >
-          <Palette size={15} />
-        </button>
-
-        <button
-          className="minimal-icon-btn"
-          onClick={openSettings}
-          title="Settings (Ctrl+,)"
-          aria-label="Settings"
-        >
-          <Settings size={15} />
-        </button>
+        <div className="window-controls-divider" aria-hidden="true" />
+        <div className="macos-traffic-lights window-controls-right" aria-label="Window controls">
+          <button
+            className="traffic-light minimize"
+            onClick={() => window.serica?.windowControl('minimize')}
+            title="Minimize"
+            aria-label="Minimize"
+          >
+            <span className="traffic-glyph">−</span>
+          </button>
+          <button
+            className="traffic-light maximize"
+            onClick={() => window.serica?.windowControl('maximize')}
+            title="Maximize"
+            aria-label="Maximize"
+          >
+            <span className="traffic-glyph">+</span>
+          </button>
+          <button
+            className="traffic-light close"
+            onClick={() => window.serica?.windowControl('close')}
+            title="Close"
+            aria-label="Close window"
+          >
+            <span className="traffic-glyph">✕</span>
+          </button>
+        </div>
       </div>
     </div>
 
     {/* Edge-to-Edge Web Canvas Viewport (pulled down on web pages so site controls never collide;
         pushed right of a docked sidebar) */}
-    <main className={`arc-viewport-container edge-to-edge ${isWebpage && !isHtmlFullscreen ? 'with-site-top-offset' : ''} ${isSidebarDocked ? 'with-docked-sidebar' : ''} ${spaceTransitionClass} ${isSettingsOpen ? 'settings-page-blur' : ''}`}>
+    <main className={`arc-viewport-container edge-to-edge ${isWebpage && !isHtmlFullscreen ? 'with-site-top-offset' : ''} ${spaceTransitionClass} ${isSettingsOpen ? 'settings-page-blur' : ''}`}>
       <div className="arc-web-canvas-frame seamless">
         <BrowserViewport
           activeTab={activeTab}
@@ -1307,7 +1270,8 @@ return (
           onFullscreenChange={setIsHtmlFullscreen}
           onPageColor={handlePageColor}
           defaultZoom={settings.textScale}
-          insetLeft={sidebarAutoHide && showSidebar ? 8 : 0}
+          contentTop={contentTop}
+          insetLeft={showSidebar ? 8 : 0}
           insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
         />
       </div>

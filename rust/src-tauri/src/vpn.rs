@@ -291,6 +291,13 @@ impl Vpn {
         }
     }
 
+    /// Whether pages must go through the local tunnel proxy. Off, or an OS VPN
+    /// without the kill switch, means a direct connection, which is faster.
+    pub fn needs_proxy(&self) -> bool {
+        let c = self.config.read();
+        c.enabled && (c.mode != "system-vpn" || c.kill_switch)
+    }
+
     pub fn webrtc_guard_active(&self) -> bool {
         let c = self.config.read();
         c.enabled && c.webrtc_guard

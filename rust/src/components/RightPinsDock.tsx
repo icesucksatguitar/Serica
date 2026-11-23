@@ -1,4 +1,4 @@
-import { useViewportOverlay } from '../hooks/useViewportOverlay';
+import { useLingering, useViewportCovered, useViewportOverlay } from '../hooks/useViewportOverlay';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, X, Globe, EyeOff } from 'lucide-react';
 import { addSettledBlurListener } from '../utils/settledBlur';
@@ -68,8 +68,12 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   const keepOpen = isAddModalOpen || menuPos !== null;
 
   // Pages are native views above the HTML UI: cover the page while the dock,
-  // its menu or the add dialog is up so they stay visible and clickable.
-  useViewportOverlay((Boolean(isOnWebpage) && isHoveredDock) || keepOpen);
+  // its menu or the add dialog is up so they stay visible and clickable. The
+  // dock slides in once the page is covered and slides out over the snapshot.
+  const overlayWanted = (Boolean(isOnWebpage) && isHoveredDock) || keepOpen;
+  useViewportOverlay(useLingering(overlayWanted, 300));
+  const covered = useViewportCovered();
+  const dockShown = isHoveredDock && covered;
 
   const revealDock = useCallback(() => {
     if (hideTimerRef.current !== null) {
@@ -261,7 +265,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
       )}
       <aside
         className={`vertical-pins-dock-container ${isOnWebpage ? 'on-webpage' : ''} ${
-          isOnWebpage ? (isHoveredDock ? 'revealed' : 'autohidden') : ''
+          isOnWebpage ? (dockShown ? 'revealed' : 'autohidden') : ''
         }`}
         ref={dockRef}
         onMouseEnter={() => {
@@ -372,7 +376,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         </div>
       </aside>
 
-      {menuPos && (
+      {menuPos && covered && (
         <div
           className="nsb-menu pin-dock-menu"
           role="menu"
@@ -412,7 +416,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
       )}
 
       {/* Add Website Pin Modal */}
-      {isAddModalOpen && (
+      {isAddModalOpen && covered && (
         <div className="pin-add-modal-backdrop" onClick={() => setIsAddModalOpen(false)}>
           <div className="pin-add-modal-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="pin-add-modal-header">

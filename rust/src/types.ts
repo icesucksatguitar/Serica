@@ -244,7 +244,8 @@ export interface SericaAPI {
   // Native tab viewport (Rust tab host)
   siteAction?: (action: SiteAction) => Promise<void>;
   setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
-  freezeViewport?: () => Promise<string | null>;
+  captureViewport?: () => Promise<string | null>;
+  freezeViewport?: (capture?: boolean) => Promise<string | null>;
   thawViewport?: () => Promise<void>;
   findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
   onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;

@@ -37,7 +37,7 @@ The first launch asks what to call you, whether you want a sidebar or top tabs, 
 <img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
 - **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Each space can use its own profile, so cookies and logins stay separate.
-- **Vertical sidebar** with **Pinned** tabs, folders and a **Today** section. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
+- **Vertical sidebar** that slides in over the page (<kbd>Ctrl</kbd>+<kbd>S</kbd>, the space button, or the left edge of the window), with **Pinned** tabs, folders and a **Today** section. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
 - **Tab previews** on hover, and a media mini player for audio playing in another tab.
 - Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
 
@@ -76,7 +76,7 @@ Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.
 
 ## Connect Claude to Serica
 
-1. In Serica, open **AI Assistants & Tools** (the sparkle button in the top bar) → **Tools**, and turn on **Connect an AI agent**.
+1. In Serica, click **‹** at the top right to slide out the browser tools, open **AI Assistants & Tools** (the sparkle button) → **Tools**, and turn on **Connect an AI agent**.
 2. The panel shows your endpoint (`http://127.0.0.1:7531/mcp`) and a private access token, with copy buttons for each config below.
 
 **Claude Code**

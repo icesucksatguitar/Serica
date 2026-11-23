@@ -61,6 +61,13 @@ export const WELCOME_SITES: readonly WelcomeSite[] = [
 const DEFAULT_DOCK = ['youtube', 'github', 'x', 'reddit', 'notion'];
 
 const STEPS = ['name', 'tabs', 'theme', 'size', 'dock', 'pins'] as const;
+
+/** Presets in onboarding order: the neutral defaults first. */
+const ONBOARDING_FIRST = ['obsidian-mono', 'cobalt-dusk'];
+const ONBOARDING_PRESETS = [
+  ...ONBOARDING_FIRST.map((id) => SPACE_THEME_PRESETS.find((p) => p.id === id)!).filter(Boolean),
+  ...SPACE_THEME_PRESETS.filter((p) => !ONBOARDING_FIRST.includes(p.id)),
+];
 type Step = (typeof STEPS)[number];
 
 const S_PATH =
@@ -163,7 +170,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onPreviewTex
   const [direction, setDirection] = useState<'fwd' | 'back'>('fwd');
   const [name, setName] = useState('');
   const [tabLayout, setTabLayout] = useState<WelcomeTabLayout>('sidebar');
-  const [presetId, setPresetId] = useState(SPACE_THEME_PRESETS[0].id);
+  const [presetId, setPresetId] = useState('obsidian-mono');
   const [mode, setMode] = useState<SpaceThemeMode>('dark');
   const [textScale, setTextScale] = useState(1);
   const [dockVisible, setDockVisible] = useState(true);
@@ -337,7 +344,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onPreviewTex
             ))}
           </div>
           <div className="onb-themes" role="radiogroup" aria-label="Theme">
-            {SPACE_THEME_PRESETS.map((p) => (
+            {ONBOARDING_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"

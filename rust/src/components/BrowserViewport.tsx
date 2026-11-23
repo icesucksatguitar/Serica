@@ -4,7 +4,7 @@ import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
 import { Moon, Sparkles, Globe } from 'lucide-react';
 import type { PageColorReport } from '../utils/topBarTint';
-import { useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { setViewportCovered, setViewportPrewarmHandler, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -26,6 +26,8 @@ interface BrowserViewportProps {
   onPageColor?: (tabId: string, report: PageColorReport) => void;
   /** Zoom of an untouched page (the text size setting); Ctrl+0 returns to it. */
   defaultZoom?: number;
+  /** Where web pages start: below the top bar (and the tab strip in top-tabs mode); 0 in HTML fullscreen. */
+  contentTop?: number;
   /** Strips at the page edges kept free for hover-reveal zones (auto-hide sidebar, pins dock). */
   insetLeft?: number;
   insetRight?: number;
@@ -33,6 +35,18 @@ interface BrowserViewportProps {
 
 /** Height reserved above the page while the find bar is open (bar + margins). */
 const FIND_BAR_INSET = 62;
+
+/** Resolves once a data-URL image is decoded, so painting it never shows a blank frame. */
+function decodeImage(src: string): Promise<void> {
+  const img = new Image();
+  img.src = src;
+  return img.decode().catch(() => undefined);
+}
+
+/** Resolves after the browser has painted the current update. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
 
 function isWebUrl(url: string | undefined): url is string {
   return !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
@@ -65,6 +79,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   insetLeft = 0,
   insetRight = 0,
   defaultZoom = 1,
+  contentTop = 44,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
@@ -81,13 +96,23 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const findVisible = isFindOpen && isWebPage;
   const reservedBottom = useReservedPageBottom();
 
-  // ---- Report the page rectangle to the tab host (CSS px = logical px).
+  // ---- Report the page rectangle to the tab host (CSS px; the host applies the text size).
+  // Computed from the layout rather than measured, so it is the same on the
+  // new-tab page as on a site (a page created from the new-tab page starts in
+  // the right place) and space/overlay animations never move the page.
+  const pageTop = contentTop + (findVisible ? FIND_BAR_INSET : 0);
+  const geometryRef = useRef({ left: insetLeft, right: insetRight, top: pageTop, bottom: reservedBottom });
+  geometryRef.current = { left: insetLeft, right: insetRight, top: pageTop, bottom: reservedBottom };
   const lastBounds = useRef('');
   const reportBounds = useCallback(() => {
-    const el = pageAreaRef.current;
-    if (!el || !window.serica?.setViewport) return;
-    const r = el.getBoundingClientRect();
-    const b = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+    if (!window.serica?.setViewport) return;
+    const g = geometryRef.current;
+    const b = [
+      Math.round(g.left),
+      Math.round(g.top),
+      Math.max(0, Math.round(window.innerWidth - g.left - g.right)),
+      Math.max(0, Math.round(window.innerHeight - g.top - g.bottom)),
+    ];
     const key = b.join(',');
     if (key === lastBounds.current) return;
     lastBounds.current = key;
@@ -95,23 +120,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   }, []);
 
   useLayoutEffect(() => {
-    const el = pageAreaRef.current;
-    if (!el) return;
     reportBounds();
-    const ro = new ResizeObserver(() => reportBounds());
-    ro.observe(el);
+  }, [reportBounds, insetLeft, insetRight, pageTop, reservedBottom]);
+
+  useEffect(() => {
     window.addEventListener('resize', reportBounds);
-    // Sidebar slide/resize animations move the page area without resizing it.
-    const onTransitionEnd = () => reportBounds();
-    document.addEventListener('transitionend', onTransitionEnd, true);
-    const poll = window.setInterval(reportBounds, 400);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', reportBounds);
-      document.removeEventListener('transitionend', onTransitionEnd, true);
-      window.clearInterval(poll);
-    };
-  }, [reportBounds, findVisible, reservedBottom, activeTab?.id]);
+    return () => window.removeEventListener('resize', reportBounds);
+  }, [reportBounds]);
 
   // A freshly created native view can come up at stale bounds (the first
   // WebView2 of a session is created while the layout is still settling), so
@@ -122,6 +137,9 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   }, [activeTab?.id, activeTab?.isLoading, isWebPage, reportBounds]);
 
   // ---- Freeze the page while UI overlays cover it.
+  // Order matters for a flicker-free swap: capture the live page, paint the
+  // capture in its place, and only then hide the native view. Thawing shows
+  // the native view first and drops the capture a frame later.
   const overlayCount = useViewportOverlayCount();
   const wantFrozen = overlayCount > 0;
   // null = unknown backend state (first mount / UI reload): always sync once.
@@ -129,6 +147,39 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const freezeBusy = useRef(false);
   const wantFrozenRef = useRef(wantFrozen);
   wantFrozenRef.current = wantFrozen;
+  const isWebPageRef = useRef(isWebPage);
+  isWebPageRef.current = isWebPage;
+
+  // A capture taken moments ago (pointer reached an overlay's button) is reused.
+  const prewarmed = useRef<{ img: string; key: string; at: number } | null>(null);
+  const prewarmBusy = useRef(false);
+  const pageKey = () => `${activeTabRef.current?.id ?? ''}|${activeTabRef.current?.url ?? ''}`;
+  useEffect(() => {
+    setViewportPrewarmHandler(() => {
+      if (prewarmBusy.current || freezeApplied.current || !isWebPageRef.current || !window.serica?.captureViewport) return;
+      const fresh = prewarmed.current;
+      if (fresh && fresh.key === pageKey() && performance.now() - fresh.at < 400) return;
+      prewarmBusy.current = true;
+      const key = pageKey();
+      void window.serica
+        .captureViewport()
+        .then(async (img) => {
+          if (!img) return;
+          await decodeImage(img);
+          prewarmed.current = { img, key, at: performance.now() };
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          prewarmBusy.current = false;
+        });
+    });
+    return () => setViewportPrewarmHandler(null);
+  }, []);
+  const takePrewarmed = (): string | null => {
+    const p = prewarmed.current;
+    prewarmed.current = null;
+    return p && p.key === pageKey() && performance.now() - p.at < 1500 ? p.img : null;
+  };
 
   const applyFreeze = useCallback(async () => {
     if (freezeBusy.current) return;
@@ -136,13 +187,27 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     try {
       while (freezeApplied.current !== wantFrozenRef.current) {
         if (wantFrozenRef.current) {
-          const img = (await window.serica?.freezeViewport?.().catch(() => null)) ?? null;
+          if (isWebPageRef.current && window.serica?.captureViewport) {
+            const ready = takePrewarmed();
+            const img = ready ?? (await window.serica.captureViewport().catch(() => null)) ?? null;
+            if (img && wantFrozenRef.current) {
+              if (!ready) await decodeImage(img);
+              setFrozenImage(img);
+              await nextPaint();
+            }
+            await window.serica.freezeViewport?.(false).catch(() => null);
+          } else {
+            const img = (await window.serica?.freezeViewport?.().catch(() => null)) ?? null;
+            setFrozenImage(img);
+          }
           freezeApplied.current = true;
-          setFrozenImage(img);
+          setViewportCovered(true);
         } else {
           await window.serica?.thawViewport?.().catch(() => undefined);
           freezeApplied.current = false;
-          setFrozenImage(null);
+          setViewportCovered(!isWebPageRef.current);
+          await nextPaint();
+          if (!wantFrozenRef.current) setFrozenImage(null);
         }
       }
     } finally {
@@ -154,9 +219,26 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     void applyFreeze();
   }, [wantFrozen, applyFreeze]);
 
-  // A different tab or page makes the snapshot stale.
+  // Without a live page there is nothing to cover.
   useEffect(() => {
-    if (freezeApplied.current) setFrozenImage(null);
+    if (!freezeApplied.current) setViewportCovered(!isWebPage);
+  }, [isWebPage]);
+
+  // A different tab or page makes the snapshot stale. Switching tabs while the
+  // page is covered (from the sidebar, for example) shows the new tab's last
+  // capture instead of an empty area until the page comes back.
+  useEffect(() => {
+    if (!freezeApplied.current) return;
+    setFrozenImage(null);
+    const id = activeTab?.id;
+    if (!id || !isWebPageRef.current) return;
+    let cancelled = false;
+    void window.serica?.getTabPreview?.(id).then((img) => {
+      if (!cancelled && freezeApplied.current && typeof img === 'string' && img) setFrozenImage(img);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab?.id, activeTab?.url]);
 
   // ---- Find in page (native WebView2 find)

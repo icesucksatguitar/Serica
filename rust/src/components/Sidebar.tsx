@@ -8,8 +8,6 @@ import {
   Coffee,
   Copy,
   Edit2,
-  Eye,
-  EyeOff,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -20,7 +18,6 @@ import {
   MoreHorizontal,
   Music,
   PanelLeftClose,
-  PanelLeftOpen,
   Pin,
   PinOff,
   Plus,
@@ -37,7 +34,7 @@ import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
 import { addSettledBlurListener } from '../utils/settledBlur';
-import { useViewportOverlay } from '../hooks/useViewportOverlay';
+import { useLingering, useViewportCovered, useViewportOverlay } from '../hooks/useViewportOverlay';
 import {
   buildSidebarView,
   contextMenuActions,
@@ -108,6 +105,10 @@ export interface SidebarProps {
   /** Overlays rendered inside the sidebar (for example a hover preview card). */
   children?: React.ReactNode;
   className?: string;
+  /** Opened from the toolbar or Ctrl+S: stays open until dismissed. */
+  pinnedOpen?: boolean;
+  /** Asks App to close a pinned-open sidebar (Esc, click outside, a tab picked). */
+  onRequestClose?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +235,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   renderSectionExtras,
   children,
   className,
+  pinnedOpen = false,
+  onRequestClose,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -379,15 +382,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // An open context menu keeps an auto-hidden sidebar visible.
   // An active drag keeps it visible too.
-  const targetWidth = (expanded ? (sidebarWidth ?? 240) : 56) + 24;
-  const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed;
-  const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive, targetWidth);
+  const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed || pinnedOpen;
+  const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive);
+  // Slide in only once the page under it is frozen (else it would slide in
+  // beneath the live page and pop up), and keep the page frozen while it
+  // slides back out.
+  const covered = useViewportCovered();
+  const shown = visible && covered;
+  const lingering = useLingering(visible, 280);
 
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
-  const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || !visible);
+  const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || !shown);
   // Menus, hover cards and the auto-hide sidebar float over the native page.
-  useViewportOverlay(menu !== null || folderMenu !== null || Boolean(preview.state && !drag.dragging) || (autoHide && visible));
+  useViewportOverlay(menu !== null || folderMenu !== null || Boolean(preview.state && !drag.dragging) || (autoHide && lingering));
+
+  // Hides the sidebar now (a pick was made or it was dismissed).
+  const dismiss = useCallback(() => {
+    if (autoHideTimerRef.current !== null) {
+      window.clearTimeout(autoHideTimerRef.current);
+      autoHideTimerRef.current = null;
+    }
+    setAutoHideRevealed(false);
+    setOverSidebar(false);
+    setPointerX(null);
+    onRequestClose?.();
+  }, [onRequestClose]);
+
+  // A pinned-open sidebar closes on Escape or a press outside it.
+  useEffect(() => {
+    if (!pinnedOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t?.closest('.nsb, .nsb-menu, .nsb-preview, [data-sidebar-toggle]')) return;
+      onRequestClose?.();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onRequestClose?.();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [pinnedOpen, onRequestClose]);
   const hidePreview = preview.hide;
   const previewKey = preview.state?.target.key;
   useEffect(() => {
@@ -500,6 +539,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // --- Activation -------------------------------------------------------------
   const activate = (item: SidebarItemRef) => {
+    // The sidebar floats over the page: get out of the way of the page just picked.
+    dismiss();
     if (item.kind === 'favorite' && item.favorite) {
       const target = favoriteActivation(item.favorite, state.tabs, activeSpaceId);
       if (target.type === 'select') actions.selectTab(target.tabId);
@@ -833,6 +874,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="nsb-pinned-section-label">Today</span>
           </div>
         )}
+        {current ? (
+          <button
+            type="button"
+            className="nsb-new-tab"
+            title="New tab (Ctrl+T)"
+            onClick={() => {
+              dismiss();
+              actions.openCommandBar();
+            }}
+          >
+            <Plus size={14} aria-hidden="true" />
+            <span>New Tab</span>
+            <kbd className="nsb-new-tab-kbd">Ctrl T</kbd>
+          </button>
+        ) : (
+          <div className="nsb-new-tab" aria-hidden="true">
+            <Plus size={14} />
+            <span>New Tab</span>
+          </div>
+        )}
         {paneSection('today', v.today, 'nsb-list nsb-today', current)}
       </div>
     );
@@ -846,7 +907,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     expanded ? 'expanded' : 'collapsed',
     drag.dragging ? 'dragging' : '',
     autoHide ? 'autohide' : '',
-    visible ? 'visible' : 'hidden',
+    shown ? 'visible' : 'hidden',
     className ?? '',
   ]
     .filter(Boolean)
@@ -896,7 +957,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ref={rootRef}
         className={rootClass}
         aria-label="Sidebar"
-        aria-hidden={!visible}
+        aria-hidden={!shown}
         style={{
           '--nsb-width-expanded': `${sidebarWidth ?? 240}px`,
           '--nsb-space-color': activeSpace?.color ?? 'var(--theme-accent)',
@@ -936,22 +997,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               className="nsb-icon-btn"
-              aria-pressed={autoHide}
-              title={autoHide ? 'Keep sidebar visible' : 'Auto-hide sidebar'}
-              aria-label={autoHide ? 'Keep sidebar visible' : 'Auto-hide sidebar'}
-              onClick={() => onUpdateSidebarState({ sidebarAutoHide: !autoHide })}
+              title="Hide sidebar (Ctrl+S)"
+              aria-label="Hide sidebar"
+              onClick={dismiss}
             >
-              {autoHide ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-            <button
-              type="button"
-              className="nsb-icon-btn"
-              aria-expanded={expanded}
-              title={expanded ? 'Collapse sidebar (Ctrl+S)' : 'Expand sidebar (Ctrl+S)'}
-              aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-              onClick={() => onUpdateSidebarState({ sidebarExpanded: !expanded })}
-            >
-              {expanded ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+              <PanelLeftClose size={14} />
             </button>
           </div>
         </div>
@@ -977,7 +1027,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {children}
       </aside>
 
-      {preview.state && !drag.dragging && (
+      {preview.state && !drag.dragging && covered && (
         <TabPreviewCard
           preview={preview.state}
           onMouseEnter={preview.cardProps.onMouseEnter}
@@ -999,7 +1049,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {menu && (
+      {menu && covered && (
         <div
           className="nsb-menu"
           role="menu"
@@ -1122,7 +1172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {folderMenu && (
+      {folderMenu && covered && (
         <div
           className="nsb-menu"
           role="menu"

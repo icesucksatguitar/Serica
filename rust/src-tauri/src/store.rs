@@ -385,6 +385,18 @@ impl Store {
     /// Makes `id` the active tab (switching space if needed). Wakes it and
     /// reloads a closed pinned tab.
     pub fn activate_tab(&mut self, id: &str) -> bool {
+        if self.tab(id).is_none() {
+            return false;
+        }
+        // The tab being left was in use until now (it may have been restored
+        // as the active tab at startup and never re-activated): without this
+        // it could look idle for hours and be archived right after the switch.
+        let now = now_ms();
+        if let Some(prev) = self.active_tab_id.clone().filter(|p| p != id) {
+            if let Some(t) = self.tab_mut(&prev) {
+                t.last_active_at = Some(now);
+            }
+        }
         let Some(tab) = self.tab_mut(id) else { return false };
         tab.is_sleeping = false;
         tab.unloaded = false;
@@ -1038,6 +1050,18 @@ mod tests {
         assert_eq!(tab.title, "Gmail");
         assert_eq!(s.active_tab_id, active);
         assert!(s.list(&space, Section::Pinned).iter().any(|&i| s.tabs[i].id == tab.id));
+    }
+
+    #[test]
+    fn leaving_a_tab_marks_it_recently_used() {
+        let mut s = store();
+        let a = s.create_tab(Some("https://a.com".into()), None, true, None).id;
+        s.tab_mut(&a).unwrap().last_active_at = Some(now_ms() - 48 * 3_600_000);
+        let b = s.create_tab(Some("https://b.com".into()), None, true, None).id;
+        assert_eq!(s.active_tab_id.as_deref(), Some(b.as_str()));
+        // The tab just left must not be archived as if idle for two days.
+        assert_eq!(s.archive_sweep(), 0);
+        assert!(s.tab(&a).is_some());
     }
 
     #[test]

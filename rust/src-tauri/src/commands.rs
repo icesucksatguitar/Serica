@@ -337,16 +337,37 @@ pub async fn set_viewport(x: f64, y: f64, width: f64, height: f64, app: State<'_
     Ok(())
 }
 
-/// Captures the active page, hides the native webview and returns the image
-/// for the UI to show behind an overlay.
+/// Captures the active page while it is on screen (for the UI to show in its
+/// place), without hiding it.
 #[tauri::command]
-pub async fn viewport_freeze(app: State<'_, Shared>) -> R<Option<String>> {
+pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
     let app = app.inner().clone();
     let mut image = None;
     #[cfg(windows)]
     if let Some(wv) = TabHost::active_webview(&app) {
         if app.host.lock().visible {
             image = await_cb(|done| crate::webview_win::capture(&wv, done)).await.flatten();
+        }
+    }
+    if let (Some(img), Some(id)) = (&image, app.store.lock().active_tab_id.clone()) {
+        app.host.lock().previews.insert(id, img.clone());
+    }
+    Ok(image)
+}
+
+/// Hides the native webview so UI overlays can cover the page. With `capture`
+/// (the default) it first captures the page and returns the image; the UI
+/// passes `false` after painting a capture from `viewport_capture`.
+#[tauri::command]
+pub async fn viewport_freeze(capture: Option<bool>, app: State<'_, Shared>) -> R<Option<String>> {
+    let app = app.inner().clone();
+    let mut image = None;
+    #[cfg(windows)]
+    if capture.unwrap_or(true) {
+        if let Some(wv) = TabHost::active_webview(&app) {
+            if app.host.lock().visible {
+                image = await_cb(|done| crate::webview_win::capture(&wv, done)).await.flatten();
+            }
         }
     }
     let a2 = app.clone();
@@ -805,6 +826,8 @@ pub async fn clear_history(range: Option<String>, app: State<'_, Shared>) -> R<u
 
 fn emit_vpn(app: &Shared, status: &crate::vpn::VpnStatus) {
     ui_emit(&app.handle, "serica:vpn-status-updated", status.clone());
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || TabHost::sync_network(&app));
 }
 
 #[tauri::command]

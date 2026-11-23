@@ -42,7 +42,8 @@ export const tauriBridge = {
   // Native viewport (tab webviews are positioned over this rectangle)
   setViewport: (x: number, y: number, width: number, height: number) =>
     invoke<void>('set_viewport', { x, y, width, height }),
-  freezeViewport: () => invoke<string | null>('viewport_freeze'),
+  captureViewport: () => invoke<string | null>('viewport_capture'),
+  freezeViewport: (capture = true) => invoke<string | null>('viewport_freeze', { capture }),
   thawViewport: () => invoke<void>('viewport_thaw'),
   findInPage: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) =>
     invoke<void>('find_in_page', { query, forward: options?.forward ?? true, findNext: options?.findNext ?? false }),

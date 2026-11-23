@@ -204,29 +204,29 @@
 @property --theme-surface {
   syntax: '<color>';
   inherits: true;
-  initial-value: rgba(16, 20, 19, 0.72);
+  initial-value: rgba(17, 19, 24, 0.72);
 }
 
 :root {
   /* Active Space Theme Tokens (set dynamically by applySpaceThemeToRoot) */
-  --theme-c1: #0E5E43;
-  --theme-c2: #1F8A5B;
-  --theme-c3: #092E22;
+  --theme-c1: #1F242D;
+  --theme-c2: #334155;
+  --theme-c3: #111827;
   --theme-intensity: 0.62;
   --theme-grain: 0.25;
   --theme-grain-opacity: 0.035;
   --theme-ambient-opacity: 0.21;
   --theme-fg: #F8FAF9;
-  --theme-fg-muted: #C7D0CC;
-  --theme-fg-faint: #8FA39B;
+  --theme-fg-muted: #C9CDD4;
+  --theme-fg-faint: #8B929E;
   --theme-fg-shadow: 0 4px 28px rgba(0, 0, 0, 0.48);
-  --theme-surface: rgba(16, 20, 19, 0.72);
-  --theme-surface-solid: #101513;
-  --theme-surface-hover: rgba(24, 31, 28, 0.85);
-  --theme-bg-canvas: #070908;
-  --theme-backdrop-c1: #0B3627;
-  --theme-backdrop-c2: #144B34;
-  --theme-backdrop-c3: #081C15;
+  --theme-surface: rgba(17, 19, 24, 0.72);
+  --theme-surface-solid: #111318;
+  --theme-surface-hover: rgba(27, 30, 37, 0.85);
+  --theme-bg-canvas: #08090B;
+  --theme-backdrop-c1: #161A21;
+  --theme-backdrop-c2: #222833;
+  --theme-backdrop-c3: #0C0E12;
   --theme-p1-x: 26%;
   --theme-p1-y: 28%;
   --theme-p2-x: 74%;
@@ -236,8 +236,8 @@
   --theme-border: rgba(255, 255, 255, 0.13);
   --theme-border-strong: rgba(255, 255, 255, 0.22);
   --theme-border-subtle: rgba(255, 255, 255, 0.08);
-  --theme-accent: #1F8A5B;
-  --theme-accent-soft: rgba(31, 138, 91, 0.2);
+  --theme-accent: #64748B;
+  --theme-accent-soft: rgba(100, 116, 139, 0.2);
 
   /* ==========================================================================
      AMBIENT GLOW CONFIGURATION (Inspired by Gemini Homepage)
@@ -6473,7 +6473,8 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   display: flex;
   align-items: center;
   user-select: none;
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+  will-change: transform;
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
 }
 
 .vertical-pins-dock-container.on-webpage.autohidden {
@@ -6482,8 +6483,7 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   pointer-events: none;
 }
 
-.vertical-pins-dock-container.on-webpage.revealed,
-.vertical-pins-dock-container.on-webpage:hover {
+.vertical-pins-dock-container.on-webpage.revealed {
   transform: translateY(-50%) translateX(0);
   opacity: 1;
   pointer-events: auto;
@@ -7448,7 +7448,7 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
    (240px / 56px while docked, 0 while auto-hidden). */
 .arc-app-shell .nsb.app-sidebar {
   position: fixed;
-  top: var(--app-top-offset, 44px);
+  top: 0;
   bottom: 0;
   left: 0;
   height: auto;
@@ -10864,3 +10864,115 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 .top-tabs-mode .floating-top-chrome-capsule.on-webpage {
   border-bottom-color: transparent;
 }
+
+/* ==========================================================================
+   TOP BAR: browser tools slide out sideways; window controls on the right
+   ========================================================================== */
+.tools-tray {
+  --tools-btn: 32px;
+  --tools-gap: 6px;
+  display: flex;
+  align-items: center;
+}
+
+/* A capsule that grows leftwards out of the "more" button. */
+.tools-tray-items {
+  display: flex;
+  align-items: center;
+  gap: var(--tools-gap);
+  box-sizing: content-box;
+  width: 0;
+  height: var(--tools-btn);
+  padding: 4px 0;
+  margin: -4px 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-right 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease;
+}
+
+.tools-tray.open .tools-tray-items {
+  width: calc(var(--tools-count) * var(--tools-btn) + (var(--tools-count) - 1) * var(--tools-gap));
+  padding: 4px 3px;
+  margin-right: 6px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tools-tray-btn {
+  flex: none;
+  opacity: 0;
+  transform: translateX(14px) scale(0.86);
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease,
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+  /* Nearest the button first when opening. */
+  transition-delay: calc((var(--tools-count) - 1 - var(--tool-index)) * 22ms);
+}
+
+.tools-tray.open .tools-tray-btn {
+  opacity: 1;
+  transform: none;
+}
+
+.tools-tray-btn.on {
+  color: #22c55e;
+}
+
+.tools-menu-btn.active {
+  background: var(--theme-surface-hover);
+  border-color: var(--border-focus);
+}
+
+/* On narrow windows the open tools need the URL pill's space. */
+@media (max-width: 1260px) {
+  .floating-top-chrome-capsule.tools-open .top-floating-url-pill {
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+  }
+}
+
+.tools-menu-glyph {
+  transition: transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The chevron points where the tools come out, then turns to tuck them back. */
+.tools-tray.open .tools-menu-glyph {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tools-tray-items,
+  .tools-tray-btn,
+  .tools-menu-glyph {
+    transition: opacity 120ms ease;
+    transition-delay: 0ms;
+  }
+}
+
+/* Window controls sit apart from the tools, at the far right. */
+.window-controls-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px 0 10px;
+  background: var(--border-strong);
+  opacity: 0.8;
+}
+
+.macos-traffic-lights.window-controls-right {
+  gap: 9px;
+  padding: 4px 2px 4px 4px;
+}
+
+.topbar-new-tab-btn {
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+

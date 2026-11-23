@@ -32,6 +32,9 @@ struct Ctx {
     reloaded_for: HashSet<String>,
     exceptions: HashSet<String>,
     generichide: bool,
+    /// The webview starts on about:blank while its first page's adblock
+    /// scripts are registered; that blank page's events are not reported.
+    booting: bool,
 }
 
 fn take(p: PWSTR) -> String {
@@ -114,7 +117,11 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
 }
 
 /// Installs all native handlers on a freshly created tab webview.
-pub fn attach(app: &Shared, tab_id: &str, profile: &str, wv: &Webview) {
+/// Hooks a new tab webview. With `first_url`, the webview was created on
+/// about:blank: the site's cosmetic filters and scriptlets are registered
+/// first and the page is loaded after, so they run on its first load (no
+/// reload to apply them).
+pub fn attach(app: &Shared, tab_id: &str, profile: &str, wv: &Webview, first_url: Option<String>) {
     let app = app.clone();
     let tab_id = tab_id.to_string();
     let profile = profile.to_string();
@@ -126,15 +133,21 @@ pub fn attach(app: &Shared, tab_id: &str, profile: &str, wv: &Webview) {
                 crate::extensions::native::sync(&app, &core);
             }
         }
-        if let Err(e) = install(app, tab_id, controller, env) {
+        if let Err(e) = install(app, tab_id, controller, env, first_url) {
             tracing::error!("webview2 hook install failed: {e}");
         }
     });
 }
 
-unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controller, env: ICoreWebView2Environment) -> windows::core::Result<()> {
+unsafe fn install(
+    app: Shared,
+    tab_id: String,
+    controller: ICoreWebView2Controller,
+    env: ICoreWebView2Environment,
+    first_url: Option<String>,
+) -> windows::core::Result<()> {
     let core = controller.CoreWebView2()?;
-    let ctx = Rc::new(RefCell::new(Ctx::default()));
+    let ctx = Rc::new(RefCell::new(Ctx { booting: first_url.is_some(), ..Ctx::default() }));
     let mut token = Default::default();
 
     if let Ok(settings) = core.Settings() {
@@ -157,8 +170,11 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 let mut uri = PWSTR::null();
                 args.Uri(&mut uri)?;
                 let uri = take(uri);
+                if ctx.borrow().booting && uri == "about:blank" {
+                    return Ok(());
+                }
                 ctx.borrow_mut().top_url = uri.clone();
-                install_cosmetics(&app, &core2, &ctx, &uri);
+                install_cosmetics(&app, &core2, &ctx, &uri, None);
                 app.tab_event(&id, TabEvent::NavigationStarting(uri));
                 Ok(())
             })),
@@ -210,7 +226,7 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
         )?;
     }
     {
-        let (app, id) = (app.clone(), tab_id.clone());
+        let (app, id, boot_ctx) = (app.clone(), tab_id.clone(), ctx.clone());
         core.add_NavigationCompleted(
             &NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
@@ -219,6 +235,9 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 let mut uri = PWSTR::null();
                 sender.Source(&mut uri)?;
                 let url = take(uri);
+                if url == "about:blank" && boot_ctx.borrow().booting {
+                    return Ok(());
+                }
                 app.tab_event(&id, TabEvent::Loaded { url, success: ok.as_bool() });
                 read_theme_color(&app, &id, &sender);
                 crate::tabhost::TabHost::capture_after_load(&app, id.clone());
@@ -234,7 +253,10 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
                 let Some(sender) = sender else { return Ok(()) };
                 let mut t = PWSTR::null();
                 sender.DocumentTitle(&mut t)?;
-                app.tab_event(&id, TabEvent::Title(take(t)));
+                let t = take(t);
+                if t != "about:blank" {
+                    app.tab_event(&id, TabEvent::Title(t));
+                }
                 Ok(())
             })),
             &mut token,
@@ -480,6 +502,21 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
             )?;
         }
     }
+
+    // Load the first page last, once every handler above is in place.
+    if let Some(url) = first_url {
+        let (core2, ctx2) = (core.clone(), ctx.clone());
+        install_cosmetics(
+            &app,
+            &core,
+            &ctx,
+            &url.clone(),
+            Some(Box::new(move || {
+                ctx2.borrow_mut().booting = false;
+                let _ = core2.Navigate(&HSTRING::from(url));
+            })),
+        );
+    }
     Ok(())
 }
 
@@ -488,7 +525,19 @@ unsafe fn install(app: Shared, tab_id: String, controller: ICoreWebView2Controll
 /// Keep at most this many per-host cosmetic scripts per tab.
 const MAX_COSMETIC_SCRIPTS: usize = 48;
 
-unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell<Ctx>>, url: &str) {
+unsafe fn install_cosmetics(
+    app: &Shared,
+    core: &ICoreWebView2,
+    ctx: &Rc<RefCell<Ctx>>,
+    url: &str,
+    done: Option<Box<dyn FnOnce()>>,
+) {
+    // Runs `done` now (nothing to wait for) or once the script is registered.
+    let finish_now = |done: Option<Box<dyn FnOnce()>>| {
+        if let Some(f) = done {
+            f();
+        }
+    };
     let res = app.shields.cosmetic(url);
     let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
     {
@@ -496,12 +545,12 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
         c.exceptions = res.as_ref().map(|r| r.exceptions.clone()).unwrap_or_default();
         c.generichide = res.as_ref().map(|r| r.generichide).unwrap_or(false);
     }
-    let Some(res) = res else { return };
+    let Some(res) = res else { return finish_now(done) };
     if host.is_empty() || (res.hide_selectors.is_empty() && res.injected_script.trim().is_empty()) {
-        return;
+        return finish_now(done);
     }
     if ctx.borrow().cosmetic_scripts.contains_key(&host) {
-        return; // already registered for this host (or registering)
+        return finish_now(done); // already registered for this host (or registering)
     }
     if ctx.borrow().cosmetic_scripts.len() >= MAX_COSMETIC_SCRIPTS {
         let old: Vec<String> = ctx.borrow_mut().cosmetic_scripts.drain().filter_map(|(_, id)| id).collect();
@@ -529,6 +578,7 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
         css = js_string(&css),
         scriptlets = res.injected_script
     );
+    let host_key = host.clone();
     {
         let mut c = ctx.borrow_mut();
         c.cosmetic_scripts.insert(host.clone(), None);
@@ -537,19 +587,39 @@ unsafe fn install_cosmetics(app: &Shared, core: &ICoreWebView2, ctx: &Rc<RefCell
         }
     }
     let ctx2 = ctx.clone();
-    let _ = core.AddScriptToExecuteOnDocumentCreated(
+    // Shared so `done` still runs if registration fails before its handler.
+    let done = Rc::new(std::cell::Cell::new(done));
+    let done2 = done.clone();
+    let added = core.AddScriptToExecuteOnDocumentCreated(
         &HSTRING::from(script),
         &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |hr, id| {
-            let mut c = ctx2.borrow_mut();
-            if hr.is_ok() {
-                c.cosmetic_scripts.insert(host, Some(id));
-            } else {
-                c.cosmetic_scripts.remove(&host);
-                c.scriptlet_hosts.remove(&host);
+            {
+                let mut c = ctx2.borrow_mut();
+                if hr.is_ok() {
+                    c.cosmetic_scripts.insert(host.clone(), Some(id));
+                } else {
+                    c.cosmetic_scripts.remove(&host);
+                    c.scriptlet_hosts.remove(&host);
+                }
+            }
+            if let Some(f) = done2.take() {
+                f();
             }
             Ok(())
         })),
     );
+    if added.is_err() {
+        // The completion handler will not run: carry on without the filters.
+        tracing::warn!("could not register cosmetic filters");
+        {
+            let mut c = ctx.borrow_mut();
+            c.cosmetic_scripts.remove(&host_key);
+            c.scriptlet_hosts.remove(&host_key);
+        }
+        if let Some(f) = done.take() {
+            f();
+        }
+    }
 }
 
 /// When a page starts loading: if its site needs scriptlets (YouTube ads, etc.)

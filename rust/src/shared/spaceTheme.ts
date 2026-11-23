@@ -405,11 +405,13 @@ export const SPACE_THEME_PRESETS: SpaceThemePreset[] = [
   },
 ];
 
-export const DEFAULT_SPACE_THEME: SpaceTheme = cloneSpaceTheme(SPACE_THEME_PRESETS[0].theme);
+export const DEFAULT_SPACE_THEME: SpaceTheme = cloneSpaceTheme(
+  (SPACE_THEME_PRESETS.find((p) => p.id === 'obsidian-mono') ?? SPACE_THEME_PRESETS[0]).theme,
+);
 
 const SPACE_DEFAULT_PRESET_MAP: Record<string, string> = {
-  'space-study': 'evergreen-mist',
-  'space-work': 'obsidian-mono',
+  'space-study': 'obsidian-mono',
+  'space-work': 'cobalt-dusk',
   'space-leisure': 'aurora-violet',
 };
 
