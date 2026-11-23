@@ -18,9 +18,24 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// Chrome version reported to the update server (it serves the newest CRX
-/// compatible with this version).
-const PROD_VERSION: &str = "131.0.0.0";
+/// Chrome version reported to the update server when the WebView2 runtime
+/// version can't be read. The server serves the newest CRX compatible with
+/// the version it is given and answers 204 (nothing) for extensions whose
+/// `minimum_chrome_version` is higher, so this must not lag the runtime.
+const FALLBACK_PROD_VERSION: &str = "157.0.0.0";
+
+/// The installed WebView2 runtime's Chromium version (e.g. `157.0.4341.60`).
+fn prod_version() -> String {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        tauri::webview_version()
+            .ok()
+            .and_then(|v| v.split_whitespace().next().map(str::to_string))
+            .filter(|v| v.split('.').next().and_then(|m| m.parse::<u32>().ok()).is_some_and(|m| m >= 100))
+            .unwrap_or_else(|| FALLBACK_PROD_VERSION.to_string())
+    })
+    .clone()
+}
 const MAX_CRX_BYTES: usize = 200 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,19 +313,50 @@ impl Extensions {
     }
 
     async fn install_inner(&self, id: &str) -> Result<ExtensionRecord, String> {
+        let version = prod_version();
         let url = format!(
-            "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={PROD_VERSION}&acceptformat=crx2,crx3&x=id%3D{id}%26uc"
+            "https://clients2.google.com/service/update2/crx?response=redirect&os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=&prodversion={version}&lang=en-US&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc"
         );
         let client = reqwest::Client::builder()
-            .user_agent(format!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{PROD_VERSION} Safari/537.36"))
-            .timeout(std::time::Duration::from_secs(120))
+            .user_agent(format!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36"))
+            // Large packages over a slow link can take minutes; only give up on a stall.
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .read_timeout(std::time::Duration::from_secs(45))
             .build()
             .map_err(|e| e.to_string())?;
-        let resp = client.get(&url).send().await.map_err(|e| format!("download failed: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("download failed (HTTP {})", resp.status().as_u16()));
+        let mut last_err = String::new();
+        let mut bytes = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(800 * attempt)).await;
+            }
+            let resp = match client.get(&url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    last_err = format!("download failed: {e}");
+                    continue;
+                }
+            };
+            let status = resp.status();
+            if status.as_u16() == 204 {
+                return Err("This extension isn't available for Serica (it may be unlisted, region-locked or need a newer browser)".into());
+            }
+            if !status.is_success() {
+                last_err = format!("download failed (HTTP {})", status.as_u16());
+                if status.is_client_error() {
+                    break;
+                }
+                continue;
+            }
+            match resp.bytes().await {
+                Ok(b) => {
+                    bytes = Some(b);
+                    break;
+                }
+                Err(e) => last_err = format!("download failed: {e}"),
+            }
         }
-        let bytes = resp.bytes().await.map_err(|e| format!("download failed: {e}"))?;
+        let Some(bytes) = bytes else { return Err(last_err) };
         if bytes.is_empty() {
             return Err("extension not found or not available for this browser".into());
         }
@@ -584,14 +630,7 @@ pub const WEBSTORE_SCRIPT: &str = r#"(() => {
     btn.type = 'button';
     wrap.append(note, btn);
     root.append(style, wrap);
-    btn.addEventListener('click', () => {
-      const s = states[current] || 'idle';
-      if (!current || s === 'installing' || s === 'installed') return;
-      states[current] = 'installing';
-      delete errors[current];
-      render();
-      post({ t: 'ext-install', id: current });
-    });
+    btn.addEventListener('click', install);
     (document.body || document.documentElement).appendChild(host);
   };
   const render = () => {
@@ -611,6 +650,26 @@ pub const WEBSTORE_SCRIPT: &str = r#"(() => {
     render();
   };
   Object.defineProperty(window, '__sericaStore', { value: { state(id, s, err) { states[id] = s; if (err) errors[id] = err; else delete errors[id]; render(); } } });
+  // The store's own "Add to Chrome" button needs Chrome's private store API,
+  // which WebView2 lacks (it fails with an error); route it to Serica instead.
+  const install = () => {
+    const s = states[current] || 'idle';
+    if (!current || s === 'installing' || s === 'installed') return;
+    states[current] = 'installing';
+    delete errors[current];
+    render();
+    post({ t: 'ext-install', id: current });
+  };
+  document.addEventListener('click', (e) => {
+    if (!current) return;
+    const b = e.target && e.target.closest && e.target.closest('button,[role=button]');
+    if (!b || (host && host.contains(b))) return;
+    const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).trim().toLowerCase();
+    if (!/\badd to (chrome|edge|browser)\b/.test(label)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    install();
+  }, true);
   const start = () => { tick(); setInterval(tick, 500); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();

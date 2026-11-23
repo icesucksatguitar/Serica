@@ -4,6 +4,8 @@ mod app;
 mod commands;
 mod downloads;
 mod extensions;
+#[cfg(windows)]
+mod touchpad;
 mod history;
 mod importer;
 mod mcp;
@@ -62,6 +64,10 @@ pub fn run() {
             let scale = shared.settings().text_scale;
             if (scale - 1.0).abs() > 0.001 {
                 commands::apply_ui_zoom(&shared, scale);
+            }
+            #[cfg(windows)]
+            if let Some(hwnd) = app.get_webview_window("main").and_then(|w| w.hwnd().ok()) {
+                touchpad::attach(&shared, windows::Win32::Foundation::HWND(hwnd.0 as _));
             }
             app.manage(shared);
             Ok(())

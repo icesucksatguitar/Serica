@@ -157,6 +157,10 @@ unsafe fn install(
         let _ = settings.SetAreDefaultContextMenusEnabled(true);
     }
 
+    if let Err(e) = install_context_menu(&app, &tab_id, &core, &env) {
+        tracing::warn!("context menu hook install failed: {e}");
+    }
+
     if let Err(e) = crate::downloads::native::install(&app, &tab_id, &core) {
         tracing::warn!("download hook install failed: {e}");
     }
@@ -419,6 +423,17 @@ unsafe fn install(
                 let msg = take(msg);
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) else { return Ok(()) };
                 if v.get("__serica").is_none() {
+                    return Ok(());
+                }
+                if v["t"] == "swipe-nav" {
+                    let mut can = Default::default();
+                    if v["dir"] == "back" {
+                        if sender.CanGoBack(&mut can).is_ok() && can.as_bool() {
+                            let _ = sender.GoBack();
+                        }
+                    } else if sender.CanGoForward(&mut can).is_ok() && can.as_bool() {
+                        let _ = sender.GoForward();
+                    }
                     return Ok(());
                 }
                 if v["t"] == "ext-install" || v["t"] == "ext-query" {
@@ -810,6 +825,181 @@ pub fn nav(wv: &Webview, action: &'static str) {
 pub fn set_zoom(wv: &Webview, factor: f64) {
     let _ = wv.with_webview(move |pw| unsafe {
         let _ = pw.controller().SetZoomFactor(factor);
+    });
+}
+
+/// Stock WebView2 menu entries that don't fit a browser: Edge-only features
+/// and "new window" (Serica opens tabs).
+const HIDDEN_MENU_ITEMS: &[&str] =
+    &["openLinkInNewWindow", "openLinkInProfile", "createQrCode", "copyLinkToHighlight", "share", "webCapture", "readAloud", "translate"];
+
+fn search_engine_label(id: &str) -> &'static str {
+    match id {
+        "duckduckgo" => "DuckDuckGo",
+        "bing" => "Bing",
+        "brave" => "Brave",
+        _ => "Google",
+    }
+}
+
+/// Turns the stock WebView2 page menu into Serica's: drops Edge-only items and
+/// adds tab actions for links, images, selections and the page.
+unsafe fn install_context_menu(app: &Shared, tab_id: &str, core: &ICoreWebView2, env: &ICoreWebView2Environment) -> windows::core::Result<()> {
+    let c11 = core.cast::<ICoreWebView2_11>()?;
+    let env9 = env.cast::<ICoreWebView2Environment9>()?;
+    let (app, tab_id) = (app.clone(), tab_id.to_string());
+    let mut token = Default::default();
+    c11.add_ContextMenuRequested(
+        &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let items = args.MenuItems()?;
+            let target = args.ContextMenuTarget()?;
+            let mut editable = Default::default();
+            target.IsEditable(&mut editable)?;
+            let editable = editable.as_bool();
+
+            let mut n = 0u32;
+            items.Count(&mut n)?;
+            for i in (0..n).rev() {
+                let mut name = PWSTR::null();
+                items.GetValueAtIndex(i)?.Name(&mut name)?;
+                let name = take(name);
+                if HIDDEN_MENU_ITEMS.contains(&name.as_str()) || (name == "other" && !editable) {
+                    items.RemoveValueAtIndex(i)?;
+                }
+            }
+            // Drop separators the removals left doubled, leading or trailing.
+            items.Count(&mut n)?;
+            let mut prev_sep = true;
+            let mut i = 0u32;
+            while i < n {
+                let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
+                items.GetValueAtIndex(i)?.Kind(&mut kind)?;
+                let sep = kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR;
+                if sep && (prev_sep || i + 1 == n) {
+                    items.RemoveValueAtIndex(i)?;
+                    n -= 1;
+                    continue;
+                }
+                prev_sep = sep;
+                i += 1;
+            }
+
+            let mut has = Default::default();
+            let mut p = PWSTR::null();
+            target.HasLinkUri(&mut has)?;
+            let link = if has.as_bool() && target.LinkUri(&mut p).is_ok() { Some(take(p)) } else { None };
+            target.HasSelection(&mut has)?;
+            let mut p = PWSTR::null();
+            let selection = if has.as_bool() && target.SelectionText(&mut p).is_ok() {
+                Some(take(p).split_whitespace().collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty())
+            } else {
+                None
+            };
+            let mut kind = COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND::default();
+            target.Kind(&mut kind)?;
+            target.HasSourceUri(&mut has)?;
+            let mut p = PWSTR::null();
+            let image = if has.as_bool() && kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE && target.SourceUri(&mut p).is_ok() {
+                Some(take(p))
+            } else {
+                None
+            };
+            let mut p = PWSTR::null();
+            target.PageUri(&mut p)?;
+            let page = take(p);
+
+            // (label, url, activate)
+            let mut top: Vec<(String, String, bool)> = Vec::new();
+            if let Some(l) = link.as_ref().filter(|l| l.starts_with("http") || l.starts_with("file:")) {
+                top.push(("Open link in new tab".into(), l.clone(), true));
+                top.push(("Open link in background tab".into(), l.clone(), false));
+            }
+            if let Some(src) = image.as_ref().filter(|s| s.starts_with("http")) {
+                top.push(("Open image in new tab".into(), src.clone(), true));
+            }
+            if let Some(sel) = selection.as_ref().filter(|_| !editable) {
+                let settings = app.settings();
+                let short: String = if sel.chars().count() > 32 { sel.chars().take(30).collect::<String>() + "\u{2026}" } else { sel.clone() };
+                let q: String = url::form_urlencoded::byte_serialize(sel.as_bytes()).collect();
+                top.push((
+                    format!("Search {} for \u{201c}{short}\u{201d}", search_engine_label(&settings.search_engine)),
+                    format!("{}{q}", settings.search_prefix()),
+                    true,
+                ));
+            }
+            let mut bottom: Vec<(String, String, bool)> = Vec::new();
+            if link.is_none() && image.is_none() && selection.is_none() && !editable && page.starts_with("http") {
+                bottom.push(("View page source".into(), format!("view-source:{page}"), true));
+            }
+
+            let make = |label: &str, action: Option<(String, bool)>| -> windows::core::Result<ICoreWebView2ContextMenuItem> {
+                let kind = if action.is_some() { COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND } else { COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR };
+                let item = env9.CreateContextMenuItem(&HSTRING::from(label), None, kind)?;
+                if let Some((url, activate)) = action {
+                    let (app, tab_id) = (app.clone(), tab_id.clone());
+                    let mut t = Default::default();
+                    item.add_CustomItemSelected(
+                        &CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+                            let (url, tab_id) = (url.clone(), tab_id.clone());
+                            app.mutate(move |s| {
+                                let space = s.tab(&tab_id).map(|t| t.space_id.clone());
+                                s.create_tab(Some(url), space, activate, Some(&tab_id));
+                            });
+                            Ok(())
+                        })),
+                        &mut t,
+                    )?;
+                }
+                Ok(item)
+            };
+            let mut at = 0u32;
+            for (label, url, activate) in &top {
+                items.InsertValueAtIndex(at, &make(label, Some((url.clone(), *activate)))?)?;
+                at += 1;
+            }
+            items.Count(&mut n)?;
+            if at > 0 && n > at {
+                items.InsertValueAtIndex(at, &make("", None)?)?;
+            }
+            for (label, url, activate) in &bottom {
+                items.Count(&mut n)?;
+                // Just above "Inspect" when it is last.
+                let mut idx = n;
+                if n > 0 {
+                    let mut name = PWSTR::null();
+                    items.GetValueAtIndex(n - 1)?.Name(&mut name)?;
+                    if take(name) == "inspectElement" {
+                        idx = n - 1;
+                    }
+                }
+                items.InsertValueAtIndex(idx, &make(label, Some((url.clone(), *activate)))?)?;
+            }
+            Ok(())
+        })),
+        &mut token,
+    )?;
+    Ok(())
+}
+
+/// Hidden tabs ask WebView2 to keep a low memory footprint (it trims caches
+/// and swaps out what it can); visible tabs go back to normal.
+pub fn set_background(wv: &Webview, background: bool) {
+    let _ = wv.with_webview(move |pw| unsafe {
+        if let Ok(c19) = pw.controller().CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_19>()) {
+            let level = if background { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+            let _ = c19.SetMemoryUsageTargetLevel(level);
+        }
+    });
+}
+
+/// Freezes a hidden tab's renderer (timers, scripts) until it is shown again.
+/// WebView2 refuses while the page plays audio or holds other live activity.
+pub fn try_suspend(wv: &Webview) {
+    let _ = wv.with_webview(move |pw| unsafe {
+        if let Ok(c3) = pw.controller().CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_3>()) {
+            let _ = c3.TrySuspend(&TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(()))));
+        }
     });
 }
 

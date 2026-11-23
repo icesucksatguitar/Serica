@@ -62,6 +62,8 @@ pub enum Shortcut {
     Downloads,
     Settings,
     SpaceIndex(usize),
+    /// Next (+1) or previous (-1) space, from a four-finger swipe.
+    SpaceStep(i32),
     Escape,
     Home,
 }
@@ -396,10 +398,18 @@ impl App {
             Shortcut::CycleTab(d) => {
                 self.mutate(|s| s.cycle_tab(d));
             }
-            Shortcut::SpaceIndex(n) => {
+            Shortcut::SpaceIndex(_) | Shortcut::SpaceStep(_) => {
                 let switched = self.mutate(|s| {
                     let order = s.switcher_order();
-                    let target = order.get(n.wrapping_sub(1)).cloned()?;
+                    let index = match sc {
+                        Shortcut::SpaceStep(d) => {
+                            let cur = order.iter().position(|id| *id == s.active_space_id)? as i64;
+                            usize::try_from(cur + d as i64).ok()?
+                        }
+                        Shortcut::SpaceIndex(n) => n.wrapping_sub(1),
+                        _ => return None,
+                    };
+                    let target = order.get(index).cloned()?;
                     if target == s.active_space_id {
                         return None;
                     }

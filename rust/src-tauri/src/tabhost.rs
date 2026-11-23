@@ -34,7 +34,12 @@ pub struct TabView {
     pub webview: Webview,
     pub profile: String,
     pub shown: bool,
+    /// When the view was last hidden (drives background suspension).
+    pub hidden_at: Option<std::time::Instant>,
 }
+
+/// Hidden tabs are frozen after this long unless they play media.
+const SUSPEND_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Puts the largest playing video into native picture-in-picture.
 pub const PIP_ENTER_JS: &str = r#"(() => {
@@ -122,6 +127,68 @@ pub struct TabHost {
     create_failures: u32,
 }
 
+/// Two-finger horizontal touchpad swipe over a page goes back/forward, when
+/// nothing under the pointer can scroll that way. An edge arrow follows the
+/// swipe; crossing the threshold navigates (handled natively: `swipe-nav`).
+pub const SWIPE_SCRIPT: &str = r#"(() => {
+  if (window.top !== window || window.__sericaSwipe) return;
+  Object.defineProperty(window, '__sericaSwipe', { value: 1 });
+  const THRESHOLD = 160, GAP = 220;
+  let acc = 0, last = 0, state = 'idle', dir = 0, ui = null, arrow = null, hideTimer = 0;
+  const scrollsX = (n, dx) => {
+    for (; n && n.nodeType === 1; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) {
+      if (n.scrollWidth <= n.clientWidth + 1) continue;
+      const ox = getComputedStyle(n).overflowX;
+      const root = n === document.scrollingElement || n === document.documentElement || n === document.body;
+      if (root ? ox === 'hidden' || ox === 'clip' : ox !== 'auto' && ox !== 'scroll') continue;
+      const left = Math.abs(n.scrollLeft), max = n.scrollWidth - n.clientWidth;
+      if (dx < 0 ? left > 1 : left < max - 1) return true;
+    }
+    return false;
+  };
+  const show = (p) => {
+    if (!ui) {
+      ui = document.createElement('serica-swipe');
+      ui.style.cssText = 'position:fixed;top:50%;z-index:2147483647;pointer-events:none;width:44px;height:44px;margin-top:-22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 22px/1 "Segoe UI",system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25);transition:background .12s,color .12s';
+      arrow = document.createElement('span');
+      ui.appendChild(arrow);
+    }
+    if (!ui.isConnected) (document.body || document.documentElement).appendChild(ui);
+    const done = p >= 1;
+    arrow.textContent = dir < 0 ? '←' : '→';
+    ui.style.left = dir < 0 ? '0' : '';
+    ui.style.right = dir < 0 ? '' : '0';
+    const off = -44 + Math.min(p, 1) * 64;
+    ui.style.transform = 'translateX(' + (dir < 0 ? off : -off) + 'px)';
+    ui.style.opacity = String(Math.min(1, p * 1.5));
+    ui.style.background = done ? '#0b57d0' : 'rgba(60,64,67,.92)';
+    ui.style.color = '#fff';
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (ui) ui.remove(); }, done ? 260 : GAP + 40);
+  };
+  addEventListener('wheel', (e) => {
+    const now = performance.now();
+    if (now - last > GAP) { state = 'idle'; acc = 0; }
+    last = now;
+    if (state === 'off' || state === 'done') return;
+    if (e.ctrlKey || e.shiftKey || e.deltaMode !== 0 || e.defaultPrevented) { state = 'off'; return; }
+    if (state === 'idle') {
+      if (Math.abs(e.deltaX) < 1 && Math.abs(e.deltaY) < 1) return;
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.5 || scrollsX(e.target, e.deltaX)) { state = 'off'; return; }
+      state = 'track';
+      dir = e.deltaX < 0 ? -1 : 1;
+    }
+    acc += e.deltaX * dir;
+    if (acc < -20) { state = 'off'; if (ui) ui.remove(); return; }
+    const p = Math.max(0, acc) / THRESHOLD;
+    show(p);
+    if (p >= 1) {
+      state = 'done';
+      try { window.chrome.webview.postMessage(JSON.stringify({ __serica: 1, t: 'swipe-nav', dir: dir < 0 ? 'back' : 'forward' })); } catch (err) {}
+    }
+  }, { passive: true });
+})();"#;
+
 /// Runs in every tab's top frame: reports CSS classes/ids for Brave's generic
 /// cosmetic filtering. Messages are ignored by Tauri's IPC (not invoke calls).
 pub const PAGE_SCRIPT: &str = r#"(() => {
@@ -181,7 +248,10 @@ impl TabHost {
     }
 
     fn browser_args(&self) -> String {
-        let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        // Background services Serica doesn't use: each costs memory, wakeups or network.
+        let mut args = String::from(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,InterestFeedContentSuggestions,SpareRendererForSitePerProcess --no-pings",
+        );
         // Pages connect directly unless the VPN needs the tunnel: a proxy turns
         // off HTTP/3 and Chromium's own DNS and connection racing.
         if let (true, Some(p)) = (self.net.0, self.proxy_port) {
@@ -197,7 +267,8 @@ impl TabHost {
             .background_color(tauri::webview::Color(255, 255, 255, 255))
             .browser_extensions_enabled(true)
             .initialization_script(PAGE_SCRIPT)
-            .initialization_script(crate::extensions::WEBSTORE_SCRIPT);
+            .initialization_script(crate::extensions::WEBSTORE_SCRIPT)
+            .initialization_script(SWIPE_SCRIPT);
         if self.net.1 {
             b = b.initialization_script_for_all_frames(crate::vpn::WEBRTC_GUARD_JS);
         }
@@ -328,7 +399,7 @@ impl TabHost {
                         if (w.zoom - 1.0).abs() > 0.001 {
                             crate::webview_win::set_zoom(&wv, w.zoom);
                         }
-                        host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false });
+                        host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false, hidden_at: None });
                     } else if host.create_failures < 20 {
                         host.create_failures += 1;
                         retry = true;
@@ -346,6 +417,7 @@ impl TabHost {
         let visible = host.visible;
         let bounds = host.bounds;
         let mut previews_to_capture = Vec::new();
+        let mut to_suspend = Vec::new();
         for (id, v) in host.views.iter_mut() {
             let should_show = visible && Some(id) == active.as_ref();
             if should_show {
@@ -355,8 +427,11 @@ impl TabHost {
                 if !v.shown {
                     #[cfg(windows)]
                     crate::webview_win::set_clip(&v.webview, clip.clone());
+                    #[cfg(windows)]
+                    crate::webview_win::set_background(&v.webview, false);
                     let _ = v.webview.show();
                     v.shown = true;
+                    v.hidden_at = None;
                     // Returning to a tab brings its mini-player video back into the page.
                     let _ = v.webview.eval(PIP_EXIT_JS);
                 }
@@ -371,9 +446,19 @@ impl TabHost {
                 }
                 let _ = v.webview.hide();
                 v.shown = false;
+                v.hidden_at = Some(std::time::Instant::now());
+                #[cfg(windows)]
+                crate::webview_win::set_background(&v.webview, true);
+                to_suspend.push(id.clone());
             }
         }
         drop(host);
+        #[cfg(windows)]
+        for id in to_suspend {
+            Self::schedule_suspend(app, id);
+        }
+        #[cfg(not(windows))]
+        let _ = to_suspend;
         if retry {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -392,6 +477,30 @@ impl TabHost {
         }
         #[cfg(not(windows))]
         let _ = previews_to_capture;
+    }
+
+    /// Suspends a hidden tab once it has stayed hidden for `SUSPEND_AFTER`,
+    /// unless it is playing media (music, calls).
+    #[cfg(windows)]
+    fn schedule_suspend(app: &Shared, id: String) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(SUSPEND_AFTER + std::time::Duration::from_secs(1)).await;
+            let media = app.store.lock().tab(&id).map(|t| t.has_active_media).unwrap_or(true);
+            if media {
+                return;
+            }
+            let wv = {
+                let host = app.host.lock();
+                host.views
+                    .get(&id)
+                    .filter(|v| !v.shown && v.hidden_at.is_some_and(|t| t.elapsed() >= SUSPEND_AFTER))
+                    .map(|v| v.webview.clone())
+            };
+            if let Some(wv) = wv {
+                crate::webview_win::try_suspend(&wv);
+            }
+        });
     }
 
     /// Navigates a tab's existing webview. Returns false if it has none yet
