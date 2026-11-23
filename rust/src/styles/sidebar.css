@@ -140,34 +140,44 @@ body.sidebar-resizing-active .arc-viewport-container {
   -webkit-app-region: no-drag;
 }
 
-/* Back / forward / reload / home in the sidebar's top row: the sidebar covers
-   the toolbar's copy while it is open. The row also moves the window. */
-.nsb-nav-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 32px;
-  margin: -4px 0 4px;
-  padding: 0 2px;
-  -webkit-app-region: drag;
+/* The top bar's left buttons slide over to sit beside the open sidebar (same
+   duration and curve as the sidebar), and the address pill re-centers in the
+   space that is left. Where that space is too narrow, the pill steps aside. */
+.floating-top-chrome-capsule .macos-window-controls-cluster,
+.floating-top-chrome-capsule .top-floating-url-pill {
+  transition:
+    transform 260ms cubic-bezier(0.4, 0, 0.6, 1),
+    opacity 160ms ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-.nsb-nav-row .nsb-icon-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  -webkit-app-region: no-drag;
-  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster,
+html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-.nsb-nav-row .nsb-icon-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-  background: transparent;
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster {
+  transform: translateX(var(--sidebar-cover, 0px));
 }
 
-.nsb-nav-spacer {
-  flex: 1;
+html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
+  transform: translateX(calc(var(--sidebar-cover, 0px) / 2));
+}
+
+@media (max-width: 1240px) {
+  html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
+    opacity: 0;
+    pointer-events: none;
+  }
 }
 
 /* + New Tab, at the top of Today */

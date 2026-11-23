@@ -1007,16 +1007,6 @@ return (
         autoHide
         pinnedOpen={sidebarOpen}
         onRequestClose={closeSidebar}
-        nav={{
-          canGoBack: Boolean(activeTab?.canGoBack),
-          canGoForward: Boolean(activeTab?.canGoForward),
-          isWebpage,
-          isLoading: Boolean(activeTab?.isLoading),
-          onBack: () => dispatchSiteAction('back'),
-          onForward: () => dispatchSiteAction('forward'),
-          onReload: () => dispatchSiteAction(activeTab?.isLoading ? 'stop' : 'reload'),
-          onHome: () => dispatchSiteAction('home'),
-        }}
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}

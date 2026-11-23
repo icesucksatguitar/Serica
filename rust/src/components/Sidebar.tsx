@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft,
-  ArrowRight,
   ArrowRightLeft,
   BookOpen,
   Briefcase,
@@ -23,7 +21,6 @@ import {
   Pin,
   PinOff,
   Plus,
-  RotateCw,
   Sparkles,
   Star,
   StarOff,
@@ -112,19 +109,6 @@ export interface SidebarProps {
   pinnedOpen?: boolean;
   /** Asks App to close a pinned-open sidebar (Esc, click outside, a tab picked). */
   onRequestClose?: () => void;
-  /** Site navigation, shown in the sidebar header (the sidebar covers the toolbar's copy). */
-  nav?: SidebarNav;
-}
-
-export interface SidebarNav {
-  canGoBack: boolean;
-  canGoForward: boolean;
-  isWebpage: boolean;
-  isLoading: boolean;
-  onBack: () => void;
-  onForward: () => void;
-  onReload: () => void;
-  onHome: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +237,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className,
   pinnedOpen = false,
   onRequestClose,
-  nav,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -430,6 +413,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
     holeShown.current = visible;
   }, [autoHide, visible, holeWidth]);
   useEffect(() => () => removeViewportHole('sidebar'), []);
+
+  // The top bar's left buttons (sidebar toggle, back/forward/reload/home,
+  // new tab) move over to sit beside the open sidebar instead of under it.
+  useLayoutEffect(() => {
+    if (!autoHide) return;
+    const root = document.documentElement;
+    root.style.setProperty('--sidebar-cover', shown ? `${holeWidth}px` : '0px');
+    root.classList.toggle('sidebar-covering', shown);
+  }, [autoHide, shown, holeWidth]);
+  useEffect(
+    () => () => {
+      document.documentElement.style.removeProperty('--sidebar-cover');
+      document.documentElement.classList.remove('sidebar-covering');
+    },
+    [],
+  );
 
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
@@ -1024,33 +1023,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         )}
         {/* Active space: name, icon and color (R13.6) */}
-        {nav && (
-          <div className="nsb-nav-row" role="group" aria-label="Site controls">
-            <button type="button" className="nsb-icon-btn" title="Back (Alt+Left)" aria-label="Go back" disabled={!nav.isWebpage || !nav.canGoBack} onClick={nav.onBack}>
-              <ArrowLeft size={15} />
-            </button>
-            <button type="button" className="nsb-icon-btn" title="Forward (Alt+Right)" aria-label="Go forward" disabled={!nav.isWebpage || !nav.canGoForward} onClick={nav.onForward}>
-              <ArrowRight size={15} />
-            </button>
-            <button
-              type="button"
-              className="nsb-icon-btn"
-              title={nav.isLoading ? 'Stop loading' : 'Reload (Ctrl+R)'}
-              aria-label={nav.isLoading ? 'Stop loading' : 'Reload page'}
-              disabled={!nav.isWebpage}
-              onClick={nav.onReload}
-            >
-              {nav.isLoading ? <X size={15} /> : <RotateCw size={14} />}
-            </button>
-            <button type="button" className="nsb-icon-btn" title="Homescreen" aria-label="Home" disabled={!nav.isWebpage} onClick={nav.onHome}>
-              <Home size={14} />
-            </button>
-            <span className="nsb-nav-spacer" />
-            <button type="button" className="nsb-icon-btn" title="Hide sidebar (Ctrl+S)" aria-label="Hide sidebar" onClick={dismiss}>
-              <PanelLeftClose size={15} />
-            </button>
-          </div>
-        )}
         <div className="nsb-header">
           {activeSpace && (
             <div className="nsb-space-title" title={activeSpace.name}>
@@ -1063,19 +1035,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
           )}
-          {!nav && (
-            <div className="nsb-header-actions">
-              <button
-                type="button"
-                className="nsb-icon-btn"
-                title="Hide sidebar (Ctrl+S)"
-                aria-label="Hide sidebar"
-                onClick={dismiss}
-              >
-                <PanelLeftClose size={14} />
-              </button>
-            </div>
-          )}
+          <div className="nsb-header-actions">
+            <button
+              type="button"
+              className="nsb-icon-btn"
+              title="Hide sidebar (Ctrl+S)"
+              aria-label="Hide sidebar"
+              onClick={dismiss}
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          </div>
         </div>
 
         {!favoritesInPanes && section('favorite', view.favorites.map((f) => renderFavorite(f)), 'nsb-favorites')}
