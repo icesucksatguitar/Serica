@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lock, Globe, Copy, Check, Search } from 'lucide-react';
+import { prewarmViewport } from '../hooks/useViewportOverlay';
 
 export interface FloatingUrlPillProps {
   url?: string;
@@ -67,6 +68,7 @@ export interface FloatingUrlPillProps {
     return (
       <div
         className={`top-floating-url-pill ${isLoading ? 'loading' : ''} ${isWebUrl ? 'has-actions' : ''}`}
+        onPointerEnter={prewarmViewport}
         onClick={onClick}
         role="button"
         tabIndex={0}

@@ -337,6 +337,38 @@ pub async fn set_viewport(x: f64, y: f64, width: f64, height: f64, app: State<'_
     Ok(())
 }
 
+/// Lets a piece of UI show through the page (see `TabHost::set_hole`).
+/// `rect`/`from` are `[x, y, w, h]` in CSS px; `ease` a CSS cubic-bezier.
+#[tauri::command]
+pub async fn set_viewport_hole(
+    id: String,
+    rect: [f64; 4],
+    from: Option<[f64; 4]>,
+    ms: Option<u32>,
+    ease: Option<[f64; 4]>,
+    remove: Option<bool>,
+    lead: Option<f64>,
+    radius: Option<f64>,
+    app: State<'_, Shared>,
+) -> R<()> {
+    let rad = radius.filter(|r| r.is_finite()).unwrap_or(0.0).clamp(0.0, 200.0);
+    let h = |r: [f64; 4]| crate::tabhost::Hole { x: r[0], y: r[1], w: r[2], h: r[3].max(0.0), r: rad };
+    if !rect.iter().all(|v| v.is_finite()) || id.len() > 64 {
+        return Err("bad hole".into());
+    }
+    TabHost::set_hole(
+        app.inner(),
+        id,
+        h(rect),
+        from.filter(|r| r.iter().all(|v| v.is_finite())).map(h),
+        ms.unwrap_or(0).min(2000),
+        ease.unwrap_or([0.25, 0.1, 0.25, 1.0]),
+        remove.unwrap_or(false),
+        lead.filter(|l| l.is_finite()).unwrap_or(0.0).clamp(-100.0, 100.0),
+    );
+    Ok(())
+}
+
 /// Captures the active page while it is on screen (for the UI to show in its
 /// place), without hiding it.
 #[tauri::command]
@@ -349,7 +381,9 @@ pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
             image = await_cb(|done| crate::webview_win::capture(&wv, done)).await.flatten();
         }
     }
-    if let (Some(img), Some(id)) = (&image, app.store.lock().active_tab_id.clone()) {
+    // Read the id first: never hold the store lock while taking the host lock.
+    let active_id = app.store.lock().active_tab_id.clone();
+    if let (Some(img), Some(id)) = (&image, active_id) {
         app.host.lock().previews.insert(id, img.clone());
     }
     Ok(image)
@@ -372,7 +406,9 @@ pub async fn viewport_freeze(capture: Option<bool>, app: State<'_, Shared>) -> R
     }
     let a2 = app.clone();
     tauri::async_runtime::spawn_blocking(move || TabHost::set_visible(&a2, false)).await.map_err(|e| e.to_string())?;
-    if let (Some(img), Some(id)) = (&image, app.store.lock().active_tab_id.clone()) {
+    // Read the id first: never hold the store lock while taking the host lock.
+    let active_id = app.store.lock().active_tab_id.clone();
+    if let (Some(img), Some(id)) = (&image, active_id) {
         app.host.lock().previews.insert(id, img.clone());
     }
     Ok(image)

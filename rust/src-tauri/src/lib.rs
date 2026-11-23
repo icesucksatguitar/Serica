@@ -93,6 +93,7 @@ pub fn run() {
             commands::open_external_url,
             commands::set_viewport,
             commands::viewport_capture,
+            commands::set_viewport_hole,
             commands::viewport_freeze,
             commands::viewport_thaw,
             commands::find_in_page,

@@ -6474,18 +6474,21 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   align-items: center;
   user-select: none;
   will-change: transform;
-  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* On sites the page is clipped around the dock as it slides (no fade, which
+   would show the flat background behind it). */
 .vertical-pins-dock-container.on-webpage.autohidden {
   transform: translateY(-50%) translateX(calc(100% + 20px));
-  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.32s;
 }
 
 .vertical-pins-dock-container.on-webpage.revealed {
   transform: translateY(-50%) translateX(0);
-  opacity: 1;
+  visibility: visible;
   pointer-events: auto;
 }
 

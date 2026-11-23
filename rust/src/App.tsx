@@ -13,7 +13,7 @@ import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { prewarmViewport, useViewportOverlay } from './hooks/useViewportOverlay';
+import { useViewportOverlay } from './hooks/useViewportOverlay';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -689,10 +689,19 @@ useEffect(() => {
   void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
     if (Array.isArray(list)) setHistoryEntries(list);
   });
-  const unsubHistory = window.serica?.onHistoryUpdated?.((entries) => {
-    if (Array.isArray(entries)) setHistoryEntries(entries);
+  // The backend pings on changes; refetch, at most a few times a second.
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const unsubHistory = window.serica?.onHistoryUpdated?.(() => {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
+        if (Array.isArray(list)) setHistoryEntries(list);
+      });
+    }, 250);
   });
   return () => {
+    if (timer) clearTimeout(timer);
     unsubHistory?.();
   };
 }, [isHistoryModalOpen]);
@@ -998,6 +1007,16 @@ return (
         autoHide
         pinnedOpen={sidebarOpen}
         onRequestClose={closeSidebar}
+        nav={{
+          canGoBack: Boolean(activeTab?.canGoBack),
+          canGoForward: Boolean(activeTab?.canGoForward),
+          isWebpage,
+          isLoading: Boolean(activeTab?.isLoading),
+          onBack: () => dispatchSiteAction('back'),
+          onForward: () => dispatchSiteAction('forward'),
+          onReload: () => dispatchSiteAction(activeTab?.isLoading ? 'stop' : 'reload'),
+          onHome: () => dispatchSiteAction('home'),
+        }}
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}
@@ -1025,7 +1044,6 @@ return (
         <button
           className={`macos-tabs-toggle-pill ${sidebarOpen ? 'active' : ''}`}
           data-sidebar-toggle
-          onPointerEnter={prewarmViewport}
           onClick={toggleSidebar}
           title={sidebarOpen ? 'Hide sidebar (Ctrl+S)' : 'Show sidebar (Ctrl+S)'}
           aria-label="Toggle sidebar"

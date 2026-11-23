@@ -4,7 +4,7 @@
 // While any overlay (modal, popover, context menu, hover card) is registered,
 // BrowserViewport replaces the live page with a snapshot and hides the native
 // view so the overlay is visible and clickable.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 
 let count = 0;
 const listeners = new Set<() => void>();
@@ -124,4 +124,66 @@ export function useReservedPageBottom(): number {
     },
     () => reservedBottom,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Holes: UI that shows through the live page without freezing it. The native
+// page view gets a window region with these rectangles cut out, so it keeps
+// running and stays clickable everywhere else, and nothing waits on a capture.
+
+/** `[x, y, width, height]` in CSS px, window coordinates. */
+export type HoleRect = [number, number, number, number];
+
+export interface HoleOptions {
+  /** Animate from this rectangle (or from the hole's current one, if it exists). */
+  from?: HoleRect;
+  ms?: number;
+  /** CSS cubic-bezier control points, matching the UI's own transition. */
+  ease?: [number, number, number, number];
+  /** Drop the hole once `rect` is reached. */
+  remove?: boolean;
+  /** Run ahead (+) or behind (-) the UI animation, in ms. */
+  lead?: number;
+  /** Corner radius in CSS px. */
+  radius?: number;
+}
+
+/** Resolves once the backend has the hole (or right away without a backend). */
+export function setViewportHole(id: string, rect: HoleRect, opts?: HoleOptions): Promise<void> {
+  const p = window.serica?.setViewportHole?.(id, rect, opts);
+  return p ? p.catch(() => undefined) : Promise.resolve();
+}
+
+export function removeViewportHole(id: string): void {
+  void setViewportHole(id, [0, 0, 0, 0], { remove: true });
+}
+
+/**
+ * Cuts `el`'s layout box (untransformed, so entry animations don't shrink it)
+ * out of the page while it is mounted. Returns whether the cut is in place:
+ * keep the element invisible until then, or it would flash under the page.
+ */
+export function useElementHole(id: string, el: HTMLElement | null, pad = 0): boolean {
+  const [ready, setReady] = useState(false);
+  useLayoutEffect(() => {
+    setReady(false);
+    if (!el) return;
+    let alive = true;
+    const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+    const push = () =>
+      setViewportHole(id, [el.offsetLeft - pad, el.offsetTop - pad, el.offsetWidth + pad * 2, el.offsetHeight + pad * 2], {
+        radius: radius + pad,
+      });
+    void push().then(() => {
+      if (alive) setReady(true);
+    });
+    const ro = new ResizeObserver(() => void push());
+    ro.observe(el);
+    return () => {
+      alive = false;
+      ro.disconnect();
+      removeViewportHole(id);
+    };
+  }, [id, el, pad]);
+  return ready;
 }

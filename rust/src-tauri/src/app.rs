@@ -197,12 +197,15 @@ impl App {
                 TabHost::reconcile(&self);
             }
             let blocked: Vec<BlockedTrackerItem> = std::mem::take(&mut *self.blocked_queue.lock());
-            for item in blocked.into_iter().rev().take(30).rev() {
-                ui_emit(&self.handle, "serica:tracker-blocked", item);
+            if !blocked.is_empty() {
+                // One message per cycle (each emit is a script call on the UI thread).
+                let latest: Vec<BlockedTrackerItem> = blocked.into_iter().rev().take(30).rev().collect();
+                ui_emit(&self.handle, "serica:trackers-blocked", latest);
             }
             if history {
-                let recent = self.history.lock().recent(500);
-                ui_emit(&self.handle, "serica:history-updated", recent);
+                // A ping, not the list: only an open History panel needs the
+                // entries, and it fetches them (keeps page loads light).
+                ui_emit(&self.handle, "serica:history-updated", serde_json::Value::Null);
             }
             if state || settings || history {
                 dirty_since.get_or_insert_with(Instant::now);

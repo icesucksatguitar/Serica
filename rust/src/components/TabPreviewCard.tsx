@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Globe } from 'lucide-react';
+import { useElementHole } from '../hooks/useViewportOverlay';
 import {
   PREVIEW_CARD_HEIGHT,
   PREVIEW_CARD_WIDTH,
@@ -107,14 +108,24 @@ export const TabPreviewCard: React.FC<TabPreviewCardProps> = ({ preview, onMouse
   const pos = previewCardPosition(target.anchor, { width: window.innerWidth, height: window.innerHeight });
   const [favFailed, setFavFailed] = useState(false);
   const domainInfo = parsePreviewDomain(target.url);
+  // Shows through the live page while it is up.
+  const [cardEl, setCardEl] = useState<HTMLDivElement | null>(null);
+  const holeReady = useElementHole('tab-preview', cardEl);
 
   return (
     <div
+      ref={setCardEl}
       className="nsb-preview mini-window-card mini-window-tab-card"
       role="tooltip"
       data-preview-tab-id={target.tabId ?? undefined}
       data-preview-status={status}
-      style={{ left: pos.left, top: pos.top, width: PREVIEW_CARD_WIDTH, maxHeight: PREVIEW_CARD_HEIGHT }}
+      style={{
+        left: pos.left,
+        top: pos.top,
+        width: PREVIEW_CARD_WIDTH,
+        maxHeight: PREVIEW_CARD_HEIGHT,
+        visibility: holeReady ? 'visible' : 'hidden',
+      }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >

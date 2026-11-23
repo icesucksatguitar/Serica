@@ -200,6 +200,7 @@ impl History {
         removed
     }
 
+    #[cfg(test)]
     pub fn recent(&self, limit: usize) -> Vec<HistoryEntry> {
         self.query(&HistoryQuery { limit: Some(limit), ..Default::default() })
     }

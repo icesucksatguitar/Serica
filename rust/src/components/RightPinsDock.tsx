@@ -1,5 +1,5 @@
-import { useLingering, useViewportCovered, useViewportOverlay } from '../hooks/useViewportOverlay';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { removeViewportHole, setViewportHole, useElementHole, useViewportCovered, useViewportOverlay } from '../hooks/useViewportOverlay';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Plus, X, Globe, EyeOff } from 'lucide-react';
 import { addSettledBlurListener } from '../utils/settledBlur';
 
@@ -67,13 +67,16 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const keepOpen = isAddModalOpen || menuPos !== null;
 
-  // Pages are native views above the HTML UI: cover the page while the dock,
-  // its menu or the add dialog is up so they stay visible and clickable. The
-  // dock slides in once the page is covered and slides out over the snapshot.
-  const overlayWanted = (Boolean(isOnWebpage) && isHoveredDock) || keepOpen;
-  useViewportOverlay(useLingering(overlayWanted, 300));
+  // Pages are native views above the HTML UI. The dock and its menu show
+  // through the live page (it is clipped around them); only the add dialog,
+  // which dims the whole page, freezes it.
+  useViewportOverlay(isAddModalOpen);
   const covered = useViewportCovered();
-  const dockShown = isHoveredDock && covered;
+  // Slides in once the page is clipped for it (see the hole effect below).
+  const [holeReady, setHoleReady] = useState(false);
+  const dockShown = isHoveredDock && (holeReady || !isOnWebpage);
+  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
+  const menuReady = useElementHole('dock-menu', menuPos ? menuEl : null);
 
   const revealDock = useCallback(() => {
     if (hideTimerRef.current !== null) {
@@ -156,6 +159,42 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   const [hoveredPinId, setHoveredPinId] = useState<string | null>(null);
 
   const dockRef = useRef<HTMLDivElement>(null);
+
+  // The page is clipped to the dock's pill (same shape) and the clip follows
+  // the dock's slide from the right (same duration and curve).
+  const holeShown = useRef(false);
+  useLayoutEffect(() => {
+    const el = dockRef.current;
+    const track = el?.querySelector<HTMLElement>('.vertical-pins-dock-track');
+    if (!isOnWebpage || !el || !track) {
+      if (holeShown.current) removeViewportHole('dock');
+      holeShown.current = false;
+      return;
+    }
+    const W = window.innerWidth;
+    const w = track.offsetWidth;
+    const h = track.offsetHeight;
+    const left = W - el.offsetWidth; // the track sits at the container's left edge
+    const top = window.innerHeight / 2 - h / 2;
+    const shift = el.offsetWidth + 20; // the hidden dock's translateX
+    const radius = parseFloat(getComputedStyle(track).borderTopLeftRadius) || 0;
+    const shownRect: [number, number, number, number] = [left, top, w, h];
+    const hiddenRect: [number, number, number, number] = [left + shift, top, w, h];
+    const ease: [number, number, number, number] = [0.22, 1, 0.36, 1];
+    if (isHoveredDock) {
+      void setViewportHole('dock', shownRect, holeShown.current ? { radius } : { from: hiddenRect, ms: 320, ease, lead: 8, radius }).then(() =>
+        setHoleReady(true),
+      );
+    } else {
+      setHoleReady(false);
+      if (holeShown.current) {
+        void setViewportHole('dock', hiddenRect, { from: shownRect, ms: 320, ease, lead: -12, remove: true, radius });
+      }
+    }
+    holeShown.current = isHoveredDock;
+  }, [isOnWebpage, isHoveredDock, pins.length]);
+  useEffect(() => () => removeViewportHole('dock'), []);
+
   const itemRefs = useRef<{ [id: string]: HTMLDivElement | null }>({});
 
   const savePins = (updated: PinnedSite[]) => {
@@ -174,7 +213,8 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     const dockRect = dock.getBoundingClientRect();
     const mouseY = e.clientY;
     const maxRadius = 72; // Influence radius in px
-    const maxScale = 1.48; // Peak magnification scale
+    // On sites the page is clipped to the dock's pill: icons must stay inside it.
+    const maxScale = isOnWebpage ? 1.2 : 1.48; // Peak magnification scale
 
     const newScales: { [id: string]: number } = {};
 
@@ -199,7 +239,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     });
 
     setScales(newScales);
-  }, [pins]);
+  }, [pins, isOnWebpage]);
 
   const handleMouseLeave = () => {
     setScales({});
@@ -304,7 +344,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                 ref={(el) => (itemRefs.current[pin.id] = el)}
                 className="pin-dock-item"
                 style={{
-                  transform: `scale(${scale}) translateX(${scale > 1.05 ? -(scale - 1) * 14 : 0}px)`,
+                  transform: `scale(${scale}) translateX(${scale > 1.05 && !isOnWebpage ? -(scale - 1) * 14 : 0}px)`,
                   zIndex: Math.round(scale * 10),
                 }}
                 onClick={() => onNavigate(pin.url)}
@@ -341,8 +381,8 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                   )}
                 </div>
 
-                {/* macOS Style Name Tooltip */}
-                {isItemHovered && (
+                {/* macOS Style Name Tooltip (on sites the native title tooltip is used: it draws above the page) */}
+                {isItemHovered && !isOnWebpage && (
                   <div className="pin-dock-tooltip">
                     <span>{pin.title}</span>
                   </div>
@@ -367,7 +407,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
             <div className="pin-dock-icon-capsule add-capsule">
               <Plus size={16} />
             </div>
-            {hoveredPinId === 'add-btn' && (
+            {hoveredPinId === 'add-btn' && !isOnWebpage && (
               <div className="pin-dock-tooltip">
                 <span>Add website</span>
               </div>
@@ -376,11 +416,12 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         </div>
       </aside>
 
-      {menuPos && covered && (
+      {menuPos && (
         <div
+          ref={setMenuEl}
           className="nsb-menu pin-dock-menu"
           role="menu"
-          style={{ left: menuPos.x, top: menuPos.y, width: DOCK_MENU_WIDTH }}
+          style={{ left: menuPos.x, top: menuPos.y, width: DOCK_MENU_WIDTH, visibility: menuReady ? 'visible' : 'hidden' }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >

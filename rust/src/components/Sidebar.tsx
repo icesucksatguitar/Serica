@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowRightLeft,
   BookOpen,
   Briefcase,
@@ -21,6 +23,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  RotateCw,
   Sparkles,
   Star,
   StarOff,
@@ -34,7 +37,7 @@ import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
 import { addSettledBlurListener } from '../utils/settledBlur';
-import { useLingering, useViewportCovered, useViewportOverlay } from '../hooks/useViewportOverlay';
+import { removeViewportHole, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 import {
   buildSidebarView,
   contextMenuActions,
@@ -109,6 +112,19 @@ export interface SidebarProps {
   pinnedOpen?: boolean;
   /** Asks App to close a pinned-open sidebar (Esc, click outside, a tab picked). */
   onRequestClose?: () => void;
+  /** Site navigation, shown in the sidebar header (the sidebar covers the toolbar's copy). */
+  nav?: SidebarNav;
+}
+
+export interface SidebarNav {
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isWebpage: boolean;
+  isLoading: boolean;
+  onBack: () => void;
+  onForward: () => void;
+  onReload: () => void;
+  onHome: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +253,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className,
   pinnedOpen = false,
   onRequestClose,
+  nav,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -384,18 +401,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // An active drag keeps it visible too.
   const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed || pinnedOpen;
   const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive);
-  // Slide in only once the page under it is frozen (else it would slide in
-  // beneath the live page and pop up), and keep the page frozen while it
-  // slides back out.
-  const covered = useViewportCovered();
-  const shown = visible && covered;
-  const lingering = useLingering(visible, 280);
+  // Slide in once the page is clipped for it (the backend confirms the hole),
+  // so it can never slide in underneath the page.
+  const [holeReady, setHoleReady] = useState(false);
+  const shown = visible && holeReady;
+
+  // The live page is clipped where the sidebar is: the clip edge follows the
+  // sidebar's slide (same duration and curve, slightly ahead when opening and
+  // behind when closing) so the page never covers it and never freezes.
+  const holeWidth = (sidebarWidth ?? 240) + 1;
+  const holeShown = useRef(false);
+  useLayoutEffect(() => {
+    if (!autoHide) return;
+    const H = 100000;
+    if (visible) {
+      const opening = !holeShown.current;
+      void setViewportHole(
+        'sidebar',
+        [0, 0, holeWidth, H],
+        opening ? { from: [0, 0, -24, H], ms: 320, ease: [0.22, 1, 0.36, 1], lead: 8 } : undefined,
+      ).then(() => setHoleReady(true));
+    } else {
+      setHoleReady(false);
+      if (holeShown.current) {
+        void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: 260, ease: [0.4, 0, 0.6, 1], lead: -12, remove: true });
+      }
+    }
+    holeShown.current = visible;
+  }, [autoHide, visible, holeWidth]);
+  useEffect(() => () => removeViewportHole('sidebar'), []);
 
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
   const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || !shown);
-  // Menus, hover cards and the auto-hide sidebar float over the native page.
-  useViewportOverlay(menu !== null || folderMenu !== null || Boolean(preview.state && !drag.dragging) || (autoHide && lingering));
+  // Menus show through the live page too.
+  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
+  const [folderMenuEl, setFolderMenuEl] = useState<HTMLDivElement | null>(null);
+  const menuReady = useElementHole('sidebar-menu', menu ? menuEl : null);
+  const folderMenuReady = useElementHole('sidebar-folder-menu', folderMenu ? folderMenuEl : null);
 
   // Hides the sidebar now (a pick was made or it was dismissed).
   const dismiss = useCallback(() => {
@@ -981,6 +1024,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         )}
         {/* Active space: name, icon and color (R13.6) */}
+        {nav && (
+          <div className="nsb-nav-row" role="group" aria-label="Site controls">
+            <button type="button" className="nsb-icon-btn" title="Back (Alt+Left)" aria-label="Go back" disabled={!nav.isWebpage || !nav.canGoBack} onClick={nav.onBack}>
+              <ArrowLeft size={15} />
+            </button>
+            <button type="button" className="nsb-icon-btn" title="Forward (Alt+Right)" aria-label="Go forward" disabled={!nav.isWebpage || !nav.canGoForward} onClick={nav.onForward}>
+              <ArrowRight size={15} />
+            </button>
+            <button
+              type="button"
+              className="nsb-icon-btn"
+              title={nav.isLoading ? 'Stop loading' : 'Reload (Ctrl+R)'}
+              aria-label={nav.isLoading ? 'Stop loading' : 'Reload page'}
+              disabled={!nav.isWebpage}
+              onClick={nav.onReload}
+            >
+              {nav.isLoading ? <X size={15} /> : <RotateCw size={14} />}
+            </button>
+            <button type="button" className="nsb-icon-btn" title="Homescreen" aria-label="Home" disabled={!nav.isWebpage} onClick={nav.onHome}>
+              <Home size={14} />
+            </button>
+            <span className="nsb-nav-spacer" />
+            <button type="button" className="nsb-icon-btn" title="Hide sidebar (Ctrl+S)" aria-label="Hide sidebar" onClick={dismiss}>
+              <PanelLeftClose size={15} />
+            </button>
+          </div>
+        )}
         <div className="nsb-header">
           {activeSpace && (
             <div className="nsb-space-title" title={activeSpace.name}>
@@ -993,17 +1063,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
           )}
-          <div className="nsb-header-actions">
-            <button
-              type="button"
-              className="nsb-icon-btn"
-              title="Hide sidebar (Ctrl+S)"
-              aria-label="Hide sidebar"
-              onClick={dismiss}
-            >
-              <PanelLeftClose size={14} />
-            </button>
-          </div>
+          {!nav && (
+            <div className="nsb-header-actions">
+              <button
+                type="button"
+                className="nsb-icon-btn"
+                title="Hide sidebar (Ctrl+S)"
+                aria-label="Hide sidebar"
+                onClick={dismiss}
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            </div>
+          )}
         </div>
 
         {!favoritesInPanes && section('favorite', view.favorites.map((f) => renderFavorite(f)), 'nsb-favorites')}
@@ -1027,7 +1099,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {children}
       </aside>
 
-      {preview.state && !drag.dragging && covered && (
+      {preview.state && !drag.dragging && (
         <TabPreviewCard
           preview={preview.state}
           onMouseEnter={preview.cardProps.onMouseEnter}
@@ -1049,11 +1121,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {menu && covered && (
+      {menu && (
         <div
+          ref={setMenuEl}
           className="nsb-menu"
           role="menu"
-          style={{ left: menu.x, top: menu.y, width: MENU_WIDTH }}
+          style={{ left: menu.x, top: menu.y, width: MENU_WIDTH, visibility: menuReady ? 'visible' : 'hidden' }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
@@ -1172,11 +1245,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {folderMenu && covered && (
+      {folderMenu && (
         <div
+          ref={setFolderMenuEl}
           className="nsb-menu"
           role="menu"
-          style={{ left: folderMenu.x, top: folderMenu.y, width: MENU_WIDTH }}
+          style={{ left: folderMenu.x, top: folderMenu.y, width: MENU_WIDTH, visibility: folderMenuReady ? 'visible' : 'hidden' }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >

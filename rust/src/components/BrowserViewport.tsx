@@ -43,6 +43,12 @@ function decodeImage(src: string): Promise<void> {
   return img.decode().catch(() => undefined);
 }
 
+const SLOW = Symbol('slow');
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Resolves after the browser has painted the current update. */
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -189,7 +195,29 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
         if (wantFrozenRef.current) {
           if (isWebPageRef.current && window.serica?.captureViewport) {
             const ready = takePrewarmed();
-            const img = ready ?? (await window.serica.captureViewport().catch(() => null)) ?? null;
+            let img: string | null = ready;
+            if (!img) {
+              // A busy page (still loading) can take a second to capture. Do not
+              // wait for it: use the tab's last capture, then swap in the fresh one.
+              const fresh = window.serica.captureViewport().catch(() => null);
+              const quick = await Promise.race([fresh, sleep(140).then(() => SLOW)]);
+              if (quick === SLOW) {
+                const tabId = activeTabRef.current?.id;
+                const cached = tabId ? await window.serica.getTabPreview?.(tabId).catch(() => null) : null;
+                img = cached ?? (await fresh);
+                if (cached) {
+                  const key = pageKey();
+                  void fresh.then(async (late) => {
+                    if (late && freezeApplied.current && wantFrozenRef.current && pageKey() === key) {
+                      await decodeImage(late);
+                      setFrozenImage(late);
+                    }
+                  });
+                }
+              } else {
+                img = quick as string | null;
+              }
+            }
             if (img && wantFrozenRef.current) {
               if (!ready) await decodeImage(img);
               setFrozenImage(img);
@@ -421,7 +449,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           bottom: reservedBottom,
           top: findVisible ? FIND_BAR_INSET : 0,
           pointerEvents: isWebPage ? 'auto' : 'none',
-          backgroundColor: isWebPage ? (isDarkMode ? '#1a1a1a' : '#ffffff') : 'transparent',
+          // Seen only at the moving edge of UI cut out of the page: match the sidebar.
+          backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
         {isWebPage && frozenImage && (

@@ -96,10 +96,8 @@ body.sidebar-resizing-active .arc-viewport-container {
   z-index: 10100;
   will-change: transform;
   transform: translate3d(0, 0, 0);
-  transition:
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 220ms ease,
-    box-shadow 320ms ease;
+  visibility: visible;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
 }
 
 [data-theme="light"] .nsb.autohide {
@@ -113,20 +111,9 @@ body.sidebar-resizing-active .arc-viewport-container {
 
 .nsb.autohide.hidden {
   transform: translate3d(calc(-100% - 24px), 0, 0);
-  opacity: 0;
-  box-shadow: none;
+  visibility: hidden;
   pointer-events: none;
-  transition:
-    transform 260ms cubic-bezier(0.4, 0, 0.6, 1),
-    opacity 200ms ease 60ms,
-    box-shadow 200ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .nsb.autohide,
-  .nsb.autohide.hidden {
-    transition: opacity 120ms ease;
-  }
+  transition: transform 260ms cubic-bezier(0.4, 0, 0.6, 1), visibility 0s linear 260ms;
 }
 
 .nsb-edge-zone {
@@ -151,6 +138,36 @@ body.sidebar-resizing-active .arc-viewport-container {
 
 .nsb-header button {
   -webkit-app-region: no-drag;
+}
+
+/* Back / forward / reload / home in the sidebar's top row: the sidebar covers
+   the toolbar's copy while it is open. The row also moves the window. */
+.nsb-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  margin: -4px 0 4px;
+  padding: 0 2px;
+  -webkit-app-region: drag;
+}
+
+.nsb-nav-row .nsb-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  -webkit-app-region: no-drag;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.nsb-nav-row .nsb-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+
+.nsb-nav-spacer {
+  flex: 1;
 }
 
 /* + New Tab, at the top of Today */
@@ -776,11 +793,9 @@ body.sidebar-resizing-active .arc-viewport-container {
 
 @keyframes nsb-menu-in {
   from {
-    opacity: 0;
-    transform: scale(0.96) translateY(-3px);
+    transform: translateY(-3px);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
@@ -978,11 +993,9 @@ body.light .nsb-preview {
 
 @keyframes nsb-preview-in {
   from {
-    opacity: 0;
-    transform: translateY(3px) scale(0.985);
+    transform: translateY(3px);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }

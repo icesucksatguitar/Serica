@@ -43,6 +43,21 @@ export const tauriBridge = {
   setViewport: (x: number, y: number, width: number, height: number) =>
     invoke<void>('set_viewport', { x, y, width, height }),
   captureViewport: () => invoke<string | null>('viewport_capture'),
+  setViewportHole: (
+    id: string,
+    rect: [number, number, number, number],
+    opts?: { from?: [number, number, number, number]; ms?: number; ease?: [number, number, number, number]; remove?: boolean; lead?: number; radius?: number },
+  ) =>
+    invoke<void>('set_viewport_hole', {
+      id,
+      rect,
+      from: opts?.from ?? null,
+      ms: opts?.ms ?? null,
+      ease: opts?.ease ?? null,
+      remove: opts?.remove ?? null,
+      lead: opts?.lead ?? null,
+      radius: opts?.radius ?? null,
+    }),
   freezeViewport: (capture = true) => invoke<string | null>('viewport_freeze', { capture }),
   thawViewport: () => invoke<void>('viewport_thaw'),
   findInPage: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) =>
@@ -156,7 +171,10 @@ export const tauriBridge = {
 
   // Events from the backend
   onStateUpdate: (cb: (state: any) => void) => on('serica:state-update', cb),
-  onTrackerBlocked: (cb: (item: any) => void) => on('serica:tracker-blocked', cb),
+  onTrackerBlocked: (cb: (item: any) => void) =>
+    on('serica:trackers-blocked', (items: any) => {
+      if (Array.isArray(items)) for (const it of items) cb(it);
+    }),
   onSettingsUpdated: (cb: (settings: any) => void) => on('serica:settings-updated', cb),
   onPerformanceStatusUpdated: (cb: (status: any) => void) => on('serica:performance-updated', cb),
   onHistoryUpdated: (cb: (entries: any[]) => void) => on('serica:history-updated', cb),

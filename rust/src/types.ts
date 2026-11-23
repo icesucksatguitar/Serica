@@ -245,6 +245,11 @@ export interface SericaAPI {
   siteAction?: (action: SiteAction) => Promise<void>;
   setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
   captureViewport?: () => Promise<string | null>;
+  setViewportHole?: (
+    id: string,
+    rect: [number, number, number, number],
+    opts?: { from?: [number, number, number, number]; ms?: number; ease?: [number, number, number, number]; remove?: boolean; lead?: number; radius?: number },
+  ) => Promise<void>;
   freezeViewport?: (capture?: boolean) => Promise<string | null>;
   thawViewport?: () => Promise<void>;
   findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;

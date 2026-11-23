@@ -61,8 +61,51 @@ pub const PIP_EXIT_JS: &str = r#"(() => {
   document.addEventListener('visibilitychange', onVisible);
 })()"#;
 
+/// A rectangle of UI (CSS px, window coordinates) that shows through the page.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hole {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// Corner radius (CSS px), so rounded UI is cut out exactly.
+    pub r: f64,
+}
+
+impl Hole {
+    fn lerp(a: Hole, b: Hole, p: f64) -> Hole {
+        let l = |x: f64, y: f64| x + (y - x) * p;
+        Hole { x: l(a.x, b.x), y: l(a.y, b.y), w: l(a.w, b.w), h: l(a.h, b.h), r: l(a.r, b.r) }
+    }
+}
+
+/// CSS `cubic-bezier(x1, y1, x2, y2)` at progress `x` (0..1).
+pub fn cubic_bezier(e: [f64; 4], x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    let [x1, y1, x2, y2] = e;
+    let bez = |t: f64, a: f64, b: f64| 3.0 * (1.0 - t) * (1.0 - t) * t * a + 3.0 * (1.0 - t) * t * t * b + t * t * t;
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    let mut t = x;
+    for _ in 0..30 {
+        let v = bez(t, x1, x2);
+        if (v - x).abs() < 1e-5 {
+            break;
+        }
+        if v < x {
+            lo = t;
+        } else {
+            hi = t;
+        }
+        t = (lo + hi) / 2.0;
+    }
+    bez(t, y1, y2)
+}
+
 pub struct TabHost {
     pub views: HashMap<String, TabView>,
+    /// UI regions cut out of the page (sidebar, dock, menus), by owner id.
+    pub holes: HashMap<String, Hole>,
+    hole_gen: HashMap<String, u64>,
     pub bounds: Option<Bounds>,
     /// False while a UI overlay covers the viewport.
     pub visible: bool,
@@ -119,6 +162,8 @@ impl TabHost {
     pub fn new(data_root: PathBuf, proxy_port: Option<u16>, net: (bool, bool)) -> Self {
         Self {
             views: HashMap::new(),
+            holes: HashMap::new(),
+            hole_gen: HashMap::new(),
             bounds: None,
             visible: true,
             active: None,
@@ -233,7 +278,7 @@ impl TabHost {
             media: bool,
             zoom: f64,
         }
-        let (wants, active, auto_pip): (HashMap<String, Want>, Option<String>, bool) = {
+        let (wants, active, auto_pip, text_scale): (HashMap<String, Want>, Option<String>, bool, f64) = {
             let s = app.store.lock();
             let wants = s
                 .tabs
@@ -249,7 +294,7 @@ impl TabHost {
                     (t.id.clone(), want)
                 })
                 .collect();
-            (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture)
+            (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture, s.settings.text_scale)
         };
         let mut host = app.host.lock();
 
@@ -294,6 +339,10 @@ impl TabHost {
 
         let previous = host.active.clone();
         host.active = active.clone();
+        #[cfg(windows)]
+        let clip = Self::clip_rects(&host, text_scale);
+        #[cfg(not(windows))]
+        let _ = text_scale;
         let visible = host.visible;
         let bounds = host.bounds;
         let mut previews_to_capture = Vec::new();
@@ -304,6 +353,8 @@ impl TabHost {
                     Self::apply_bounds(&v.webview, b);
                 }
                 if !v.shown {
+                    #[cfg(windows)]
+                    crate::webview_win::set_clip(&v.webview, clip.clone());
                     let _ = v.webview.show();
                     v.shown = true;
                     // Returning to a tab brings its mini-player video back into the page.
@@ -373,9 +424,96 @@ impl TabHost {
             Self::apply_bounds(&v.webview, b);
         }
         drop(host);
+        // Hole positions are relative to the page, which just moved.
+        Self::apply_clips(app);
         if first {
             Self::reconcile(app);
         }
+    }
+
+    /// Holes in logical px relative to the page view, plus the page's
+    /// logical width (the UI thread derives the pixel scale from it). Pure:
+    /// callers read the text size `z` before taking the host lock, and nothing
+    /// here locks or waits on anything else.
+    fn clip_rects(host: &TabHost, z: f64) -> crate::webview_win::Clip {
+        let Some(b) = host.bounds else { return crate::webview_win::Clip::default() };
+        let holes = host
+            .holes
+            .values()
+            .filter(|h| h.w > 0.5 && h.h > 0.5)
+            .map(|h| (h.x * z - b.x, h.y * z - b.y, (h.x + h.w) * z - b.x, (h.y + h.h) * z - b.y, h.r * z))
+            .collect();
+        crate::webview_win::Clip { holes, page_width: b.w }
+    }
+
+    /// Applies the current holes to every page view on screen.
+    pub fn apply_clips(app: &Shared) {
+        #[cfg(windows)]
+        {
+            let z = app.store.lock().settings.text_scale;
+            let host = app.host.lock();
+            let clip = Self::clip_rects(&host, z);
+            for v in host.views.values().filter(|v| v.shown) {
+                crate::webview_win::set_clip(&v.webview, clip.clone());
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = app;
+    }
+
+    /// Sets, animates or removes the hole owned by `id`. With `from` and
+    /// `ms`, the hole moves from `from` to `rect` along the `ease` curve (the
+    /// same curve as the CSS transition of the UI it uncovers); `remove`
+    /// drops it once there.
+    /// `lead_ms` runs the hole ahead of (or, negative, behind) the UI's own
+    /// animation so the page never covers the moving edge.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_hole(app: &Shared, id: String, rect: Hole, from: Option<Hole>, ms: u32, ease: [f64; 4], remove: bool, lead_ms: f64) {
+        let (gen, current) = {
+            let mut host = app.host.lock();
+            let g = host.hole_gen.entry(id.clone()).or_insert(0);
+            *g += 1;
+            (*g, host.holes.get(&id).copied())
+        };
+        // A change mid-animation continues from where the hole is now.
+        let from = from.map(|f| current.unwrap_or(f));
+        let hole_id = id.clone();
+        let finish = move |app: &Shared| {
+            let mut host = app.host.lock();
+            if remove {
+                host.holes.remove(&id);
+            } else {
+                host.holes.insert(id.clone(), rect);
+            }
+            drop(host);
+            Self::apply_clips(app);
+        };
+        let Some(from) = from.filter(|_| ms > 0) else {
+            finish(app);
+            return;
+        };
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let start = std::time::Instant::now();
+            loop {
+                let t = ((start.elapsed().as_secs_f64() * 1000.0 + lead_ms) / ms as f64).max(0.0);
+                {
+                    let mut host = app.host.lock();
+                    if host.hole_gen.get(&hole_id) != Some(&gen) {
+                        return; // superseded
+                    }
+                    if t >= 1.0 {
+                        break;
+                    }
+                    host.holes.insert(hole_id.clone(), Hole::lerp(from, rect, cubic_bezier(ease, t)));
+                }
+                Self::apply_clips(&app);
+                tokio::time::sleep(std::time::Duration::from_millis(7)).await;
+            }
+            if app.host.lock().hole_gen.get(&hole_id) == Some(&gen) {
+                finish(&app);
+            }
+        });
     }
 
     /// Recreates page webviews when the VPN changes how they must connect

@@ -847,3 +847,57 @@ mod tests {
         assert!(shortcut_for(0x54, false, false, false).is_none());
     }
 }
+
+/// UI rectangles to cut out of a page view: logical px relative to the page,
+/// as (left, top, right, bottom), and the page's logical width.
+#[derive(Clone, Default)]
+pub struct Clip {
+    /// (left, top, right, bottom, corner radius)
+    pub holes: Vec<(f64, f64, f64, f64, f64)>,
+    pub page_width: f64,
+}
+
+/// Cuts the clip's holes out of a page webview's window region. The page keeps
+/// its size and position (no reflow); the UI underneath shows through the
+/// holes and gets their clicks. No holes removes the region.
+pub fn set_clip(wv: &Webview, clip: Clip) {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, HGDIOBJ, RGN_DIFF};
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetClientRect};
+    let _ = wv.with_webview(move |pw| unsafe {
+        let mut host = HWND::default();
+        if pw.controller().ParentWindow(&mut host).is_err() || host.0.is_null() {
+            return;
+        }
+        // Only ever clip the page's own container, never the app window.
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(host, &mut class) as usize;
+        if String::from_utf16_lossy(&class[..n]) != "WRY_WEBVIEW" {
+            return;
+        }
+        if clip.holes.is_empty() {
+            let _ = SetWindowRgn(host, None, true);
+            return;
+        }
+        let mut rc = RECT::default();
+        if GetClientRect(host, &mut rc).is_err() || rc.right <= 0 || clip.page_width <= 0.0 {
+            return;
+        }
+        // Physical px per logical px, from the page window's own size.
+        let sf = rc.right as f64 / clip.page_width;
+        let full = CreateRectRgn(0, 0, rc.right, rc.bottom);
+        for (l, t, r, b, radius) in clip.holes {
+            let (l, t, r, b) = ((l * sf).floor() as i32, (t * sf).floor() as i32, (r * sf).ceil() as i32, (b * sf).ceil() as i32);
+            if r <= l || b <= t {
+                continue;
+            }
+            let d = (radius * sf * 2.0).round() as i32;
+            // Round-rect regions exclude their right and bottom edges.
+            let hole = if d > 1 { CreateRoundRectRgn(l, t, r + 1, b + 1, d, d) } else { CreateRectRgn(l, t, r, b) };
+            CombineRgn(Some(full), Some(full), Some(hole), RGN_DIFF);
+            let _ = DeleteObject(HGDIOBJ(hole.0));
+        }
+        // The system owns the region from here on.
+        let _ = SetWindowRgn(host, Some(full), true);
+    });
+}
