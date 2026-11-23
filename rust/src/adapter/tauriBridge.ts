@@ -6,6 +6,16 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 type Unsubscribe = () => void;
 
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'ready' | 'installing' | 'error';
+  currentVersion: string;
+  newVersion?: string | null;
+  notes?: string | null;
+  progress?: number | null;
+  error?: string | null;
+  lastChecked?: number | null;
+}
+
 /** Subscribes to a backend event; safe to unsubscribe before `listen` resolves. */
 function on<T>(event: string, callback: (payload: T) => void): Unsubscribe {
   let unlisten: UnlistenFn | undefined;
@@ -170,6 +180,11 @@ export const tauriBridge = {
   getPasswordStatus: () => invoke<any>('passwords_status'),
   listPasswords: () => invoke<any[]>('passwords_list'),
 
+  // Updates
+  getUpdateStatus: () => invoke<UpdateStatus>('get_update_status'),
+  checkForUpdate: () => invoke<UpdateStatus>('check_for_update'),
+  installUpdate: () => invoke<void>('install_update'),
+
   // Events from the backend
   onStateUpdate: (cb: (state: any) => void) => on('serica:state-update', cb),
   onTrackerBlocked: (cb: (item: any) => void) =>
@@ -197,6 +212,7 @@ export const tauriBridge = {
   onZoomUpdated: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => on('serica:zoom-updated', cb),
   onFindResult: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => on('serica:find-result', cb),
   onPageColor: (cb: (r: { tabId: string; themeColor: string | null }) => void) => on('serica:page-color', cb),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => on('serica:update-status', cb),
   onHtmlFullscreen: (cb: (isFullscreen: boolean) => void) => on('serica:html-fullscreen', cb),
 };
 

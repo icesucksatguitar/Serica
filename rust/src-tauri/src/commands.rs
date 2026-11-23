@@ -1188,3 +1188,21 @@ pub async fn clear_downloads(app: State<'_, Shared>) -> R<Vec<crate::downloads::
 pub async fn open_downloads_folder() -> R<()> {
     open::that_detached(crate::downloads::default_folder()).map_err(|e| e.to_string())
 }
+
+// ── Updates ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_update_status(app: State<'_, Shared>) -> crate::updater::UpdateStatus {
+    crate::updater::status(&app.handle)
+}
+
+#[tauri::command]
+pub async fn check_for_update(app: State<'_, Shared>) -> R<crate::updater::UpdateStatus> {
+    let handle = app.handle.clone();
+    Ok(crate::updater::check(&handle).await)
+}
+
+#[tauri::command]
+pub fn install_update(app: State<'_, Shared>) -> R<()> {
+    crate::updater::install(&app.handle)
+}

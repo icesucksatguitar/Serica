@@ -12,6 +12,7 @@ Builds, versions, and stages the Rust (Tauri v2) release:
 Usage:
   python build.py --bump [major|minor|patch|none] [--clean] [--run]
   python build.py -b patch
+  python build.py -b patch --bundle   <- release: signed MSI + latest.json in release/github
 """
 
 import os
@@ -285,6 +286,79 @@ def build_rust(bump_type: str, clean: bool = False) -> bool:
 
 
 # ==============================================================================
+# Signed installer + auto-update manifest (GitHub release assets)
+# ==============================================================================
+
+GITHUB_REPO = "icesucksatguitar/Serica"
+UPDATER_KEY = Path.home() / ".tauri" / "serica-updater.key"
+GITHUB_RELEASE_DIR = RELEASE_DIR / "github"
+
+
+def build_bundle() -> bool:
+    """Builds the signed MSI with `tauri build` and stages every asset a
+    GitHub release needs into release/github, including latest.json, the
+    manifest installed copies poll for updates
+    (releases/latest/download/latest.json). Upload all of it to the release."""
+    log_header("BUILDING SIGNED INSTALLER + UPDATE MANIFEST")
+    if not UPDATER_KEY.exists():
+        log_error(f"Updater signing key not found at {UPDATER_KEY}. Without it installed copies can't verify updates.")
+        return False
+    version = get_rust_version()
+    env = os.environ.copy()
+    env["TAURI_SIGNING_PRIVATE_KEY"] = UPDATER_KEY.read_text(encoding="utf-8").strip()
+    env.setdefault("TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
+    npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+    if not run_cmd([npx_cmd, "tauri", "build", "--bundles", "msi"], cwd=RUST_DIR, env=env):
+        log_error("tauri build failed.")
+        return False
+
+    target = RUST_DIR / "src-tauri" / "target" / "release"
+    msi = target / "bundle" / "msi" / f"Serica_{version}_x64_en-US.msi"
+    sig = msi.with_name(msi.name + ".sig")
+    exe = target / "serica-rust.exe"
+    for f in (msi, sig, exe):
+        if not f.exists():
+            log_error(f"Expected build output not found: {f}")
+            return False
+
+    shutil.rmtree(GITHUB_RELEASE_DIR, ignore_errors=True)
+    GITHUB_RELEASE_DIR.mkdir(parents=True)
+    assets = {
+        msi.name: msi,
+        "Serica-Setup-x64.msi": msi,
+        f"Serica_{version}_x64_portable.exe": exe,
+        sig.name: sig,
+    }
+    for name, src in assets.items():
+        shutil.copy2(src, GITHUB_RELEASE_DIR / name)
+
+    latest = {
+        "version": version,
+        "notes": f"https://github.com/{GITHUB_REPO}/releases/tag/v{version}",
+        "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "platforms": {
+            "windows-x86_64": {
+                "signature": sig.read_text(encoding="utf-8").strip(),
+                "url": f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/{msi.name}",
+            }
+        },
+    }
+    (GITHUB_RELEASE_DIR / "latest.json").write_text(json.dumps(latest, indent=2) + "\n", encoding="utf-8")
+
+    import hashlib
+    lines = []
+    for name in sorted(p.name for p in GITHUB_RELEASE_DIR.iterdir() if p.suffix in (".msi", ".exe")):
+        digest = hashlib.sha256((GITHUB_RELEASE_DIR / name).read_bytes()).hexdigest()
+        lines.append(f"{digest} *{name}")
+    (GITHUB_RELEASE_DIR / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    log_success(f"Release assets for v{version} staged in {BOLD}{GITHUB_RELEASE_DIR}{RESET}")
+    for p in sorted(GITHUB_RELEASE_DIR.iterdir()):
+        print(f"   {p.name}")
+    return True
+
+
+# ==============================================================================
 # Release Directory Summary & Launcher
 # ==============================================================================
 
@@ -353,6 +427,11 @@ Examples:
         help="Clean previous build artifacts before building"
     )
     parser.add_argument(
+        "--bundle",
+        action="store_true",
+        help="Also build the signed MSI and stage GitHub release assets (with latest.json for auto-update) in release/github"
+    )
+    parser.add_argument(
         "--run",
         action="store_true",
         help="Launch the application after a successful build"
@@ -368,6 +447,10 @@ Examples:
 
     if not build_rust(args.bump, args.clean):
         log_error("Build failed.")
+        return 1
+
+    if args.bundle and not build_bundle():
+        log_error("Bundling failed.")
         return 1
 
     print_summary()

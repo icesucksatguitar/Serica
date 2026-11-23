@@ -13,6 +13,7 @@ import {
   Layers,
   KeyRound,
   SlidersHorizontal,
+  Info,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -24,6 +25,7 @@ import {
 import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
 import { PasswordsSettings } from './PasswordsSettings';
+import { AboutSettings } from './AboutSettings';
 import { TEXT_SCALE_OPTIONS } from '../shared/settings';
 
 export type SettingsTabId =
@@ -32,7 +34,8 @@ export type SettingsTabId =
   | 'search'
   | 'performance'
   | 'profiles'
-  | 'passwords';
+  | 'passwords'
+  | 'about';
 
 export interface SettingsPanelProps {
   isOpen: boolean;
@@ -139,6 +142,13 @@ export const SETTINGS_TABS: readonly SettingsTabMeta[] = [
     icon: KeyRound,
     title: 'Passwords Vault',
     description: 'Securely manage stored credentials, search logins, and import or export data',
+  },
+  {
+    id: 'about',
+    label: 'About',
+    icon: Info,
+    title: 'About Serica',
+    description: 'Your version of Serica and automatic updates',
   },
 ];
 
@@ -662,6 +672,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               className="settings-tabpanel"
             >
               <PasswordsSettings />
+            </div>
+
+            {/* 7. About Tab */}
+            <div
+              role="tabpanel"
+              id={`${idBase}-tabpanel-about`}
+              aria-labelledby={`${idBase}-tab-about`}
+              hidden={activeTab !== 'about'}
+              className="settings-tabpanel"
+            >
+              <AboutSettings active={isOpen && activeTab === 'about'} />
             </div>
           </div>
         </main>

@@ -10,6 +10,7 @@ import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
 import { TopTabStrip } from './components/TopTabStrip';
 import { ToolsMenu } from './components/ToolsMenu';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
+import { UpdateNotice } from './components/UpdateNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
@@ -1290,6 +1291,9 @@ return (
     {/* Google sign-in refused in-app: offer to continue in the default browser */}
     <AuthHandoffNotice />
 
+    {/* A downloaded update is ready: offer to restart into it */}
+    <UpdateNotice />
+
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
     <PasswordPrompt />
 
@@ -1297,7 +1301,7 @@ return (
     {/* Hidden by the Settings toggle; stored pinnedSites stay untouched (R19.2, R19.3) */}
     {settings.rightPinsDockVisible && (
       <RightPinsDock
-        onNavigate={navigate}
+        onNavigate={(url) => void createTab(url, state.activeSpaceId)}
         isOnWebpage={isWebpage}
         persistedPins={Array.isArray(settings.pinnedSites) ? (settings.pinnedSites as PinnedSite[]) : undefined}
         onPersistPins={(pins) => void updateSettings({ pinnedSites: pins })}

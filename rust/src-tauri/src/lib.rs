@@ -15,6 +15,7 @@ mod settings;
 mod shields;
 mod store;
 mod tabhost;
+mod updater;
 mod vpn;
 mod window_state;
 #[cfg(windows)]
@@ -52,6 +53,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -70,6 +72,7 @@ pub fn run() {
                 touchpad::attach(&shared, windows::Win32::Foundation::HWND(hwnd.0 as _));
             }
             app.manage(shared);
+            updater::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -161,6 +164,9 @@ pub fn run() {
             commands::set_extension_enabled,
             commands::remove_extension,
             commands::open_extension_page,
+            commands::get_update_status,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building serica browser");
