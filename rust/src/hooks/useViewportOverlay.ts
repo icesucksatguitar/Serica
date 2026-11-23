@@ -131,6 +131,77 @@ export function useReservedPageBottom(): number {
 // page view gets a window region with these rectangles cut out, so it keeps
 // running and stays clickable everywhere else, and nothing waits on a capture.
 
+// Underlay: a snapshot of the live page drawn beneath it (in the page's own
+// place). Cutting a hole then changes nothing on screen, and UI can slide in
+// over the snapshot smoothly, however busy the app's main thread is.
+let underlay: string | null = null;
+const underlayListeners = new Set<() => void>();
+
+export function setPageUnderlay(img: string | null): void {
+  if (underlay === img) return;
+  underlay = img;
+  underlayListeners.forEach((l) => l());
+}
+
+export function usePageUnderlay(): string | null {
+  return useSyncExternalStore(
+    (cb) => {
+      underlayListeners.add(cb);
+      return () => underlayListeners.delete(cb);
+    },
+    () => underlay,
+  );
+}
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const twoFrames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+// One page capture at a time, shared; the latest is kept for reuse.
+let inflight: Promise<string | null> | null = null;
+let lastCapture: { img: string; at: number } | null = null;
+
+function capturePage(): Promise<string | null> {
+  if (inflight) return inflight;
+  const p = window.serica?.captureViewport?.();
+  if (!p) return Promise.resolve(null);
+  inflight = p
+    .catch(() => null)
+    .then((img) => {
+      if (img) lastCapture = { img, at: performance.now() };
+      return img;
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+/** Starts a page capture ahead of UI that is about to slide over the page. */
+export function prewarmPageUnderlay(): void {
+  if (lastCapture && performance.now() - lastCapture.at < 250) return;
+  void capturePage();
+}
+
+/**
+ * Captures the live page and draws it beneath the page. Resolves true once
+ * painted. A capture from moments ago is reused; when a busy page does not
+ * deliver one within `timeoutMs`, the latest from the last few seconds is
+ * used instead; false when there is none at all.
+ */
+export async function preparePageUnderlay(timeoutMs = 220): Promise<boolean> {
+  const age = () => (lastCapture ? performance.now() - lastCapture.at : Infinity);
+  let img: string | null = age() < 250 ? lastCapture!.img : null;
+  if (!img) img = await Promise.race([capturePage(), wait(timeoutMs).then(() => null)]);
+  if (!img && age() < 4000) img = lastCapture!.img;
+  if (!img) return false;
+  const el = new Image();
+  el.src = img;
+  await el.decode().catch(() => undefined);
+  setPageUnderlay(img);
+  await twoFrames();
+  return true;
+}
+
 /** `[x, y, width, height]` in CSS px, window coordinates. */
 export type HoleRect = [number, number, number, number];
 

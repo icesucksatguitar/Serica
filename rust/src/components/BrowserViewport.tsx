@@ -4,7 +4,7 @@ import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
 import { Moon, Sparkles, Globe } from 'lucide-react';
 import type { PageColorReport } from '../utils/topBarTint';
-import { setViewportCovered, setViewportPrewarmHandler, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -97,6 +97,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [findQuery, setFindQuery] = useState('');
   const [findState, setFindState] = useState({ activeMatch: 0, totalMatches: 0 });
   const [frozenImage, setFrozenImage] = useState<string | null>(null);
+  // The page's snapshot beneath it while UI slides over it (see setPageUnderlay).
+  const underlayImage = usePageUnderlay();
 
   const isWebPage = Boolean(activeTab && isWebUrl(activeTab.url) && !activeTab.isSleeping && !activeTab.unloaded);
   const findVisible = isFindOpen && isWebPage;
@@ -453,10 +455,10 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
-        {isWebPage && frozenImage && (
+        {isWebPage && (frozenImage || underlayImage) && (
           <img
             className="native-page-snapshot"
-            src={frozenImage}
+            src={(frozenImage || underlayImage)!}
             alt=""
             draggable={false}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}

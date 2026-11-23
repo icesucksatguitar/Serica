@@ -366,6 +366,16 @@ pub async fn set_viewport_hole(
         remove.unwrap_or(false),
         lead.filter(|l| l.is_finite()).unwrap_or(0.0).clamp(-100.0, 100.0),
     );
+    // Window regions are set on the main thread, in order: resolve only once
+    // everything queued so far has run, so "ready" means the page really is
+    // cut (it can be busy for tens of ms, e.g. while a page loads).
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if app.handle.run_on_main_thread(move || {
+        let _ = tx.send(());
+    }).is_ok()
+    {
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx).await;
+    }
     Ok(())
 }
 

@@ -34,7 +34,12 @@ import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
 import { addSettledBlurListener } from '../utils/settledBlur';
-import { removeViewportHole, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
+import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
+
+/** The auto-hide sidebar's slide (keep in step with `.nsb.autohide` in sidebar.css). */
+const SLIDE_IN_MS = 320;
+const SLIDE_OUT_MS = 260;
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 import {
   buildSidebarView,
   contextMenuActions,
@@ -109,6 +114,8 @@ export interface SidebarProps {
   pinnedOpen?: boolean;
   /** Asks App to close a pinned-open sidebar (Esc, click outside, a tab picked). */
   onRequestClose?: () => void;
+  /** A live web page is on screen (a native view the sidebar is cut out of). */
+  livePage?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +244,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className,
   pinnedOpen = false,
   onRequestClose,
+  livePage = false,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -313,6 +321,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (autoHideTimerRef.current !== null) {
       window.clearTimeout(autoHideTimerRef.current);
     }
+    // The slide out runs over a snapshot of the page: take it during the delay.
+    if (livePage) prewarmPageUnderlay();
     autoHideTimerRef.current = window.setTimeout(() => {
       const elapsed = Date.now() - autoHideRevealedAtRef.current;
       if (elapsed < 350) {
@@ -325,7 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         autoHideTimerRef.current = null;
       }
     }, delay);
-  }, [menu, folderMenu, drag.dragging]);
+  }, [menu, folderMenu, drag.dragging, livePage]);
 
   const cancelHideSidebar = useCallback(() => {
     if (autoHideTimerRef.current !== null) {
@@ -384,35 +394,78 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // An active drag keeps it visible too.
   const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed || pinnedOpen;
   const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive);
-  // Slide in once the page is clipped for it (the backend confirms the hole),
-  // so it can never slide in underneath the page.
+  // The sidebar shows only once the page under it is clipped (the backend
+  // confirms the hole is applied), so it never appears beneath the page.
   const [holeReady, setHoleReady] = useState(false);
-  const shown = visible && holeReady;
+  // Over a live page the clip is cut and restored in one step: the page's
+  // window region is set on the app's main thread, which can stall for tens
+  // of ms (a page loading), so a clip animated step by step falls behind the
+  // sidebar's slide and the page draws over it. Instead a snapshot of the
+  // page goes beneath it first, the clip is cut in one step (nothing visibly
+  // changes), and the sidebar slides over the snapshot; closing runs the
+  // same steps backwards.
+  const instant = Boolean(livePage);
+  const shown = instant ? holeReady : visible && holeReady;
 
-  // The live page is clipped where the sidebar is: the clip edge follows the
-  // sidebar's slide (same duration and curve, slightly ahead when opening and
-  // behind when closing) so the page never covers it and never freezes.
   const holeWidth = (sidebarWidth ?? 240) + 1;
   const holeShown = useRef(false);
+  const holeSeq = useRef(0);
   useLayoutEffect(() => {
     if (!autoHide) return;
     const H = 100000;
-    if (visible) {
-      const opening = !holeShown.current;
-      void setViewportHole(
-        'sidebar',
-        [0, 0, holeWidth, H],
-        opening ? { from: [0, 0, -24, H], ms: 320, ease: [0.22, 1, 0.36, 1], lead: 8 } : undefined,
-      ).then(() => setHoleReady(true));
+    const seq = ++holeSeq.current;
+    const current = () => seq === holeSeq.current;
+    const opening = visible && !holeShown.current;
+    const closing = !visible && holeShown.current;
+    if (instant && opening) {
+      void (async () => {
+        await preparePageUnderlay();
+        if (!current()) return;
+        await setViewportHole('sidebar', [0, 0, holeWidth, H]);
+        if (!current()) return;
+        setHoleReady(true); // slides in over the snapshot
+        await sleepMs(SLIDE_IN_MS + 40);
+        if (current()) setPageUnderlay(null); // fully covered by the sidebar now
+      })();
+    } else if (instant && closing) {
+      void (async () => {
+        await preparePageUnderlay();
+        if (!current()) return;
+        setHoleReady(false); // slides out over the snapshot
+        await sleepMs(SLIDE_OUT_MS + 20);
+        if (!current()) return;
+        await setViewportHole('sidebar', [0, 0, 0, 0], { remove: true });
+        if (current()) setPageUnderlay(null);
+      })();
+    } else if (instant) {
+      // A resize while open, or nothing to undo.
+      if (visible) {
+        void setViewportHole('sidebar', [0, 0, holeWidth, H]).then(() => {
+          if (current()) setHoleReady(true);
+        });
+      } else {
+        setHoleReady(false);
+      }
+    } else if (visible) {
+      const anim = opening ? { from: [0, 0, -24, H] as HoleRect, ms: SLIDE_IN_MS, ease: [0.22, 1, 0.36, 1] as [number, number, number, number], lead: 8 } : undefined;
+      void setViewportHole('sidebar', [0, 0, holeWidth, H], anim).then(() => {
+        if (current()) setHoleReady(true);
+      });
     } else {
       setHoleReady(false);
       if (holeShown.current) {
-        void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: 260, ease: [0.4, 0, 0.6, 1], lead: -12, remove: true });
+        void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: SLIDE_OUT_MS, ease: [0.4, 0, 0.6, 1], lead: -12, remove: true });
       }
     }
     holeShown.current = visible;
-  }, [autoHide, visible, holeWidth]);
-  useEffect(() => () => removeViewportHole('sidebar'), []);
+  }, [autoHide, visible, holeWidth, instant]);
+  useEffect(
+    () => () => {
+      removeViewportHole('sidebar');
+      setPageUnderlay(null);
+    },
+    [],
+  );
 
   // The top bar's left buttons (sidebar toggle, back/forward/reload/home,
   // new tab) move over to sit beside the open sidebar instead of under it.
@@ -1041,6 +1094,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="nsb-icon-btn"
               title="Hide sidebar (Ctrl+S)"
               aria-label="Hide sidebar"
+              onPointerEnter={livePage ? prewarmPageUnderlay : undefined}
               onClick={dismiss}
             >
               <PanelLeftClose size={14} />

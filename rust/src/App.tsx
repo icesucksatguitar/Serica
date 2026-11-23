@@ -13,7 +13,7 @@ import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { useViewportOverlay } from './hooks/useViewportOverlay';
+import { prewarmPageUnderlay, useViewportOverlay } from './hooks/useViewportOverlay';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -1007,6 +1007,7 @@ return (
         autoHide
         pinnedOpen={sidebarOpen}
         onRequestClose={closeSidebar}
+        livePage={isWebpage && !activeTab?.unloaded}
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}
@@ -1034,6 +1035,7 @@ return (
         <button
           className={`macos-tabs-toggle-pill ${sidebarOpen ? 'active' : ''}`}
           data-sidebar-toggle
+          onPointerEnter={isWebpage ? prewarmPageUnderlay : undefined}
           onClick={toggleSidebar}
           title={sidebarOpen ? 'Hide sidebar (Ctrl+S)' : 'Show sidebar (Ctrl+S)'}
           aria-label="Toggle sidebar"
