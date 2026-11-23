@@ -58,6 +58,7 @@ export const tauriBridge = {
       lead: opts?.lead ?? null,
       radius: opts?.radius ?? null,
     }),
+  uiCursor: () => invoke<[number, number, number] | null>('ui_cursor'),
   freezeViewport: (capture = true) => invoke<string | null>('viewport_freeze', { capture }),
   thawViewport: () => invoke<void>('viewport_thaw'),
   findInPage: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) =>

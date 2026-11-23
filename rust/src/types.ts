@@ -250,6 +250,8 @@ export interface SericaAPI {
     rect: [number, number, number, number],
     opts?: { from?: [number, number, number, number]; ms?: number; ease?: [number, number, number, number]; remove?: boolean; lead?: number; radius?: number },
   ) => Promise<void>;
+  /** Cursor over the app window: `[x, y, clientWidth]` in physical px, or null when outside. */
+  uiCursor?: () => Promise<[number, number, number] | null>;
   freezeViewport?: (capture?: boolean) => Promise<string | null>;
   thawViewport?: () => Promise<void>;
   findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;

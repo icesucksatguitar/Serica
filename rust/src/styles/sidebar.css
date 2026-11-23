@@ -97,7 +97,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   will-change: transform;
   transform: translate3d(0, 0, 0);
   visibility: visible;
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
 }
 
 [data-theme="light"] .nsb.autohide {
@@ -113,7 +113,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   transform: translate3d(calc(-100% - 24px), 0, 0);
   visibility: hidden;
   pointer-events: none;
-  transition: transform 260ms cubic-bezier(0.4, 0, 0.6, 1), visibility 0s linear 260ms;
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.6, 1), visibility 0s linear 180ms;
 }
 
 .nsb-edge-zone {
@@ -146,7 +146,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 .floating-top-chrome-capsule .macos-window-controls-cluster,
 .floating-top-chrome-capsule .top-floating-url-pill {
   transition:
-    transform 260ms cubic-bezier(0.4, 0, 0.6, 1),
+    transform 180ms cubic-bezier(0.4, 0, 0.6, 1),
     opacity 160ms ease,
     background 0.2s ease,
     border-color 0.2s ease,
@@ -157,7 +157,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster,
 html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
   transition:
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 160ms ease,
     background 0.2s ease,
     border-color 0.2s ease,

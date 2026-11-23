@@ -178,19 +178,22 @@ function capturePage(): Promise<string | null> {
 
 /** Starts a page capture ahead of UI that is about to slide over the page. */
 export function prewarmPageUnderlay(): void {
-  if (lastCapture && performance.now() - lastCapture.at < 250) return;
+  if (lastCapture && performance.now() - lastCapture.at < 150) return;
   void capturePage();
 }
 
+/** A capture this recent is reused as is (it is seen only for one slide). */
+const FRESH_MS = 600;
+
 /**
  * Captures the live page and draws it beneath the page. Resolves true once
- * painted. A capture from moments ago is reused; when a busy page does not
+ * painted. A capture from moments ago (FRESH_MS) is reused; when a busy page does not
  * deliver one within `timeoutMs`, the latest from the last few seconds is
  * used instead; false when there is none at all.
  */
-export async function preparePageUnderlay(timeoutMs = 220): Promise<boolean> {
+export async function preparePageUnderlay(timeoutMs = 160): Promise<boolean> {
   const age = () => (lastCapture ? performance.now() - lastCapture.at : Infinity);
-  let img: string | null = age() < 250 ? lastCapture!.img : null;
+  let img: string | null = age() < FRESH_MS ? lastCapture!.img : null;
   if (!img) img = await Promise.race([capturePage(), wait(timeoutMs).then(() => null)]);
   if (!img && age() < 4000) img = lastCapture!.img;
   if (!img) return false;

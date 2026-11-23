@@ -379,6 +379,42 @@ pub async fn set_viewport_hole(
     Ok(())
 }
 
+/// Where the cursor is over the app window: `[x, y, clientWidth]` in physical
+/// client px, or `None` when it is outside. The UI cannot see the pointer over
+/// a page (a separate native window), so floating UI asks this to know when
+/// the pointer has left it. Reads the OS cursor directly: never waits on the
+/// main thread.
+#[tauri::command]
+pub fn ui_cursor(app: State<'_, Shared>) -> Option<[f64; 3]> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        use windows::Win32::Foundation::{HWND, POINT, RECT};
+        use windows::Win32::Graphics::Gdi::ScreenToClient;
+        use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos};
+        let win = app.handle.get_window("main")?;
+        let hwnd = HWND(win.hwnd().ok()?.0 as _);
+        unsafe {
+            let mut p = POINT::default();
+            GetCursorPos(&mut p).ok()?;
+            if !ScreenToClient(hwnd, &mut p).as_bool() {
+                return None;
+            }
+            let mut rc = RECT::default();
+            GetClientRect(hwnd, &mut rc).ok()?;
+            if p.x < 0 || p.y < 0 || p.x >= rc.right || p.y >= rc.bottom {
+                return None;
+            }
+            Some([p.x as f64, p.y as f64, rc.right as f64])
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// Captures the active page while it is on screen (for the UI to show in its
 /// place), without hiding it.
 #[tauri::command]

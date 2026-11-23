@@ -37,8 +37,12 @@ import { addSettledBlurListener } from '../utils/settledBlur';
 import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 
 /** The auto-hide sidebar's slide (keep in step with `.nsb.autohide` in sidebar.css). */
-const SLIDE_IN_MS = 320;
-const SLIDE_OUT_MS = 260;
+const SLIDE_IN_MS = 220;
+const SLIDE_OUT_MS = 180;
+/** How long the pointer must be away before the sidebar hides. */
+const HIDE_DELAY_MS = 100;
+/** A sidebar just revealed stays at least this long (a pass over the edge). */
+const MIN_SHOWN_MS = 150;
 const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 import {
   buildSidebarView,
@@ -316,7 +320,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setAutoHideRevealed(true);
   }, []);
 
-  const scheduleHideSidebar = useCallback((delay = 200) => {
+  const scheduleHideSidebar = useCallback((delay = HIDE_DELAY_MS) => {
     if (menu !== null || folderMenu !== null || drag.dragging) return;
     if (autoHideTimerRef.current !== null) {
       window.clearTimeout(autoHideTimerRef.current);
@@ -325,11 +329,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (livePage) prewarmPageUnderlay();
     autoHideTimerRef.current = window.setTimeout(() => {
       const elapsed = Date.now() - autoHideRevealedAtRef.current;
-      if (elapsed < 350) {
+      if (elapsed < MIN_SHOWN_MS) {
         autoHideTimerRef.current = window.setTimeout(() => {
           setAutoHideRevealed(false);
           autoHideTimerRef.current = null;
-        }, 350 - elapsed);
+        }, MIN_SHOWN_MS - elapsed);
       } else {
         setAutoHideRevealed(false);
         autoHideTimerRef.current = null;
@@ -359,7 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
     const onLeave = () => {
       setPointerX(null);
-      scheduleHideSidebar(220);
+      scheduleHideSidebar(HIDE_DELAY_MS);
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     document.documentElement.addEventListener('mouseleave', onLeave);
@@ -522,6 +526,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
       window.removeEventListener('keydown', onKey);
     };
   }, [pinnedOpen, onRequestClose]);
+
+  // Over a live page the UI gets no pointer events (the page is a separate
+  // native window), so it cannot see the pointer leave the sidebar or click
+  // the page. While the sidebar is open there, the OS cursor is polled: once
+  // it has been inside the sidebar and then stays outside it (and its menus
+  // and hover card) for HIDE_DELAY_MS, the sidebar hides, however it opened.
+  // A sidebar opened from the keyboard with the pointer already on the page
+  // waits until the pointer has visited it.
+  const busyRef = useRef(false);
+  busyRef.current = isMenuOrDragOpen || creatingFolder || renamingFolderId !== null;
+  useEffect(() => {
+    if (!autoHide || !shown || !livePage || !window.serica?.uiCursor) return;
+    let alive = true;
+    let timer = 0;
+    let armed = false;
+    let outsideSince: number | null = null;
+    const insideUi = (x: number, y: number) => {
+      if (x <= (sidebarWidth ?? 240) + 4) return true;
+      for (const el of document.querySelectorAll('.nsb-menu, .nsb-preview')) {
+        const r = el.getBoundingClientRect();
+        if (x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4) return true;
+      }
+      return false;
+    };
+    const tick = async () => {
+      const c = await window.serica!.uiCursor!().catch(() => null);
+      if (!alive) return;
+      const k = c && c[2] > 0 ? window.innerWidth / c[2] : 0;
+      const inside = c !== null && k > 0 && insideUi(c[0] * k, c[1] * k);
+      const now = performance.now();
+      if (inside || busyRef.current) {
+        armed = armed || inside;
+        outsideSince = null;
+      } else if (armed) {
+        if (outsideSince === null) {
+          outsideSince = now;
+          prewarmPageUnderlay(); // for the slide out
+        } else if (now - outsideSince >= HIDE_DELAY_MS) {
+          dismiss();
+          return;
+        }
+      }
+      timer = window.setTimeout(tick, 40);
+    };
+    timer = window.setTimeout(tick, 40);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [autoHide, shown, livePage, sidebarWidth, dismiss]);
   const hidePreview = preview.hide;
   const previewKey = preview.state?.target.key;
   useEffect(() => {
