@@ -15,7 +15,7 @@ import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { prewarmPageUnderlay, useViewportOverlay } from './hooks/useViewportOverlay';
+import { prepareViewportFreeze, prewarmPageUnderlay, useViewportCovered, useViewportOverlay } from './hooks/useViewportOverlay';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -161,6 +161,14 @@ export function App() {
   // Native pages paint above HTML: while the space name shows, the new page is
   // frozen to a snapshot so the label (and its blur) can sit on top of it.
   const [spaceFreeze, setSpaceFreeze] = useState(false);
+  const viewportCovered = useViewportCovered();
+  const endSpaceOverlay = useCallback((key: number) => {
+    if (spaceOverlayKey.current !== key) return;
+    if (spaceOverlayTimer.current) clearTimeout(spaceOverlayTimer.current);
+    spaceOverlayTimer.current = null;
+    setSpaceOverlay(null);
+    setSpaceFreeze(false);
+  }, []);
   /** Shows the space name and/or slides the page; a new switch restarts both cleanly. */
   const playSpaceSwitch = useCallback((
     name: string | null,
@@ -169,20 +177,24 @@ export function App() {
   ) => {
     if (name) {
       if (spaceOverlayTimer.current) clearTimeout(spaceOverlayTimer.current);
+      spaceOverlayTimer.current = null;
       const key = ++spaceOverlayKey.current;
-      setSpaceOverlay({ name, key });
+      setSpaceOverlay(null);
       setSpaceFreeze(false);
-      // Snapshot the page we switched *to*: wait for the backend to show it.
-      void switched.then(() => {
-        setTimeout(() => {
-          if (spaceOverlayKey.current === key) setSpaceFreeze(true);
-        }, 60);
-      });
-      spaceOverlayTimer.current = setTimeout(() => {
-        spaceOverlayTimer.current = null;
-        setSpaceOverlay(null);
-        setSpaceFreeze(false);
-      }, 1450);
+      // The label covers the page we switched *to*, frozen to a snapshot. Only
+      // a fresh capture of it makes that freeze invisible (an older one would
+      // jump), so wait for the backend to show the page and for its capture;
+      // on a page too busy to capture in time, skip the label instead.
+      void switched
+        .then(() => new Promise((r) => setTimeout(r, 60)))
+        .then(() => (spaceOverlayKey.current === key ? prepareViewportFreeze() : false))
+        .then((ready) => {
+          if (!ready || spaceOverlayKey.current !== key) return;
+          setSpaceOverlay({ name, key });
+          setSpaceFreeze(true);
+          // The label ends itself when its animation does; this is a fallback.
+          spaceOverlayTimer.current = setTimeout(() => endSpaceOverlay(key), 2400);
+        });
     }
     if (slide) {
       if (spaceSlideTimer.current) clearTimeout(spaceSlideTimer.current);
@@ -1019,9 +1031,14 @@ return (
     )}
 
     {/* Space Name Animation Overlay */}
-    {spaceOverlay && (
+    {/* Mounted once the page is covered, so the label animates in where it can be seen. */}
+    {spaceOverlay && viewportCovered && (
       <div className="macos-space-name-overlay" aria-live="polite">
-        <div className="macos-space-name-card" key={spaceOverlay.key}>
+        <div
+          className="macos-space-name-card"
+          key={spaceOverlay.key}
+          onAnimationEnd={(e) => e.target === e.currentTarget && endSpaceOverlay(spaceOverlay.key)}
+        >
           <span className="macos-space-name-text">{spaceOverlay.name}</span>
         </div>
       </div>

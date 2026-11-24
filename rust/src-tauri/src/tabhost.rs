@@ -411,49 +411,6 @@ impl TabHost {
             }
         }
 
-        let mut retry = false;
-        // Lazily create the active tab's webview. The lock is released while
-        // it is built, so another reconcile may be building it already.
-        if let Some(id) = &active {
-            if let Some(w) = wants.get(id) {
-                if w.live && !host.views.contains_key(id) && !host.creating.contains(id) && !is_internal_url(&w.url) {
-                    let profile = w.profile.clone();
-                    let created = match host.prepare(app, id, &w.url, &profile) {
-                        Some(p) => {
-                            host.creating.insert(id.clone());
-                            drop(host);
-                            let wv = Self::build(app, id, &profile, p);
-                            host = app.host.lock();
-                            host.creating.remove(id);
-                            wv
-                        }
-                        None => None,
-                    };
-                    if let Some(wv) = created {
-                        host.create_failures = 0;
-                        let _ = wv.hide();
-                        #[cfg(windows)]
-                        if (w.zoom - 1.0).abs() > 0.001 {
-                            crate::webview_win::set_zoom(&wv, w.zoom);
-                        }
-                        if let Some(old) = host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
-                            let _ = old.webview.close();
-                        }
-                        // `wants`/`active` were read before the lock was
-                        // released for the build: a reconcile that ran
-                        // meanwhile (tab closed, slept or switched away) could
-                        // not see this view. Start over from fresh state; the
-                        // view now exists, so this does not build again.
-                        drop(host);
-                        return Self::reconcile(app);
-                    } else if host.create_failures < 20 {
-                        host.create_failures += 1;
-                        retry = true;
-                    }
-                }
-            }
-        }
-
         let previous = host.active.clone();
         host.active = active.clone();
         #[cfg(windows)]
@@ -505,13 +462,6 @@ impl TabHost {
         }
         #[cfg(not(windows))]
         let _ = to_suspend;
-        if retry {
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                let _ = tauri::async_runtime::spawn_blocking(move || Self::reconcile(&app)).await;
-            });
-        }
         #[cfg(windows)]
         for (id, wv) in previews_to_capture {
             let app = app.clone();
@@ -523,6 +473,67 @@ impl TabHost {
         }
         #[cfg(not(windows))]
         let _ = previews_to_capture;
+
+        // Build the active tab's webview last, once the page being left is
+        // hidden: building takes a while (a slept tab waking up) and the old
+        // page must not stay on screen under the new tab's address meanwhile.
+        if let Some(id) = &active {
+            if let Some(w) = wants.get(id) {
+                if w.live && !is_internal_url(&w.url) {
+                    Self::create_active(app, id, w.url.clone(), w.profile.clone(), w.zoom);
+                }
+            }
+        }
+    }
+
+    /// Builds the active tab's webview, then reconciles again to show it. The
+    /// host lock is released while it is built, so another reconcile may be
+    /// building it already.
+    fn create_active(app: &Shared, id: &str, url: String, profile: String, zoom: f64) {
+        let mut host = app.host.lock();
+        if host.views.contains_key(id) || host.creating.contains(id) {
+            return;
+        }
+        let created = match host.prepare(app, id, &url, &profile) {
+            Some(p) => {
+                host.creating.insert(id.to_string());
+                drop(host);
+                let wv = Self::build(app, id, &profile, p);
+                host = app.host.lock();
+                host.creating.remove(id);
+                wv
+            }
+            None => None,
+        };
+        let Some(wv) = created else {
+            if host.create_failures < 20 {
+                host.create_failures += 1;
+                drop(host);
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    let _ = tauri::async_runtime::spawn_blocking(move || Self::reconcile(&app)).await;
+                });
+            }
+            return;
+        };
+        host.create_failures = 0;
+        let _ = wv.hide();
+        #[cfg(windows)]
+        if (zoom - 1.0).abs() > 0.001 {
+            crate::webview_win::set_zoom(&wv, zoom);
+        }
+        #[cfg(not(windows))]
+        let _ = zoom;
+        if let Some(old) = host.views.insert(id.to_string(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
+            let _ = old.webview.close();
+        }
+        // The state was read before the lock was released for the build: a
+        // reconcile that ran meanwhile (tab closed, slept or switched away)
+        // could not see this view. Start over from fresh state, which shows
+        // it (or closes it); the view exists now, so nothing is built again.
+        drop(host);
+        Self::reconcile(app);
     }
 
     /// Winds a hidden tab down in two steps, unless it is playing media

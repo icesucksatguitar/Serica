@@ -413,6 +413,15 @@ impl Store {
         if self.space(space_id).is_none() {
             return false;
         }
+        // Like `activate_tab`: the tab being left was in use until now, or a
+        // tab used only through space switches would look idle and be put to
+        // sleep (then rebuilt, blank, on the way back) right after leaving it.
+        let now = now_ms();
+        if let Some(prev) = self.active_tab_id.clone() {
+            if let Some(t) = self.tab_mut(&prev) {
+                t.last_active_at = Some(now);
+            }
+        }
         self.active_space_id = space_id.to_string();
         let order = self.visible_order(space_id);
         let best = order
@@ -426,6 +435,7 @@ impl Store {
                 self.active_tab_id = Some(id.clone());
                 if let Some(t) = self.tab_mut(&id) {
                     t.is_sleeping = false;
+                    t.last_active_at = Some(now);
                 }
             }
             None => {
@@ -1180,6 +1190,25 @@ mod tests {
         assert_eq!(s.sleep_inactive(600_000), 1);
         assert!(s.tab(&a).unwrap().is_sleeping);
         assert!(!s.tab(&b).unwrap().is_sleeping);
+    }
+
+    #[test]
+    fn switching_spaces_marks_both_tabs_in_use() {
+        let mut s = store();
+        s.activate_space("space-study");
+        let study = s.create_tab(Some("https://study.com".into()), Some("space-study".into()), true, None).id;
+        let work = s.create_tab(Some("https://work.com".into()), Some("space-work".into()), false, None).id;
+        // Both last picked directly long ago, then used only through space switches.
+        s.tab_mut(&study).unwrap().last_active_at = Some(now_ms() - 3 * 3_600_000);
+        s.tab_mut(&work).unwrap().last_active_at = Some(now_ms() - 3 * 3_600_000);
+        s.activate_space("space-work");
+        assert_eq!(s.active_tab_id.as_deref(), Some(work.as_str()));
+        // The tab just left was in use until now: it must not sleep right away.
+        assert_eq!(s.sleep_inactive(60 * 60_000), 0);
+        assert!(!s.tab(&study).unwrap().is_sleeping);
+        s.activate_space("space-study");
+        assert_eq!(s.sleep_least_recent(60_000, 5), 0);
+        assert!(!s.tab(&work).unwrap().is_sleeping);
     }
 
     #[test]

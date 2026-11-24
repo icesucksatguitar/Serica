@@ -169,15 +169,6 @@ export function useBrowser() {
     };
   }, []);
 
-  const activeTabBySpaceRef = useRef<Record<string, string>>({});
-
-  useEffect(() => {
-    const tab = state.tabs.find((t) => t.id === state.activeTabId);
-    if (tab) {
-      activeTabBySpaceRef.current[tab.spaceId] = tab.id;
-    }
-  }, [state.tabs, state.activeTabId]);
-
   const navigate = useCallback((url: string) => {
     if (typeof url === 'string') {
       const normalized = url.trim().toLowerCase();
@@ -242,14 +233,24 @@ export function useBrowser() {
     const done = Promise.resolve(window.serica?.selectSpace(spaceId)).catch(() => undefined);
     setState((prev) => {
       if (!prev.spaces.some((s) => s.id === spaceId)) return prev;
-      const spaceTabs = prev.tabs.filter((t) => t.spaceId === spaceId);
-      const remembered = activeTabBySpaceRef.current[spaceId];
-      const nextActiveTab =
-        (remembered ? spaceTabs.find((t) => t.id === remembered) : undefined) || spaceTabs[0];
+      // Same pick as the backend (`Store::activate_space`): the space's most
+      // recently used loaded tab. A different guess shows the wrong tab (say
+      // its New Tab page) for a moment until the backend's state arrives.
+      let nextActiveTab: TabState | undefined;
+      for (const t of prev.tabs) {
+        if (t.spaceId !== spaceId || t.unloaded) continue;
+        if (!nextActiveTab || (t.lastActiveAt ?? 0) >= (nextActiveTab.lastActiveAt ?? 0)) nextActiveTab = t;
+      }
+      const pickedId = nextActiveTab?.id;
       return {
         ...prev,
         activeSpaceId: spaceId,
-        activeTabId: nextActiveTab ? nextActiveTab.id : prev.activeTabId,
+        activeTabId: pickedId ?? prev.activeTabId,
+        // The backend wakes the picked tab; so does this guess, so its page
+        // (and its last capture, while it wakes) shows right away.
+        tabs: nextActiveTab?.isSleeping
+          ? prev.tabs.map((t) => (t.id === pickedId ? { ...t, isSleeping: false } : t))
+          : prev.tabs,
       };
     });
     return done;

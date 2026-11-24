@@ -72,15 +72,29 @@ export function useViewportCovered(): boolean {
 
 // Pre-capture: the page snapshot takes ~100 ms, so controls that open an
 // overlay start one when the pointer reaches them; the freeze then reuses it.
-let prewarmHandler: (() => void) | null = null;
+// The handler resolves true once a capture of the current page is ready for
+// the freeze (or returns nothing when no capture is needed).
+let prewarmHandler: (() => Promise<boolean> | void) | null = null;
 
-export function setViewportPrewarmHandler(fn: (() => void) | null): void {
+export function setViewportPrewarmHandler(fn: (() => Promise<boolean> | void) | null): void {
   prewarmHandler = fn;
 }
 
 /** Captures the page ahead of an overlay that is about to open. */
 export function prewarmViewport(): void {
-  prewarmHandler?.();
+  void prewarmHandler?.();
+}
+
+/**
+ * Captures the current page and resolves true once a freeze would show that
+ * fresh capture (true right away when no capture is needed). False when the
+ * page does not deliver one within `timeoutMs`: freezing then would show an
+ * older snapshot of the page, which visibly jumps.
+ */
+export function prepareViewportFreeze(timeoutMs = 900): Promise<boolean> {
+  const p = prewarmHandler?.();
+  if (!p) return Promise.resolve(true);
+  return Promise.race([p.catch(() => false), new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs))]);
 }
 
 /** True while `flag` is true and for `ms` after it turns false (lets exit animations finish over the snapshot). */

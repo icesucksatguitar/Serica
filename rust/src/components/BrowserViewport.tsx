@@ -160,27 +160,34 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
 
   // A capture taken moments ago (pointer reached an overlay's button) is reused.
   const prewarmed = useRef<{ img: string; key: string; at: number } | null>(null);
-  const prewarmBusy = useRef(false);
+  // The capture in flight, and the page it is of.
+  const prewarmBusy = useRef<{ key: string; done: Promise<boolean> } | null>(null);
   const pageKey = () => `${activeTabRef.current?.id ?? ''}|${activeTabRef.current?.url ?? ''}`;
   useEffect(() => {
-    setViewportPrewarmHandler(() => {
-      if (prewarmBusy.current || freezeApplied.current || !isWebPageRef.current || !window.serica?.captureViewport) return;
-      const fresh = prewarmed.current;
-      if (fresh && fresh.key === pageKey() && performance.now() - fresh.at < 400) return;
-      prewarmBusy.current = true;
+    // Resolves true once `prewarmed` holds a capture of the current page.
+    const prewarm = (): Promise<boolean> | void => {
+      if (freezeApplied.current || !isWebPageRef.current || !window.serica?.captureViewport) return;
       const key = pageKey();
-      void window.serica
+      const busy = prewarmBusy.current;
+      if (busy) return busy.key === key ? busy.done : busy.done.then(() => prewarm() ?? true);
+      const fresh = prewarmed.current;
+      if (fresh && fresh.key === key && performance.now() - fresh.at < 400) return Promise.resolve(true);
+      const done = window.serica
         .captureViewport()
         .then(async (img) => {
-          if (!img) return;
+          if (!img) return false;
           await decodeImage(img);
           prewarmed.current = { img, key, at: performance.now() };
+          return true;
         })
-        .catch(() => undefined)
+        .catch(() => false)
         .finally(() => {
-          prewarmBusy.current = false;
+          prewarmBusy.current = null;
         });
-    });
+      prewarmBusy.current = { key, done };
+      return done;
+    };
+    setViewportPrewarmHandler(prewarm);
     return () => setViewportPrewarmHandler(null);
   }, []);
   const takePrewarmed = (): string | null => {
@@ -253,6 +260,41 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   useEffect(() => {
     if (!freezeApplied.current) setViewportCovered(!isWebPage);
   }, [isWebPage]);
+
+  // A tab being shown (or woken from sleep: its webview takes a moment to
+  // build and paint) draws its last capture in its place meanwhile, instead
+  // of an empty area. The live page covers it as soon as it is up; it is
+  // dropped once the tab has loaded.
+  const [wakeImage, setWakeImage] = useState<{ tabId: string; img: string } | null>(null);
+  const activeTabLoading = Boolean(activeTab?.isLoading);
+  const wakeSawLoad = useRef(false);
+  useEffect(() => {
+    const id = activeTab?.id;
+    wakeSawLoad.current = false;
+    if (!id || !isWebPage) {
+      setWakeImage(null);
+      return;
+    }
+    let cancelled = false;
+    void window.serica?.getTabPreview?.(id).then((img) => {
+      if (!cancelled && typeof img === 'string' && img) setWakeImage({ tabId: id, img });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab?.id, isWebPage]);
+  useEffect(() => {
+    if (!wakeImage) return;
+    if (activeTabLoading) {
+      wakeSawLoad.current = true;
+      return;
+    }
+    // A woken tab has loaded: drop the image once its first frame is surely
+    // painted. A tab that was awake covers it at once; drop it later anyway.
+    const t = window.setTimeout(() => setWakeImage(null), wakeSawLoad.current ? 700 : 5000);
+    return () => window.clearTimeout(t);
+  }, [wakeImage, activeTabLoading]);
+  const placeholder = wakeImage && wakeImage.tabId === activeTab?.id ? wakeImage.img : null;
 
   // A different tab or page makes the snapshot stale. Switching tabs while the
   // page is covered (from the sidebar, for example) shows the new tab's last
@@ -455,10 +497,10 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
-        {isWebPage && (frozenImage || underlayImage) && (
+        {isWebPage && (frozenImage || underlayImage || placeholder) && (
           <img
             className="native-page-snapshot"
-            src={(frozenImage || underlayImage)!}
+            src={(frozenImage || underlayImage || placeholder)!}
             alt=""
             draggable={false}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}
