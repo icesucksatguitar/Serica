@@ -997,6 +997,7 @@ return (
         onCloseTab={(id) => closeTab(id)}
         onSelectSpace={handleSelectSpace}
         onNewTab={openNewTabCommandBar}
+        actions={browser}
       />
     )}
 

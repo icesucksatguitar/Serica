@@ -192,7 +192,7 @@ function mergeProps<T extends Record<string, any>>(base: T, extra?: ExtraProps):
   return out as T;
 }
 
-const MENU_LABELS: Record<SidebarMenuAction, string> = {
+export const MENU_LABELS: Record<SidebarMenuAction, string> = {
   pin: 'Pin',
   unpin: 'Unpin',
   'add-favorite': 'Add to favorites',
@@ -203,7 +203,7 @@ const MENU_LABELS: Record<SidebarMenuAction, string> = {
   close: 'Close',
 };
 
-const MENU_ICONS: Record<SidebarMenuAction, LucideIcon> = {
+export const MENU_ICONS: Record<SidebarMenuAction, LucideIcon> = {
   pin: Pin,
   unpin: PinOff,
   'add-favorite': Star,
