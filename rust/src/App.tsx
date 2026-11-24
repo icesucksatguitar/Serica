@@ -12,6 +12,7 @@ import { ToolsMenu } from './components/ToolsMenu';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { UpdateNotice } from './components/UpdateNotice';
 import { PasswordPrompt } from './components/PasswordPrompt';
+import { PageDialog } from './components/PageDialog';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
 import { prewarmPageUnderlay, useViewportOverlay } from './hooks/useViewportOverlay';
@@ -544,6 +545,7 @@ export function App() {
 
   // Space_Switcher order (profiles in creation order, then each profile's spaces), used by Ctrl+1..9.
   const spaceSwitcherOrder = useMemo(() => buildSidebarView(state).spaceOrder, [state]);
+  const pageDialogTabIds = useMemo(() => state.tabs.map((t) => t.id), [state.tabs]);
 
   // Fluid space switching animation
   const handleSelectSpace = (spaceId: string) => {
@@ -1296,6 +1298,9 @@ return (
 
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
     <PasswordPrompt />
+
+    {/* Page alert/confirm/prompt, "Leave site?" and "Open in app?" in Serica's style */}
+    <PageDialog activeTabId={state.activeTabId} tabIds={pageDialogTabIds} />
 
     {/* Vertical Pinned Websites Dock (Right Side with macOS Magnification) */}
     {/* Hidden by the Settings toggle; stored pinnedSites stay untouched (R19.2, R19.3) */}

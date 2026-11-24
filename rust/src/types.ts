@@ -258,6 +258,7 @@ export interface SericaAPI {
   onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
   onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
   onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
+  onPageDialog?: (cb: (d: PageDialogRequest) => void) => () => void;
   getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
   openDevtools?: () => Promise<void>;
   historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
@@ -293,6 +294,7 @@ export interface SericaAPI {
   reopenClosedTab?: () => Promise<TabState | null>;
   cycleTab?: (direction: 1 | -1) => Promise<TabState | null>;
   openExternalUrl?: (url: string) => Promise<boolean>;
+  answerPageDialog?: (id: number, accept: boolean, text?: string) => Promise<void>;
   onSiteAction?: (cb: (payload: { action: SiteAction; source?: string }) => void) => () => void;
   onSpaceSwitched?: (cb: (payload: { spaceId: string; spaceName: string }) => void) => () => void;
   getState?: () => Promise<BrowserAppState>;
@@ -462,3 +464,17 @@ import type { ArchiveListEntry } from './shared/ipcTypes';
 /** Password save/update prompt shapes (src/main/passwords/manager.ts). No password field. */
 export type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';
 import type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';
+
+/** A page's alert/confirm/prompt/"Leave site?" dialog, or a request to open a link in another app. */
+export interface PageDialogRequest {
+  id: number;
+  tabId: string;
+  kind: 'alert' | 'confirm' | 'prompt' | 'beforeunload' | 'external';
+  /** Host of the page that asked (without www.). */
+  origin: string;
+  /** Dialog text; for `external`, the link being opened. */
+  message: string;
+  defaultText?: string;
+  /** For `external`: the link's scheme, e.g. "mailto" or "spotify". */
+  scheme?: string;
+}

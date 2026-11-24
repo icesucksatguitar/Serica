@@ -100,6 +100,7 @@ pub fn run() {
             commands::navigate,
             commands::site_action,
             commands::open_external_url,
+            commands::answer_page_dialog,
             commands::set_viewport,
             commands::viewport_capture,
             commands::set_viewport_hole,

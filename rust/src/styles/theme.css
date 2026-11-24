@@ -11069,3 +11069,142 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
+
+/* ---- Page dialogs: alert / confirm / prompt / "Leave site?" / "Open in app?" */
+.page-dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0);
+  transition: background 0.18s ease;
+}
+.page-dialog-scrim.visible {
+  background: rgba(0, 0, 0, 0.32);
+}
+.page-dialog {
+  width: min(400px, 100%);
+  padding: 18px 18px 14px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateY(6px) scale(0.985);
+  transition: opacity 0.16s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.page-dialog-scrim.visible .page-dialog {
+  opacity: 1;
+  transform: none;
+}
+.page-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page-dialog-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.page-dialog-icon.kind-beforeunload {
+  color: #f59e0b;
+}
+.page-dialog-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page-dialog-body {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.page-dialog-link {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font: 12px ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page-dialog-input {
+  width: 100%;
+  margin-top: 12px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.page-dialog-input:focus {
+  border-color: var(--border-focus);
+}
+.page-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.page-dialog-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+.page-dialog-btn:active {
+  transform: scale(0.98);
+}
+.page-dialog-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.page-dialog-btn.primary {
+  background: var(--text);
+  color: var(--bg-elevated);
+}
+.page-dialog-btn.primary:hover {
+  opacity: 0.88;
+}
+.page-dialog-btn.primary.danger {
+  background: #dc2626;
+  color: #fff;
+}
+.page-dialog-btn.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.page-dialog-btn.secondary:hover {
+  background: var(--surface-hover);
+}

@@ -242,6 +242,12 @@ unsafe fn install(
                 if url == "about:blank" && boot_ctx.borrow().booting {
                     return Ok(());
                 }
+                if !ok.as_bool() {
+                    let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+                    if args.WebErrorStatus(&mut status).is_ok() {
+                        show_error_page(&sender, status, &url);
+                    }
+                }
                 app.tab_event(&id, TabEvent::Loaded { url, success: ok.as_bool() });
                 read_theme_color(&app, &id, &sender);
                 crate::tabhost::TabHost::capture_after_load(&app, id.clone());
@@ -299,6 +305,7 @@ unsafe fn install(
             &mut token,
         )?;
     }
+    install_dialogs(&app, &tab_id, &core)?;
     {
         let app = app.clone();
         core.add_ContainsFullScreenElementChanged(
@@ -1002,6 +1009,225 @@ pub fn try_suspend(wv: &Webview) {
         }
     });
 }
+
+// ------------------------------------------------------------------ page dialogs
+
+/// A page dialog (alert/confirm/prompt/"Leave site?") or an "Open in app?"
+/// request waiting for the user's answer in Serica's own UI.
+enum Pending {
+    Script(ICoreWebView2ScriptDialogOpeningEventArgs, ICoreWebView2Deferral),
+    External(String, ICoreWebView2Deferral),
+}
+
+thread_local! {
+    static DIALOGS: RefCell<HashMap<u64, Pending>> = RefCell::new(HashMap::new());
+}
+static NEXT_DIALOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn origin_of(uri: &str) -> String {
+    url::Url::parse(uri)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+        .unwrap_or_else(|| uri.to_string())
+}
+
+/// Replaces WebView2's built-in dialogs with events the UI renders in Serica's style.
+unsafe fn install_dialogs(app: &Shared, tab_id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
+    let mut token = Default::default();
+    if let Ok(settings) = core.Settings() {
+        let _ = settings.SetAreDefaultScriptDialogsEnabled(false);
+    }
+    {
+        let (app, id) = (app.clone(), tab_id.to_string());
+        core.add_ScriptDialogOpening(
+            &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut kind = COREWEBVIEW2_SCRIPT_DIALOG_KIND::default();
+                args.Kind(&mut kind)?;
+                let kind = match kind {
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM => "confirm",
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT => "prompt",
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD => "beforeunload",
+                    _ => "alert",
+                };
+                let (mut uri, mut msg, mut def) = (PWSTR::null(), PWSTR::null(), PWSTR::null());
+                args.Uri(&mut uri)?;
+                args.Message(&mut msg)?;
+                args.DefaultText(&mut def)?;
+                let (uri, msg, def) = (take(uri), take(msg), take(def));
+                let deferral = args.GetDeferral()?;
+                let dialog_id = NEXT_DIALOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                DIALOGS.with(|d| d.borrow_mut().insert(dialog_id, Pending::Script(args.clone(), deferral)));
+                ui_emit(
+                    &app.handle,
+                    "serica:page-dialog",
+                    serde_json::json!({
+                        "id": dialog_id, "tabId": id, "kind": kind,
+                        "origin": origin_of(&uri),
+                        "message": msg.chars().take(2000).collect::<String>(),
+                        "defaultText": def,
+                    }),
+                );
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    if let Ok(core18) = core.cast::<ICoreWebView2_18>() {
+        let (app, id) = (app.clone(), tab_id.to_string());
+        core18.add_LaunchingExternalUriScheme(
+            &LaunchingExternalUriSchemeEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                // Serica asks (and launches) itself; WebView2's own prompt never shows.
+                args.SetCancel(true)?;
+                let (mut uri, mut from) = (PWSTR::null(), PWSTR::null());
+                args.Uri(&mut uri)?;
+                args.InitiatingOrigin(&mut from)?;
+                let (uri, from) = (take(uri), take(from));
+                let scheme = uri.split(':').next().unwrap_or_default().to_ascii_lowercase();
+                if scheme.is_empty() || matches!(scheme.as_str(), "javascript" | "file" | "data" | "vbscript") {
+                    return Ok(());
+                }
+                let deferral = args.GetDeferral()?;
+                let dialog_id = NEXT_DIALOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                DIALOGS.with(|d| d.borrow_mut().insert(dialog_id, Pending::External(uri.clone(), deferral)));
+                ui_emit(
+                    &app.handle,
+                    "serica:page-dialog",
+                    serde_json::json!({
+                        "id": dialog_id, "tabId": id, "kind": "external",
+                        "origin": origin_of(&from),
+                        "message": uri.chars().take(300).collect::<String>(),
+                        "scheme": scheme,
+                    }),
+                );
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
+}
+
+/// Answers a dialog raised by `install_dialogs`. Must run on the UI thread.
+pub fn answer_dialog(id: u64, accept: bool, text: Option<String>) {
+    let Some(p) = DIALOGS.with(|d| d.borrow_mut().remove(&id)) else { return };
+    unsafe {
+        match p {
+            Pending::Script(args, deferral) => {
+                if accept {
+                    if let Some(t) = text {
+                        let _ = args.SetResultText(&HSTRING::from(t));
+                    }
+                    let _ = args.Accept();
+                }
+                let _ = deferral.Complete();
+            }
+            Pending::External(uri, deferral) => {
+                let _ = deferral.Complete();
+                if accept {
+                    let _ = open::that_detached(uri);
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ error page
+
+/// Replaces WebView2's "Hmmm… can't reach this page" with Serica's own page.
+/// The error document stays in place, so the address bar, back/forward and
+/// reload keep working; it retries by itself when the connection returns.
+unsafe fn show_error_page(core: &ICoreWebView2, status: COREWEBVIEW2_WEB_ERROR_STATUS, url: &str) {
+    let (kind, title, body) = match status {
+        COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED => (
+            "offline",
+            "You're offline",
+            "Serica can't reach the internet right now. Check your Wi-Fi or network cable — this page will reload as soon as you're back online.",
+        ),
+        COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED => (
+            "dns",
+            "This site can't be found",
+            "The address might be mistyped, or the site might no longer exist. If you're offline, the page will reload once you reconnect.",
+        ),
+        COREWEBVIEW2_WEB_ERROR_STATUS_TIMEOUT => (
+            "timeout",
+            "This site took too long to respond",
+            "The server may be busy or your connection may be slow. Try again in a moment.",
+        ),
+        COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT
+        | COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED
+        | COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_RESET
+        | COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE => (
+            "unreachable",
+            "This site can't be reached",
+            "The connection was interrupted or refused. Check your connection and try again.",
+        ),
+        // Certificate pages carry WebView2's own "continue anyway" flow; other
+        // statuses (cancelled navigations, downloads) are not network failures.
+        _ => return,
+    };
+    let data = serde_json::json!({ "kind": kind, "title": title, "body": body, "url": url, "host": origin_of(url) });
+    let js = ERROR_PAGE_JS.replace("__DATA__", &data.to_string());
+    let _ = core.ExecuteScript(&HSTRING::from(js), &ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(()))));
+}
+
+const ERROR_PAGE_JS: &str = r#"(() => {
+  if (!location.href.startsWith('chrome-error://')) return;
+  const d = __DATA__;
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const icons = {
+    offline: '<path d="M2 8.8a15 15 0 0 1 4.2-2.6"/><path d="M10.7 5.1A15 15 0 0 1 22 8.8"/><path d="M5 12.6a10 10 0 0 1 5.2-2.7"/><path d="M16.8 11.2A10 10 0 0 1 19 12.6"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M12 20h.01"/><path d="m2 2 20 20"/>',
+    dns: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M8.5 8.5l5 5M13.5 8.5l-5 5"/>',
+    timeout: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    unreachable: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/>',
+  };
+  document.documentElement.innerHTML = `<head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title></title><style>
+    :root { --bg: ${dark ? '#111113' : '#f6f6f7'}; --card: ${dark ? '#1b1b1e' : '#ffffff'}; --fg: ${dark ? '#ececef' : '#17171a'};
+            --muted: ${dark ? '#9b9ba3' : '#6b6b73'}; --line: ${dark ? '#2a2a2f' : '#e6e6ea'}; --accent: ${dark ? '#ececef' : '#17171a'}; --on-accent: ${dark ? '#111113' : '#ffffff'}; }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { height: 100%; }
+    body { background: var(--bg); color: var(--fg); font: 14px/1.55 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+           display: grid; place-items: center; padding: 24px; -webkit-font-smoothing: antialiased; }
+    main { width: min(440px, 100%); text-align: left; animation: in .35s cubic-bezier(.2,.8,.2,1); }
+    @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+    .icon { width: 52px; height: 52px; border-radius: 14px; background: var(--card); border: 1px solid var(--line);
+            display: grid; place-items: center; margin-bottom: 22px; }
+    .icon svg { width: 24px; height: 24px; stroke: var(--fg); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    h1 { font: 600 22px/1.25 "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; letter-spacing: -.01em; margin-bottom: 8px; }
+    p { color: var(--muted); }
+    .host { display: inline-block; margin: 14px 0 26px; padding: 3px 10px; border-radius: 999px; background: var(--card);
+            border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row { display: flex; align-items: center; gap: 14px; }
+    button { font: 600 13px "Segoe UI", system-ui, sans-serif; border: 0; border-radius: 10px; padding: 9px 18px; cursor: pointer;
+             background: var(--accent); color: var(--on-accent); transition: opacity .15s, transform .1s; }
+    button:hover { opacity: .88; } button:active { transform: scale(.98); }
+    .status { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #d9534f; }
+    .dot.on { background: #3fb950; }
+    .code { margin-top: 34px; font: 11.5px ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); opacity: .7; }
+  </style></head><body><main>
+    <div class="icon"><svg viewBox="0 0 24 24">${icons[d.kind] || icons.unreachable}</svg></div>
+    <h1></h1><p class="body"></p><div class="host"></div>
+    <div class="row"><button id="retry">Try again</button><span class="status"><span class="dot"></span><span class="st"></span></span></div>
+    <div class="code"></div>
+  </main></body>`;
+  document.title = d.host || d.title;
+  document.querySelector('h1').textContent = d.title;
+  document.querySelector('.body').textContent = d.body;
+  document.querySelector('.host').textContent = d.host || d.url;
+  document.querySelector('.code').textContent = { offline: 'ERR_INTERNET_DISCONNECTED', dns: 'ERR_NAME_NOT_RESOLVED', timeout: 'ERR_TIMED_OUT' }[d.kind] || 'ERR_CONNECTION_FAILED';
+  const retry = () => location.replace(d.url);
+  document.getElementById('retry').onclick = retry;
+  const status = () => {
+    const on = navigator.onLine;
+    document.querySelector('.dot').classList.toggle('on', on);
+    document.querySelector('.st').textContent = on ? 'Connected' : 'No internet connection';
+  };
+  status();
+  addEventListener('offline', status);
+  addEventListener('online', () => { status(); setTimeout(retry, 600); });
+})()"#;
 
 pub fn set_muted(wv: &Webview, muted: bool) {
     let _ = wv.with_webview(move |pw| unsafe {

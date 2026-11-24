@@ -3,6 +3,7 @@
 // backend emits to the main webview. No browser logic lives here.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { PageDialogRequest } from '../types';
 
 type Unsubscribe = () => void;
 
@@ -47,6 +48,8 @@ export const tauriBridge = {
   reopenClosedTab: () => invoke<any>('reopen_closed_tab'),
   cycleTab: (direction: 1 | -1) => invoke<any>('cycle_tab', { direction }),
   openExternalUrl: (url: string) => invoke<boolean>('open_external_url', { url }),
+  answerPageDialog: (id: number, accept: boolean, text?: string) =>
+    invoke<void>('answer_page_dialog', { id, accept, text: text ?? null }),
   openDevtools: () => invoke<void>('open_devtools'),
 
   // Native viewport (tab webviews are positioned over this rectangle)
@@ -214,6 +217,7 @@ export const tauriBridge = {
   onPageColor: (cb: (r: { tabId: string; themeColor: string | null }) => void) => on('serica:page-color', cb),
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => on('serica:update-status', cb),
   onHtmlFullscreen: (cb: (isFullscreen: boolean) => void) => on('serica:html-fullscreen', cb),
+  onPageDialog: (cb: (d: PageDialogRequest) => void) => on('serica:page-dialog', cb),
 };
 
 export type TauriBridge = typeof tauriBridge;

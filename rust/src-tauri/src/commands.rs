@@ -325,6 +325,16 @@ pub async fn open_external_url(url: String) -> R<bool> {
     Ok(open::that_detached(parsed.as_str()).is_ok())
 }
 
+/// Answers a page dialog (alert/confirm/prompt/"Leave site?"/"Open in app?") shown by the UI.
+#[tauri::command]
+pub async fn answer_page_dialog(id: u64, accept: bool, text: Option<String>, app: State<'_, Shared>) -> R<()> {
+    #[cfg(windows)]
+    let _ = app.handle.run_on_main_thread(move || crate::webview_win::answer_dialog(id, accept, text));
+    #[cfg(not(windows))]
+    let _ = (id, accept, text, app);
+    Ok(())
+}
+
 // ------------------------------------------------------------------ viewport
 
 #[tauri::command]

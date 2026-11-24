@@ -25,6 +25,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const REFRESH_AFTER_MS: i64 = 4 * 24 * 3_600_000;
+/// Bump when `BUILTIN_RULES` changes: a cached engine built from older rules
+/// is then rebuilt at startup instead of waiting for the next list refresh.
+const BUILTIN_VERSION: i64 = 2;
 
 struct ListSource {
     name: &'static str,
@@ -133,6 +136,10 @@ youtube.com###player-ads
 youtube.com##.ytp-ad-module
 youtube.com##ytd-promoted-sparkles-web-renderer
 youtube.com##ytd-display-ad-renderer
+! YouTube Music reads /youtubei/v1/player with fetch + Response.json(), which uBO's
+! music.youtube.com rules (JSON.parse only) miss: its ads ride in adSlots/playerAds.
+music.youtube.com##+js(json-prune-fetch-response, adPlacements adSlots playerAds playerResponse.adPlacements playerResponse.adSlots playerResponse.playerAds, , propsToMatch, /\/youtubei\/v1\/player/)
+music.youtube.com##+js(json-prune-xhr-response, adPlacements adSlots playerAds playerResponse.adPlacements playerResponse.adSlots playerResponse.playerAds, , propsToMatch, /\/youtubei\/v1\/player/)
 "#;
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -317,6 +324,9 @@ impl Shields {
         let mut info = self.info.lock();
         info.engine = "full".into();
         info.last_updated = meta.as_ref().and_then(|m| m["updatedAt"].as_i64());
+        if meta.as_ref().and_then(|m| m["builtinVersion"].as_i64()) != Some(BUILTIN_VERSION) {
+            info.last_updated = None; // built from older built-in rules: rebuild now
+        }
         info.lists = LISTS.iter().map(|l| l.name.to_string()).collect();
         tracing::info!("loaded cached adblock engine");
     }
@@ -419,7 +429,7 @@ impl Shields {
         .map_err(|e| e.to_string())?;
         *self.engine.write() = Arc::new(engine);
         let now = now_ms();
-        let _ = crate::store::write_atomic(&self.dir.join("meta.json"), serde_json::json!({ "updatedAt": now }).to_string().as_bytes());
+        let _ = crate::store::write_atomic(&self.dir.join("meta.json"), serde_json::json!({ "updatedAt": now, "builtinVersion": BUILTIN_VERSION }).to_string().as_bytes());
         let mut info = self.info.lock();
         info.engine = "full".into();
         info.last_updated = Some(now);
