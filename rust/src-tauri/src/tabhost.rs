@@ -436,11 +436,16 @@ impl TabHost {
                         if (w.zoom - 1.0).abs() > 0.001 {
                             crate::webview_win::set_zoom(&wv, w.zoom);
                         }
-                        // A tab closed or slept meanwhile queued another
-                        // reconcile, which closes this view again.
                         if let Some(old) = host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
                             let _ = old.webview.close();
                         }
+                        // `wants`/`active` were read before the lock was
+                        // released for the build: a reconcile that ran
+                        // meanwhile (tab closed, slept or switched away) could
+                        // not see this view. Start over from fresh state; the
+                        // view now exists, so this does not build again.
+                        drop(host);
+                        return Self::reconcile(app);
                     } else if host.create_failures < 20 {
                         host.create_failures += 1;
                         retry = true;

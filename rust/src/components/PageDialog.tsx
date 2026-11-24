@@ -87,7 +87,8 @@ export const PageDialog: React.FC<PageDialogProps> = ({ activeTabId, tabIds }) =
       e.preventDefault();
       e.stopPropagation();
       close(current.kind === 'alert');
-    } else if (e.key === 'Enter' && !e.shiftKey) {
+    } else if (e.key === 'Enter' && !e.shiftKey && !(e.target instanceof HTMLButtonElement)) {
+      // A focused button answers Enter itself (Cancel/Stay must not accept).
       e.preventDefault();
       close(true);
     }
