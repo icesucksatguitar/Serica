@@ -38,7 +38,9 @@ pub struct TabView {
     pub hidden_at: Option<std::time::Instant>,
 }
 
-/// Hidden tabs are frozen after this long unless they play media.
+/// Hidden tabs drop to WebView2's low-memory level after this long, and are
+/// frozen after `SUSPEND_AFTER`, unless they play media.
+const TRIM_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
 const SUSPEND_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Puts the largest playing video into native picture-in-picture.
@@ -125,6 +127,8 @@ pub struct TabHost {
     /// Failed creations in a row (a profile's browser process may still be
     /// shutting down after a network change); creation is retried a few times.
     create_failures: u32,
+    /// Tabs whose webview is being built right now (outside the lock).
+    creating: std::collections::HashSet<String>,
 }
 
 /// Two-finger horizontal touchpad swipe over a page goes back/forward, when
@@ -221,6 +225,14 @@ pub const PAGE_SCRIPT: &str = r#"(() => {
   else start();
 })();"#;
 
+/// A tab webview ready to be built (see `TabHost::prepare`).
+struct PendingView {
+    window: tauri::Window,
+    builder: WebviewBuilder<tauri::Wry>,
+    bounds: Bounds,
+    url: url::Url,
+}
+
 fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
 }
@@ -240,6 +252,7 @@ impl TabHost {
             proxy_port,
             net,
             create_failures: 0,
+            creating: std::collections::HashSet::new(),
         }
     }
 
@@ -307,8 +320,9 @@ impl TabHost {
         b
     }
 
-    /// Creates a tab webview at the current viewport bounds.
-    fn create(&mut self, app: &Shared, tab_id: &str, url: &str, profile: &str) -> Option<Webview> {
+    /// Everything needed to create a tab webview at the current viewport
+    /// bounds. Cheap; done under the host lock.
+    fn prepare(&self, app: &Shared, tab_id: &str, url: &str, profile: &str) -> Option<PendingView> {
         let bounds = self.bounds?;
         let window = app.handle.get_window("main")?;
         let parsed = url::Url::parse(url).ok()?;
@@ -320,10 +334,21 @@ impl TabHost {
         #[cfg(not(windows))]
         let start = parsed.clone();
         let builder = self.builder(app, label, start, profile, Some(tab_id));
+        Some(PendingView { window, builder, bounds, url: parsed })
+    }
+
+    /// Creates the webview. `add_child` blocks until the main thread has
+    /// built it, and the main thread takes the host lock in its own callbacks
+    /// (preview captures finishing, page events), so this must run without
+    /// the host lock held, or both threads wait on each other forever.
+    fn build(app: &Shared, tab_id: &str, profile: &str, p: PendingView) -> Option<Webview> {
+        let PendingView { window, builder, bounds, url: parsed } = p;
         match window.add_child(builder, LogicalPosition::new(bounds.x, bounds.y), LogicalSize::new(bounds.w.max(1.0), bounds.h.max(1.0))) {
             Ok(wv) => {
                 #[cfg(windows)]
                 crate::webview_win::attach(app, tab_id, profile, &wv, Some(parsed.to_string()));
+                #[cfg(not(windows))]
+                let _ = (app, profile, parsed);
                 Some(wv)
             }
             Err(e) => {
@@ -387,19 +412,35 @@ impl TabHost {
         }
 
         let mut retry = false;
-        // Lazily create the active tab's webview.
+        // Lazily create the active tab's webview. The lock is released while
+        // it is built, so another reconcile may be building it already.
         if let Some(id) = &active {
             if let Some(w) = wants.get(id) {
-                if w.live && !host.views.contains_key(id) && !is_internal_url(&w.url) {
-                    let (url, profile) = (w.url.clone(), w.profile.clone());
-                    if let Some(wv) = host.create(app, id, &url, &profile) {
+                if w.live && !host.views.contains_key(id) && !host.creating.contains(id) && !is_internal_url(&w.url) {
+                    let profile = w.profile.clone();
+                    let created = match host.prepare(app, id, &w.url, &profile) {
+                        Some(p) => {
+                            host.creating.insert(id.clone());
+                            drop(host);
+                            let wv = Self::build(app, id, &profile, p);
+                            host = app.host.lock();
+                            host.creating.remove(id);
+                            wv
+                        }
+                        None => None,
+                    };
+                    if let Some(wv) = created {
                         host.create_failures = 0;
                         let _ = wv.hide();
                         #[cfg(windows)]
                         if (w.zoom - 1.0).abs() > 0.001 {
                             crate::webview_win::set_zoom(&wv, w.zoom);
                         }
-                        host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false, hidden_at: None });
+                        // A tab closed or slept meanwhile queued another
+                        // reconcile, which closes this view again.
+                        if let Some(old) = host.views.insert(id.clone(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
+                            let _ = old.webview.close();
+                        }
                     } else if host.create_failures < 20 {
                         host.create_failures += 1;
                         retry = true;
@@ -447,8 +488,8 @@ impl TabHost {
                 let _ = v.webview.hide();
                 v.shown = false;
                 v.hidden_at = Some(std::time::Instant::now());
-                #[cfg(windows)]
-                crate::webview_win::set_background(&v.webview, true);
+                // Trimmed after a short delay, not now: trimming right away
+                // made quick switching back and forth slow.
                 to_suspend.push(id.clone());
             }
         }
@@ -479,25 +520,33 @@ impl TabHost {
         let _ = previews_to_capture;
     }
 
-    /// Suspends a hidden tab once it has stayed hidden for `SUSPEND_AFTER`,
-    /// unless it is playing media (music, calls).
+    /// Winds a hidden tab down in two steps, unless it is playing media
+    /// (music, calls): after `TRIM_AFTER` WebView2 is asked to keep a low
+    /// memory footprint, and after `SUSPEND_AFTER` its scripts are frozen.
+    /// Showing the tab again in between cancels both. Neither returns the
+    /// GPU process's memory (measured): only sleeping the tab does that.
     #[cfg(windows)]
     fn schedule_suspend(app: &Shared, id: String) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(SUSPEND_AFTER + std::time::Duration::from_secs(1)).await;
-            let media = app.store.lock().tab(&id).map(|t| t.has_active_media).unwrap_or(true);
-            if media {
-                return;
-            }
-            let wv = {
+            // The view, if it is still hidden and has been for at least `after`.
+            let still_hidden = |after: std::time::Duration| -> Option<Webview> {
+                let media = app.store.lock().tab(&id).map(|t| t.has_active_media).unwrap_or(true);
+                if media {
+                    return None;
+                }
                 let host = app.host.lock();
                 host.views
                     .get(&id)
-                    .filter(|v| !v.shown && v.hidden_at.is_some_and(|t| t.elapsed() >= SUSPEND_AFTER))
+                    .filter(|v| !v.shown && v.hidden_at.is_some_and(|t| t.elapsed() >= after))
                     .map(|v| v.webview.clone())
             };
-            if let Some(wv) = wv {
+            let slack = std::time::Duration::from_millis(500);
+            tokio::time::sleep(TRIM_AFTER + slack).await;
+            let Some(wv) = still_hidden(TRIM_AFTER) else { return };
+            crate::webview_win::set_background(&wv, true);
+            tokio::time::sleep(SUSPEND_AFTER - TRIM_AFTER).await;
+            if let Some(wv) = still_hidden(SUSPEND_AFTER) {
                 crate::webview_win::try_suspend(&wv);
             }
         });
@@ -720,10 +769,14 @@ impl TabHost {
         let profile = app.store.lock().active_profile_id();
         let label = format!("assistant-{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed));
         let builder = host.builder(app, label, parsed, &profile, None);
+        // Never hold the host lock across `add_child` (see `TabHost::build`).
+        drop(host);
         let wv = window
             .add_child(builder, LogicalPosition::new(b.x, b.y), LogicalSize::new(b.w.max(1.0), b.h.max(1.0)))
             .map_err(|e| e.to_string())?;
-        host.assistant = Some((wv, b));
+        if let Some((old, _)) = app.host.lock().assistant.replace((wv, b)) {
+            let _ = old.close();
+        }
         Ok(())
     }
 

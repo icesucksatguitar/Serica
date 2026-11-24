@@ -927,23 +927,35 @@ impl Store {
     /// (manual Zen); otherwise only tabs idle at least that long. Pinned tabs,
     /// tabs playing media and the active tab are never slept.
     pub fn sleep_inactive(&mut self, min_idle_ms: i64) -> usize {
+        self.sleep_least_recent(min_idle_ms, usize::MAX)
+    }
+
+    /// Sleeps up to `limit` eligible tabs idle at least `min_idle_ms`, least
+    /// recently used first (used when the system runs low on memory).
+    pub fn sleep_least_recent(&mut self, min_idle_ms: i64, limit: usize) -> usize {
         let now = now_ms();
         let active = self.active_tab_id.clone();
-        let mut n = 0;
-        for t in &mut self.tabs {
-            let idle = now - t.last_active_at.unwrap_or(0);
-            if Some(&t.id) != active.as_ref()
-                && !t.is_sleeping
-                && !t.unloaded
-                && !t.has_active_media
-                && t.section() != Section::Pinned
-                && !is_internal_url(&t.url)
-                && idle >= min_idle_ms
-            {
-                t.is_sleeping = true;
-                t.is_loading = false;
-                n += 1;
-            }
+        let mut eligible: Vec<(i64, usize)> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                Some(&t.id) != active.as_ref()
+                    && !t.is_sleeping
+                    && !t.unloaded
+                    && !t.has_active_media
+                    && t.section() != Section::Pinned
+                    && !is_internal_url(&t.url)
+            })
+            .map(|(i, t)| (t.last_active_at.unwrap_or(0), i))
+            .filter(|(last, _)| now - last >= min_idle_ms)
+            .collect();
+        eligible.sort_unstable();
+        let n = eligible.len().min(limit);
+        for &(_, i) in &eligible[..n] {
+            let t = &mut self.tabs[i];
+            t.is_sleeping = true;
+            t.is_loading = false;
         }
         n
     }
@@ -1168,6 +1180,28 @@ mod tests {
         assert_eq!(s.sleep_inactive(600_000), 1);
         assert!(s.tab(&a).unwrap().is_sleeping);
         assert!(!s.tab(&b).unwrap().is_sleeping);
+    }
+
+    #[test]
+    fn memory_pressure_sleeps_least_recently_used_first() {
+        let mut s = store();
+        let old = s.create_tab(Some("https://old.com".into()), None, false, None).id;
+        let older = s.create_tab(Some("https://older.com".into()), None, false, None).id;
+        let fresh = s.create_tab(Some("https://fresh.com".into()), None, false, None).id;
+        let active = s.create_tab(Some("https://active.com".into()), None, true, None).id;
+        s.tab_mut(&old).unwrap().last_active_at = Some(now_ms() - 20 * 60_000);
+        s.tab_mut(&older).unwrap().last_active_at = Some(now_ms() - 40 * 60_000);
+        s.tab_mut(&fresh).unwrap().last_active_at = Some(now_ms() - 60_000);
+        s.tab_mut(&active).unwrap().last_active_at = Some(now_ms() - 90 * 60_000);
+        // One at a time, oldest first; the active tab and recent tabs are spared.
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 1), 1);
+        assert!(s.tab(&older).unwrap().is_sleeping);
+        assert!(!s.tab(&old).unwrap().is_sleeping);
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 5), 1);
+        assert!(s.tab(&old).unwrap().is_sleeping);
+        assert!(!s.tab(&fresh).unwrap().is_sleeping);
+        assert!(!s.tab(&active).unwrap().is_sleeping);
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 5), 0);
     }
 
     #[test]

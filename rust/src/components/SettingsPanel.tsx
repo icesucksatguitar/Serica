@@ -19,8 +19,10 @@ import type { LucideIcon } from 'lucide-react';
 import {
   ARCHIVE_INTERVAL_OPTIONS,
   SEARCH_ENGINES,
+  TAB_SLEEP_OPTIONS,
   type ArchiveIntervalHours,
   type SearchEngineId,
+  type TabSleepMinutes,
 } from '../shared/settings';
 import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
@@ -55,7 +57,14 @@ export interface SettingsPanelProps {
   initialTab?: SettingsTabId;
 }
 
-export const ZEN_SLEEP_HINT = 'Sleeps tabs after 10 minutes of inactivity';
+export const tabSleepLabel = (minutes: TabSleepMinutes): string =>
+  minutes < 60 ? `${minutes} min` : `${minutes / 60} hr`;
+
+const tabSleepLongLabel = (minutes: TabSleepMinutes): string =>
+  minutes < 60 ? `${minutes} minutes` : minutes === 60 ? '1 hour' : `${minutes / 60} hours`;
+
+export const zenSleepHint = (minutes: TabSleepMinutes): string =>
+  `Sleeps background tabs unused for ${tabSleepLongLabel(minutes)} to free memory. Pinned tabs and tabs playing audio stay awake`;
 
 const ENGINE_IDS = Object.keys(SEARCH_ENGINES) as SearchEngineId[];
 
@@ -591,7 +600,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <div className="settings-row">
                     <div className="settings-row-text">
                       <span className="settings-row-label">Zen auto-sleep</span>
-                      <span className="settings-hint">{ZEN_SLEEP_HINT}</span>
+                      <span className="settings-hint">{zenSleepHint(settings.tabSleepMinutes)}</span>
                     </div>
                     <SettingsSwitch
                       checked={settings.zenSleepEnabled}
@@ -599,6 +608,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onChange={(next) => onUpdateSettings({ zenSleepEnabled: next })}
                     />
                   </div>
+
+                  {settings.zenSleepEnabled && (
+                    <>
+                      <div className="settings-row-text" style={{ marginTop: 4 }}>
+                        <span className="settings-row-label">Sleep tabs after</span>
+                      </div>
+                      <div
+                        className="settings-segmented settings-segmented-full"
+                        role="radiogroup"
+                        aria-label="Sleep tabs after"
+                        style={{ marginTop: 8 }}
+                      >
+                        {TAB_SLEEP_OPTIONS.map((value) => {
+                          const selected = settings.tabSleepMinutes === value;
+                          const label = tabSleepLabel(value);
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              aria-label={`Sleep tabs after ${label}`}
+                              className={`settings-segment${selected ? ' active' : ''}`}
+                              onClick={() => {
+                                if (!selected) onUpdateSettings({ tabSleepMinutes: value });
+                              }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
                   <div className="settings-divider" />
 

@@ -34,6 +34,9 @@ pub struct BrowserSettings {
     pub adblock_enabled: bool,
     #[serde(default = "yes")]
     pub zen_sleep_enabled: bool,
+    /// Minutes a background tab stays unused before Zen sleeps it (see `TAB_SLEEP_MINUTES`).
+    #[serde(default = "default_tab_sleep_minutes")]
+    pub tab_sleep_minutes: u32,
     #[serde(default = "default_search_engine")]
     pub search_engine: String,
     #[serde(default = "default_reduced_effects")]
@@ -80,6 +83,10 @@ pub const TEXT_SCALES: [f64; 4] = [0.9, 1.0, 1.1, 1.25];
 fn default_text_scale() -> f64 {
     1.0
 }
+pub const TAB_SLEEP_MINUTES: [u32; 6] = [15, 30, 60, 120, 240, 720];
+fn default_tab_sleep_minutes() -> u32 {
+    60
+}
 fn default_mcp_port() -> u16 {
     crate::mcp_http::DEFAULT_PORT
 }
@@ -125,6 +132,7 @@ impl BrowserSettings {
         let typed: &[(&str, fn(&Value) -> bool)] = &[
             ("adblockEnabled", Value::is_boolean),
             ("zenSleepEnabled", Value::is_boolean),
+            ("tabSleepMinutes", Value::is_u64),
             ("searchEngine", Value::is_string),
             ("reducedEffectsMode", Value::is_string),
             ("spaceThemes", Value::is_object),
@@ -175,6 +183,9 @@ impl BrowserSettings {
         if !valid_interval {
             self.archive_interval_hours = default_archive_interval();
         }
+        if !TAB_SLEEP_MINUTES.contains(&self.tab_sleep_minutes) {
+            self.tab_sleep_minutes = default_tab_sleep_minutes();
+        }
         if !self.sidebar_width.is_finite() {
             self.sidebar_width = default_sidebar_width();
         }
@@ -195,7 +206,7 @@ impl BrowserSettings {
             .collect();
         // Typed keys must never also live in `extra`, or they'd be serialized twice.
         for k in [
-            "adblockEnabled", "zenSleepEnabled", "searchEngine", "reducedEffectsMode", "spaceThemes",
+            "adblockEnabled", "zenSleepEnabled", "tabSleepMinutes", "searchEngine", "reducedEffectsMode", "spaceThemes",
             "customThemePresets", "shieldWhitelist", "archiveIntervalHours", "rightPinsDockVisible",
             "sidebarExpanded", "sidebarAutoHide", "sidebarWidth", "textScale",
         ] {
@@ -248,6 +259,18 @@ impl BrowserSettings {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn tab_sleep_minutes_defaults_and_validates() {
+        assert_eq!(BrowserSettings::from_value(json!({})).tab_sleep_minutes, 60);
+        assert_eq!(BrowserSettings::from_value(json!({ "tabSleepMinutes": 240 })).tab_sleep_minutes, 240);
+        assert_eq!(BrowserSettings::from_value(json!({ "tabSleepMinutes": 7 })).tab_sleep_minutes, 60);
+        assert_eq!(BrowserSettings::from_value(json!({ "tabSleepMinutes": "soon" })).tab_sleep_minutes, 60);
+        let mut s = BrowserSettings::default();
+        s.apply_patch(&json!({ "tabSleepMinutes": 15 }));
+        assert_eq!(s.tab_sleep_minutes, 15);
+        assert_eq!(serde_json::to_string(&s).unwrap().matches("tabSleepMinutes").count(), 1);
+    }
 
     #[test]
     fn text_scale_snaps_to_offered_sizes() {

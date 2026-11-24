@@ -88,6 +88,31 @@ pub fn ui_emit<S: serde::Serialize + Clone>(handle: &AppHandle, event: &str, pay
     let _ = handle.emit_to("main", event, payload);
 }
 
+/// Percent of physical memory in use system-wide, if known.
+fn memory_load_percent() -> Option<u32> {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut m = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+        GlobalMemoryStatusEx(&mut m).ok()?;
+        Some(m.dwMemoryLoad)
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// With system memory `load`% in use: sleep up to `.1` background tabs idle
+/// at least `.0` ms right now, or `None` while memory is plentiful. Every
+/// awake background tab holds its renderer plus GPU memory, and the GPU
+/// process only gives memory back once the pages using it are closed.
+pub fn pressure_sleep_plan(load: u32) -> Option<(i64, usize)> {
+    match load {
+        90.. => Some((60_000, 3)),
+        80..=89 => Some((5 * 60_000, 1)),
+        _ => None,
+    }
+}
+
 /// Turns omnibox input into a URL: keeps real URLs, adds https:// to
 /// host-like input, searches everything else. `javascript:` is refused.
 pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
@@ -254,15 +279,25 @@ impl App {
 
     fn start_background_jobs(self: &Arc<Self>) {
         crate::mcp_http::sync(self);
-        // Zen auto-sleep and Today-tab archiving, once a minute.
+        // Zen auto-sleep and Today-tab archiving, twice a minute.
         let app = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(60));
+            let mut tick = tokio::time::interval(Duration::from_secs(30));
             loop {
                 tick.tick().await;
+                let pressure = memory_load_percent().and_then(pressure_sleep_plan);
                 let (slept, archived) = {
                     let mut s = app.store.lock();
-                    let slept = if s.settings.zen_sleep_enabled { s.sleep_inactive(10 * 60_000) } else { 0 };
+                    let mut slept = 0;
+                    if s.settings.zen_sleep_enabled {
+                        let idle_ms = i64::from(s.settings.tab_sleep_minutes) * 60_000;
+                        slept += s.sleep_inactive(idle_ms);
+                        // Low on RAM: also sleep the least recently used
+                        // background tabs, a few per tick, before the timer.
+                        if let Some((min_idle_ms, limit)) = pressure {
+                            slept += s.sleep_least_recent(min_idle_ms, limit);
+                        }
+                    }
                     (slept, s.archive_sweep())
                 };
                 if slept + archived > 0 {
@@ -434,8 +469,22 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_input;
+    use super::{memory_load_percent, normalize_input, pressure_sleep_plan};
     const G: &str = "https://www.google.com/search?q=";
+
+    #[test]
+    fn memory_pressure_plan() {
+        assert_eq!(pressure_sleep_plan(50), None);
+        assert_eq!(pressure_sleep_plan(79), None);
+        assert_eq!(pressure_sleep_plan(80), Some((5 * 60_000, 1)));
+        assert_eq!(pressure_sleep_plan(95), Some((60_000, 3)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn memory_load_is_read() {
+        assert!(memory_load_percent().is_some_and(|p| p <= 100));
+    }
 
     #[test]
     fn omnibox_input() {

@@ -89,6 +89,8 @@ function normalizeTextScale(value: unknown): number {
 export interface BrowserSettings {
   adblockEnabled: boolean;
   zenSleepEnabled: boolean;
+  /** Minutes a background tab stays unused before Zen sleeps it. */
+  tabSleepMinutes: TabSleepMinutes;
   /** Pop a playing video into picture-in-picture when switching away from its tab. */
   autoPictureInPicture: boolean;
   /** Vertical sidebar with hover previews, or a horizontal strip of tabs under the top bar. */
@@ -112,9 +114,15 @@ export type ArchiveIntervalHours = 12 | 24 | 168 | 720 | 'never';
 
 export const ARCHIVE_INTERVAL_OPTIONS: readonly ArchiveIntervalHours[] = Object.freeze([12, 24, 168, 720, 'never']);
 
+/** How long an unused background tab stays awake (minutes). Mirrors `TAB_SLEEP_MINUTES` in settings.rs. */
+export type TabSleepMinutes = 15 | 30 | 60 | 120 | 240 | 720;
+
+export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = Object.freeze([15, 30, 60, 120, 240, 720]);
+
 export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   adblockEnabled: true,
   zenSleepEnabled: true,
+  tabSleepMinutes: 60 as TabSleepMinutes,
   autoPictureInPicture: true,
   tabLayout: 'sidebar' as TabLayout,
   searchEngine: 'google' as SearchEngineId,
@@ -229,6 +237,9 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     adblockEnabled: typeof source.adblockEnabled === 'boolean' ? source.adblockEnabled : DEFAULT_SETTINGS.adblockEnabled,
     zenSleepEnabled:
       typeof source.zenSleepEnabled === 'boolean' ? source.zenSleepEnabled : DEFAULT_SETTINGS.zenSleepEnabled,
+    tabSleepMinutes: (TAB_SLEEP_OPTIONS as readonly unknown[]).includes(source.tabSleepMinutes)
+      ? (source.tabSleepMinutes as TabSleepMinutes)
+      : DEFAULT_SETTINGS.tabSleepMinutes,
     autoPictureInPicture:
       typeof source.autoPictureInPicture === 'boolean'
         ? source.autoPictureInPicture
