@@ -14,7 +14,6 @@ import {
   Globe,
   Heart,
   Home,
-  Moon,
   MoreHorizontal,
   Music,
   PanelLeftClose,
@@ -727,8 +726,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isActiveItem = (item: SidebarItemRef) =>
     item.tab !== undefined && item.tab.id === activeTabId;
-  const isSleepingItem = (item: SidebarItemRef) =>
-    item.kind === 'favorite' ? false : Boolean(item.tab?.isSleeping || item.tab?.unloaded);
 
   // --- Rendering --------------------------------------------------------------
   const renderFavorite = (item: SidebarItemRef, inert = false) => {
@@ -749,19 +746,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
   const renderTabRow = (item: SidebarItemRef, inert = false) => {
     const active = isActiveItem(item);
-    const sleeping = isSleepingItem(item);
-    const cls = `nsb-tab ${active ? 'active' : ''} ${sleeping ? 'sleeping' : ''} ${item.tab?.unloaded ? 'unloaded' : ''}`;
+    // Sleeping tabs look like any other: memory is freed in the background.
+    const cls = `nsb-tab ${active ? 'active' : ''} ${item.tab?.unloaded ? 'unloaded' : ''}`;
     const content = (
       <>
         <span className="nsb-tab-favicon">
           <Favicon src={item.favicon ?? item.tab?.favicon} />
         </span>
         <span className="nsb-tab-title">{item.title || item.url || 'New Tab'}</span>
-        {sleeping && (
-          <span className="nsb-tab-mark" title={item.tab?.unloaded ? 'Not loaded' : 'Sleeping'}>
-            <Moon size={11} aria-label={item.tab?.unloaded ? 'Not loaded' : 'Sleeping'} />
-          </span>
-        )}
       </>
     );
     // Neighbour panes only need to look right: no handlers, no focusable controls.

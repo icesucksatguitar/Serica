@@ -172,6 +172,9 @@ export const tauriBridge = {
   clearDownloads: () => invoke<any[]>('clear_downloads'),
   openDownloadsFolder: () => invoke<void>('open_downloads_folder'),
   openFile: () => invoke<void>('open_file'),
+  readClipboardText: () => invoke<string | null>('read_clipboard_text'),
+  cookieSites: () => invoke<{ ok: boolean; error?: string; sites?: { site: string; count: number }[] }>('cookie_sites'),
+  deleteCookies: (site?: string) => invoke<{ ok: boolean; error?: string; deleted?: number }>('delete_cookies', { site: site ?? null }),
 
   // Extensions (Chrome Web Store)
   listExtensions: () => invoke<any[]>('list_extensions'),

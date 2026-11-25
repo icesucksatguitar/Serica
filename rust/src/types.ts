@@ -272,6 +272,9 @@ export interface SericaAPI {
   openDownloadsFolder?: () => Promise<void>;
   /** Native "Open file" picker; chosen files (PDFs…) open in new tabs. */
   openFile?: () => Promise<void>;
+  readClipboardText?: () => Promise<string | null>;
+  cookieSites?: () => Promise<{ ok: boolean; error?: string; sites?: { site: string; count: number }[] }>;
+  deleteCookies?: (site?: string) => Promise<{ ok: boolean; error?: string; deleted?: number }>;
   onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
   onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
   onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;

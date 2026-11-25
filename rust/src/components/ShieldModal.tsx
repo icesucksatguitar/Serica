@@ -225,7 +225,7 @@ export const ShieldModal: React.FC<ShieldModalProps> = ({
             <Zap size={16} style={{ color: 'var(--zen-blue)' }} />
             <div>
               <div style={{ fontSize: '16px', fontWeight: 700 }}>Active</div>
-              <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>Zen Resource Saver</div>
+              <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>Memory saver</div>
             </div>
           </div>
         </div>

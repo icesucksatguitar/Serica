@@ -10,7 +10,6 @@ interface CommandBarProps {
   onNavigate: (url: string) => void;
   onSelectTab: (id: string) => void;
   onCreateTab: (url?: string) => void;
-  onZenOptimize: () => void;
   onToggleShields: () => void;
   onSelectSpace: (spaceId: string) => void;
   onToggleTheme?: () => void;
@@ -96,7 +95,6 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   onNavigate,
   onSelectTab,
   onCreateTab,
-  onZenOptimize,
   onToggleShields,
   onSelectSpace,
   onToggleTheme,
@@ -266,12 +264,6 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       title: '> Open New Tab',
       hint: 'Ctrl+T',
       action: () => onCreateTab(),
-    },
-    {
-      id: 'cmd-sleep-tabs',
-      title: '> Put Inactive Tabs to Sleep (Zen Memory Mode)',
-      hint: 'Zen',
-      action: () => onZenOptimize(),
     },
     {
       id: 'cmd-toggle-shields',

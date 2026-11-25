@@ -16,22 +16,13 @@ import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { prepareViewportFreeze, prewarmPageUnderlay, useViewportCovered, useViewportOverlay } from './hooks/useViewportOverlay';
+import { prewarmPageUnderlay, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
+import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
 import { computeTopBarTint, type PageColorReport, type TabPageColor } from './utils/topBarTint';
-import {
-  ArrowLeft,
-  ArrowRight,
-  RotateCw,
-  Home,
-  X,
-  Shield,
-  Lock,
-  Download,
-  Plus,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Home, X, Shield, Lock, Download, Plus, PanelLeft } from 'lucide-react';
 import { useDownloads, aggregateProgress, isActiveDownload } from './hooks/useDownloads';
 import {
   TabState,
@@ -43,6 +34,9 @@ import {
   SiteAction,
   PerformanceStatus,
 } from './types';
+import { AppContextMenu } from './components/AppContextMenu';
+import { runSpaceTransition } from './utils/spaceTransition';
+import { normalizePinnedTools, type ToolActions } from './shared/tools';
 import './styles/theme.css';
 
 const ArchiveList = lazy(() =>
@@ -107,7 +101,6 @@ export function App() {
     reorderTabs,
     toggleShields,
     resetShieldStats,
-    zenOptimize,
   } = browser;
   const { activeProfile } = useProfiles();
 
@@ -154,59 +147,18 @@ export function App() {
   useEffect(() => {
     if (!isCommandBarOpen) setIsCommandBarNewTab(false);
   }, [isCommandBarOpen]);
-  const [spaceOverlay, setSpaceOverlay] = useState<{ name: string; key: number } | null>(null);
   const [spaceTransitionClass, setSpaceTransitionClass] = useState<string>('');
-  const spaceOverlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spaceSlideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const spaceOverlayKey = useRef(0);
-  // Native pages paint above HTML: while the space name shows, the new page is
-  // frozen to a snapshot so the label (and its blur) can sit on top of it.
-  const [spaceFreeze, setSpaceFreeze] = useState(false);
-  const viewportCovered = useViewportCovered();
-  const endSpaceOverlay = useCallback((key: number) => {
-    if (spaceOverlayKey.current !== key) return;
-    if (spaceOverlayTimer.current) clearTimeout(spaceOverlayTimer.current);
-    spaceOverlayTimer.current = null;
-    setSpaceOverlay(null);
-    setSpaceFreeze(false);
-  }, []);
-  /** Shows the space name and/or slides the page; a new switch restarts both cleanly. */
-  const playSpaceSwitch = useCallback((
-    name: string | null,
-    slide: '' | 'space-transition-left' | 'space-transition-right',
-    switched: Promise<unknown> = Promise.resolve(),
-  ) => {
-    if (name) {
-      if (spaceOverlayTimer.current) clearTimeout(spaceOverlayTimer.current);
-      spaceOverlayTimer.current = null;
-      const key = ++spaceOverlayKey.current;
-      setSpaceOverlay(null);
-      setSpaceFreeze(false);
-      // The label covers the page we switched *to*, frozen to a snapshot. Only
-      // a fresh capture of it makes that freeze invisible (an older one would
-      // jump), so wait for the backend to show the page and for its capture;
-      // on a page too busy to capture in time, skip the label instead.
-      void switched
-        .then(() => new Promise((r) => setTimeout(r, 60)))
-        .then(() => (spaceOverlayKey.current === key ? prepareViewportFreeze() : false))
-        .then((ready) => {
-          if (!ready || spaceOverlayKey.current !== key) return;
-          setSpaceOverlay({ name, key });
-          setSpaceFreeze(true);
-          // The label ends itself when its animation does; this is a fallback.
-          spaceOverlayTimer.current = setTimeout(() => endSpaceOverlay(key), 2400);
-        });
-    }
-    if (slide) {
-      if (spaceSlideTimer.current) clearTimeout(spaceSlideTimer.current);
-      // Drop the class for one frame so the animation restarts on rapid switches.
+  /** Slides the page on a space switch; a new switch restarts the slide cleanly. */
+  const playSpaceSlide = useCallback((slide: 'space-transition-left' | 'space-transition-right') => {
+    if (spaceSlideTimer.current) clearTimeout(spaceSlideTimer.current);
+    // Drop the class for one frame so the animation restarts on rapid switches.
+    setSpaceTransitionClass('');
+    requestAnimationFrame(() => setSpaceTransitionClass(slide));
+    spaceSlideTimer.current = setTimeout(() => {
+      spaceSlideTimer.current = null;
       setSpaceTransitionClass('');
-      requestAnimationFrame(() => setSpaceTransitionClass(slide));
-      spaceSlideTimer.current = setTimeout(() => {
-        spaceSlideTimer.current = null;
-        setSpaceTransitionClass('');
-      }, 560);
-    }
+    }, 460);
   }, []);
 
   // User Profile & First Launch Welcome Screen State
@@ -314,13 +266,12 @@ export function App() {
     document.documentElement.setAttribute('data-reduced-effects', isReducedEffects ? 'on' : 'off');
   }, [isReducedEffects]);
 
-  // Active webpage detection: on web pages, the viewport is pulled down below the 44px top header
+  // Active webpage detection: on web pages, the viewport is pulled down below the top bar
   // so window controls, tabs, and site navigation controls never collide.
   const isWebpage = Boolean(
     activeTab?.url &&
     activeTab.url !== 'serica://newtab' && activeTab.url !== 'neutrino://newtab' &&
-    activeTab.url !== 'about:blank' &&
-    !activeTab.isSleeping
+    activeTab.url !== 'about:blank'
   );
   const [isHtmlFullscreen, setIsHtmlFullscreen] = useState(false);
 
@@ -566,19 +517,21 @@ export function App() {
 
     const currentIdx = state.spaces.findIndex((s) => s.id === state.activeSpaceId);
     const nextIdx = state.spaces.findIndex((s) => s.id === spaceId);
-    const nextSpace = state.spaces.find((s) => s.id === spaceId);
-
     triggerThemeCrossFade();
 
-    const dirClass = nextIdx >= currentIdx ? 'space-transition-left' : 'space-transition-right';
-    playSpaceSwitch(nextSpace?.name ?? null, dirClass, selectSpace(spaceId));
+    const forward = nextIdx >= currentIdx;
+    void runSpaceTransition({
+      dir: forward ? 1 : -1,
+      doSwitch: () => selectSpace(spaceId),
+      onNothingToSlide: () => playSpaceSlide(forward ? 'space-transition-left' : 'space-transition-right'),
+    });
   };
 
   const handleCreateSpace = async (name: string, color?: string) => {
     const created = await createSpace(name, color);
     if (created) {
       triggerThemeCrossFade();
-      playSpaceSwitch(created.name, 'space-transition-left');
+      playSpaceSlide('space-transition-left');
     }
     return created;
   };
@@ -624,11 +577,8 @@ export function App() {
     const unsubIpcHistory = window.serica?.onOpenHistory?.(() => {
       setIsHistoryModalOpen(true);
     });
-    const unsubIpcSpaceSwitched = window.serica?.onSpaceSwitched?.((payload) => {
+    const unsubIpcSpaceSwitched = window.serica?.onSpaceSwitched?.(() => {
       triggerThemeCrossFade();
-      if (payload?.spaceName) {
-        playSpaceSwitch(payload.spaceName, '');
-      }
     });
     // neutrino://settings, neutrino://history, neutrino://vpn from useBrowser.navigate
     const handleOpenSettingsEvent = () => setIsSettingsOpen(true);
@@ -962,8 +912,20 @@ const topTabs = settings.tabLayout === 'top';
 const showTopTabs = topTabs && !isHtmlFullscreen;
 // Sidebar placement: docked (not auto-hide) pushes the web canvas right; hidden in HTML fullscreen.
 const showSidebar = !isHtmlFullscreen && !topTabs;
+// The top bar on web pages: 30px, and (by default) hidden until the pointer
+// reaches the top edge. The tab strip of top-tabs mode keeps it shown.
+const TOP_TAB_STRIP_HEIGHT = 38;
+const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide !== false;
+const overlayCount = useViewportOverlayCount();
+const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0);
 // Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
-const contentTop = isHtmlFullscreen ? 0 : showTopTabs ? 82 : 44;
+const contentTop = isHtmlFullscreen
+  ? 0
+  : showTopTabs
+    ? TOP_BAR_HEIGHT + TOP_TAB_STRIP_HEIGHT
+    : topBarAutoHideOn
+      ? TOP_BAR_REVEAL_STRIP
+      : TOP_BAR_HEIGHT;
 
 const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
   const saved = (settings as any).sidebarWidth;
@@ -978,7 +940,6 @@ useEffect(() => {
 }, [(settings as any).sidebarWidth]);
 
 // Native page views paint above HTML; freeze the page while any of these cover it.
-useViewportOverlay(spaceFreeze);
 useViewportOverlay(
   isCommandBarOpen ||
     isShieldModalOpen ||
@@ -993,18 +954,35 @@ useViewportOverlay(
     isWelcomeOpen,
 );
 
+// Browser tools, run from the top bar's menu (when pinned) or from Settings.
+const toolActions: ToolActions = {
+  history: () => setIsHistoryModalOpen(true),
+  downloads: () => setIsDownloadsOpen(true),
+  'open-file': () => void window.serica?.openFile?.().catch(() => {}),
+  ai: () => {
+    setMcpInitialTab('assistants');
+    setIsMcpModalOpen(true);
+  },
+  vpn: () => setIsVpnModalOpen(true),
+  theme: () => setIsThemeModalOpen(true),
+};
+
 const shellStyle = {
-    '--app-top-offset': isWebpage ? '44px' : '60px',
+  '--topbar-h': `${TOP_BAR_HEIGHT}px`,
   // Where the page starts on web pages: below the top bar, plus the tab strip in top-tabs mode.
-  '--app-content-top': showTopTabs ? '82px' : '44px',
+  '--app-content-top': `${contentTop}px`,
 } as React.CSSProperties;
 
 return (
   <div className={`arc-app-shell radical-minimalism-shell${showTopTabs ? ' top-tabs-mode' : ''}`} style={shellStyle}>
     <div className="space-grain-overlay" aria-hidden="true" />
-    {/* Frameless Top Drag Bar */}
-    {!isHtmlFullscreen && (
+    {/* Frameless Top Drag Bar (only where the top bar is on screen) */}
+    {!isHtmlFullscreen && topBar.shown && (
       <div className={`macos-window-drag-bar ${isWebpage ? 'on-webpage' : ''}`} />
+    )}
+    {/* Pointer at the top edge reveals the auto-hidden top bar. */}
+    {topBarAutoHideOn && !topBar.shown && (
+      <div className="topbar-reveal-strip" onPointerEnter={topBar.revealNow} aria-hidden="true" />
     )}
 
     {showTopTabs && (
@@ -1037,23 +1015,9 @@ return (
       />
     )}
 
-    {/* Space Name Animation Overlay */}
-    {/* Mounted once the page is covered, so the label animates in where it can be seen. */}
-    {spaceOverlay && viewportCovered && (
-      <div className="macos-space-name-overlay" aria-live="polite">
-        <div
-          className="macos-space-name-card"
-          key={spaceOverlay.key}
-          onAnimationEnd={(e) => e.target === e.currentTarget && endSpaceOverlay(spaceOverlay.key)}
-        >
-          <span className="macos-space-name-text">{spaceOverlay.name}</span>
-        </div>
-      </div>
-    )}
-
     {/* Top Chrome Header Bar (Solid dedicated header on web pages, floating on newtab) */}
     <div
-      className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}${toolsOpen ? ' tools-open' : ''}`}
+      className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}${toolsOpen ? ' tools-open' : ''} topbar-style-${settings.topBarStyle === 'pill' ? 'pill' : 'flat'}${topBarAutoHideOn ? ` topbar-autohide${topBar.shown ? ' topbar-shown' : ''}` : ''}`}
       style={isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : undefined}
       data-topbar-tint={isTopBarTinted && topBarTint ? topBarTint.source : 'default'}
     >
@@ -1069,12 +1033,7 @@ return (
           aria-label="Toggle sidebar"
           aria-pressed={sidebarOpen}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1.5" />
-            <rect x="14" y="3" width="7" height="7" rx="1.5" />
-            <rect x="3" y="14" width="7" height="7" rx="1.5" />
-            <rect x="14" y="14" width="7" height="7" rx="1.5" />
-          </svg>
+          <PanelLeft size={14} strokeWidth={2} aria-hidden="true" />
           <span
             className="macos-tabs-space-dot"
             style={{ backgroundColor: activeSpace?.color || '#E4E4E7' }}
@@ -1244,15 +1203,8 @@ return (
         <ToolsMenu
           isDarkMode={isDarkMode}
           vpnOn={vpnStatus?.state === 'connected'}
-          onHistory={() => setIsHistoryModalOpen(true)}
-          onDownloads={() => setIsDownloadsOpen(true)}
-          onOpenFile={() => void window.serica?.openFile?.().catch(() => {})}
-          onAssistants={() => {
-            setMcpInitialTab('assistants');
-            setIsMcpModalOpen(true);
-          }}
-          onVpn={() => setIsVpnModalOpen(true)}
-          onThemeStudio={() => setIsThemeModalOpen(true)}
+          pinned={normalizePinnedTools(settings.pinnedTools)}
+          actions={toolActions}
           onToggleDarkMode={toggleDarkMode}
           onSettings={openSettings}
           onOpenChange={setToolsOpen}
@@ -1321,6 +1273,7 @@ return (
 
     {/* A downloaded update is ready: offer to restart into it */}
     <UpdateNotice />
+    <AppContextMenu />
     <WhatsNew onboarded={!isWelcomeOpen} />
 
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
@@ -1370,7 +1323,6 @@ return (
           onNavigate={handleCommandBarNavigate}
           onSelectTab={selectTab}
           onCreateTab={(url) => void createTab(url, state.activeSpaceId)}
-          onZenOptimize={zenOptimize}
           onToggleShields={toggleShields}
           onSelectSpace={handleSelectSpace}
           onToggleTheme={toggleDarkMode}
@@ -1487,6 +1439,7 @@ return (
           userName={userProfile?.name ?? ''}
           onUserNameChange={handleUserNameChange}
           tabs={state.tabs}
+          toolActions={toolActions}
         />
       </Suspense>
     )}

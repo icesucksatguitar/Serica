@@ -67,6 +67,20 @@ pub struct BrowserSettings {
     /// Show PDFs with black pages and white text.
     #[serde(default = "yes")]
     pub pdf_dark_mode: bool,
+    /// Block cookies of sites other than the one in the address bar (sites
+    /// embedded in pages, trackers). Applies to pages after they reload.
+    #[serde(default)]
+    pub block_third_party_cookies: bool,
+    /// Delete cookies when Serica closes, except for `cookie_keep_sites`.
+    #[serde(default)]
+    pub clear_cookies_on_exit: bool,
+    /// Sites (and their subdomains) whose cookies are always kept.
+    #[serde(default)]
+    pub cookie_keep_sites: Vec<String>,
+    /// Page zoom per site (host without `www.`), as other browsers keep it.
+    /// Sites at the default zoom (the text size) have no entry.
+    #[serde(default)]
+    pub site_zoom: std::collections::BTreeMap<String, f64>,
     /// Local MCP endpoint for external agents (off by default).
     #[serde(default)]
     pub mcp_server_enabled: bool,
@@ -149,6 +163,10 @@ impl BrowserSettings {
             ("mcpServerEnabled", Value::is_boolean),
             ("autoPictureInPicture", Value::is_boolean),
             ("pdfDarkMode", Value::is_boolean),
+            ("siteZoom", Value::is_object),
+            ("blockThirdPartyCookies", Value::is_boolean),
+            ("clearCookiesOnExit", Value::is_boolean),
+            ("cookieKeepSites", Value::is_array),
             ("mcpServerPort", Value::is_u64),
         ];
         for (key, ok) in typed {
@@ -156,9 +174,11 @@ impl BrowserSettings {
                 obj.remove(*key);
             }
         }
-        if let Some(Value::Array(list)) = obj.get("shieldWhitelist") {
-            if list.iter().any(|v| !v.is_string()) {
-                obj.remove("shieldWhitelist");
+        for key in ["shieldWhitelist", "cookieKeepSites"] {
+            if let Some(Value::Array(list)) = obj.get(key) {
+                if list.iter().any(|v| !v.is_string()) {
+                    obj.remove(key);
+                }
             }
         }
         let mut s: BrowserSettings = serde_json::from_value(Value::Object(obj)).unwrap_or_else(|e| {
@@ -243,6 +263,21 @@ impl BrowserSettings {
             .unwrap_or(SEARCH_ENGINES[0].1)
     }
 
+    /// Zoom for a page: its site's saved zoom, else the default (text size).
+    pub fn zoom_for(&self, url: &str) -> f64 {
+        zoom_site(url).and_then(|h| self.site_zoom.get(&h).copied()).filter(|z| z.is_finite() && *z > 0.0).unwrap_or(self.text_scale)
+    }
+
+    /// Remembers `zoom` for `url`'s site. Returns whether anything changed.
+    pub fn remember_zoom(&mut self, url: &str, zoom: f64) -> bool {
+        let Some(site) = zoom_site(url) else { return false };
+        if (zoom - self.text_scale).abs() < 0.005 {
+            self.site_zoom.remove(&site).is_some()
+        } else {
+            self.site_zoom.insert(site, zoom).map(|old| (old - zoom).abs() >= 0.005).unwrap_or(true)
+        }
+    }
+
     /// Hours after which an unused Today tab is archived; `None` = never.
     pub fn archive_after_hours(&self) -> Option<i64> {
         self.archive_interval_hours.as_i64()
@@ -263,6 +298,19 @@ impl BrowserSettings {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn zoom_is_remembered_per_site() {
+        let mut s = BrowserSettings::default();
+        assert!(s.remember_zoom("https://www.youtube.com/watch?v=1", 1.25));
+        assert_eq!(s.zoom_for("https://youtube.com/feed"), 1.25);
+        assert_eq!(s.zoom_for("https://example.com/"), s.text_scale);
+        // Back to the default forgets the site; non-web pages are never kept.
+        assert!(s.remember_zoom("https://youtube.com/", s.text_scale));
+        assert!(s.site_zoom.is_empty());
+        assert!(!s.remember_zoom("file:///C:/a.pdf", 1.5));
+        assert_eq!(zoom_site("https://WWW.Example.com:8080/x").as_deref(), Some("example.com"));
+    }
 
     #[test]
     fn tab_sleep_minutes_defaults_and_validates() {
@@ -324,4 +372,15 @@ mod tests {
         assert_eq!(s.search_engine, "google");
         assert_eq!(s.archive_interval_hours, json!(12));
     }
+}
+
+/// The site a page's zoom is remembered for: its host without `www.`, for
+/// web pages only.
+pub fn zoom_site(url: &str) -> Option<String> {
+    let u = url::Url::parse(url).ok()?;
+    if !matches!(u.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = u.host_str()?.to_ascii_lowercase();
+    Some(host.strip_prefix("www.").unwrap_or(&host).to_string())
 }

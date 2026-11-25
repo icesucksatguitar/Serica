@@ -134,7 +134,7 @@ pub fn attach(app: &Shared, tab_id: &str, profile: &str, wv: &Webview, first_url
                 crate::extensions::native::sync(&app, &core);
             }
         }
-        if let Err(e) = install(app, tab_id, controller, env, first_url) {
+        if let Err(e) = install(app, tab_id, profile, controller, env, first_url) {
             tracing::error!("webview2 hook install failed: {e}");
         }
     });
@@ -143,6 +143,7 @@ pub fn attach(app: &Shared, tab_id: &str, profile: &str, wv: &Webview, first_url
 unsafe fn install(
     app: Shared,
     tab_id: String,
+    profile: String,
     controller: ICoreWebView2Controller,
     env: ICoreWebView2Environment,
     first_url: Option<String>,
@@ -156,6 +157,13 @@ unsafe fn install(
         let _ = settings.SetIsZoomControlEnabled(true);
         let _ = settings.SetIsStatusBarEnabled(true);
         let _ = settings.SetAreDefaultContextMenusEnabled(true);
+        // The engine's own password manager and form autofill, as in Edge:
+        // offers to save a password on sign-in and fills it in next time.
+        // Saved per profile, encrypted by Windows (DPAPI).
+        if let Ok(s4) = settings.cast::<ICoreWebView2Settings4>() {
+            let _ = s4.SetIsPasswordAutosaveEnabled(true);
+            let _ = s4.SetIsGeneralAutofillEnabled(true);
+        }
     }
 
     if let Err(e) = install_context_menu(&app, &tab_id, &core, &env) {
@@ -532,17 +540,38 @@ unsafe fn install(
 
     // Load the first page last, once every handler above is in place.
     if let Some(url) = first_url {
-        let (core2, ctx2) = (core.clone(), ctx.clone());
-        install_cosmetics(
-            &app,
-            &core,
-            &ctx,
-            &url.clone(),
-            Some(Box::new(move || {
-                ctx2.borrow_mut().booting = false;
-                let _ = core2.Navigate(&HSTRING::from(url));
-            })),
-        );
+        let (app2, core2, ctx2) = (app.clone(), core.clone(), ctx.clone());
+        let load = move || {
+            let (core3, ctx3) = (core2.clone(), ctx2.clone());
+            install_cosmetics(
+                &app2,
+                &core2,
+                &ctx2,
+                &url.clone(),
+                Some(Box::new(move || {
+                    ctx3.borrow_mut().booting = false;
+                    let _ = core3.Navigate(&HSTRING::from(url));
+                })),
+            );
+        };
+        // "Clear cookies when Serica closes": also done before the first page
+        // of a session loads, in case Serica could not do it while closing
+        // (closed with Alt+F4, shut down, crashed).
+        // Only before the profile's first page this session: turning the
+        // setting on later must not sign the user out of the session.
+        let first_of_session = app.claim_cookie_sweep(&profile);
+        let s = app.settings();
+        if s.clear_cookies_on_exit && first_of_session {
+            let keep = s.cookie_keep_sites.clone();
+            sweep(&core, move |domain| !cookie_in_sites(domain, &keep), move |n| {
+                if n > 0 {
+                    tracing::info!("cleared {n} cookies at start");
+                }
+                load();
+            });
+        } else {
+            load();
+        }
     }
     Ok(())
 }
@@ -1013,6 +1042,115 @@ pub fn try_suspend(wv: &Webview) {
             let _ = c3.TrySuspend(&TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(()))));
         }
     });
+}
+
+// ------------------------------------------------------------------ cookies
+//
+// Cookies belong to a WebView2 profile (one per Serica profile), so any page
+// webview of that profile reaches all of them. Calls run on the UI thread and
+// report through `done`.
+
+/// A cookie's site, as shown and matched: its domain without a leading dot
+/// or `www.`.
+pub fn cookie_site(domain: &str) -> String {
+    let d = domain.trim_start_matches('.').to_ascii_lowercase();
+    d.strip_prefix("www.").map(str::to_string).unwrap_or(d)
+}
+
+/// Whether a cookie for `domain` belongs to one of `sites` (a site keeps its
+/// subdomains: `google.com` keeps `accounts.google.com`).
+pub fn cookie_in_sites(domain: &str, sites: &[String]) -> bool {
+    let d = cookie_site(domain);
+    sites.iter().any(|s| {
+        let s = cookie_site(s);
+        !s.is_empty() && (d == s || d.ends_with(&format!(".{s}")))
+    })
+}
+
+/// Reads every cookie of the profile, then runs `f` with them.
+unsafe fn with_cookies(
+    core: &ICoreWebView2,
+    f: impl FnOnce(&ICoreWebView2CookieManager, Vec<(ICoreWebView2Cookie, String)>) + 'static,
+) -> windows::core::Result<()> {
+    let mgr = core.cast::<ICoreWebView2_2>()?.CookieManager()?;
+    let m2 = mgr.clone();
+    let handler = GetCookiesCompletedHandler::create(Box::new(move |_, list| {
+        let mut out = Vec::new();
+        if let Some(list) = list {
+            let mut n = 0u32;
+            list.Count(&mut n)?;
+            for i in 0..n {
+                if let Ok(c) = list.GetValueAtIndex(i) {
+                    let mut d = PWSTR::null();
+                    if c.Domain(&mut d).is_ok() {
+                        out.push((c, take(d)));
+                    }
+                }
+            }
+        }
+        f(&m2, out);
+        Ok(())
+    }));
+    // An empty URI lists every cookie of the profile.
+    mgr.GetCookies(&HSTRING::new(), &handler)
+}
+
+/// Sites with cookies in `wv`'s profile and how many each has, most first.
+pub fn cookie_sites(wv: &Webview, done: impl FnOnce(Vec<(String, usize)>) + Send + 'static) {
+    let _ = wv.with_webview(move |pw| unsafe {
+        let Ok(core) = pw.controller().CoreWebView2() else { return done(Vec::new()) };
+        let done = std::cell::Cell::new(Some(done));
+        let r = with_cookies(&core, {
+            let done = done.take();
+            move |_, cookies| {
+                let mut by_site: HashMap<String, usize> = HashMap::new();
+                for (_, domain) in &cookies {
+                    *by_site.entry(cookie_site(domain)).or_default() += 1;
+                }
+                let mut v: Vec<(String, usize)> = by_site.into_iter().collect();
+                v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                if let Some(done) = done {
+                    done(v);
+                }
+            }
+        });
+        if r.is_err() {
+            if let Some(done) = done.take() {
+                done(Vec::new());
+            }
+        }
+    });
+}
+
+/// Deletes the cookies of `wv`'s profile that `delete` picks (by domain);
+/// reports how many went.
+pub fn delete_cookies(wv: &Webview, delete: impl Fn(&str) -> bool + Send + 'static, done: impl FnOnce(usize) + Send + 'static) {
+    let _ = wv.with_webview(move |pw| unsafe {
+        let Ok(core) = pw.controller().CoreWebView2() else { return done(0) };
+        sweep(&core, delete, done);
+    });
+}
+
+/// Deletes the cookies `delete` picks, on the UI thread, then runs `done`.
+unsafe fn sweep(core: &ICoreWebView2, delete: impl Fn(&str) -> bool + 'static, done: impl FnOnce(usize) + 'static) {
+    let done = Rc::new(RefCell::new(Some(done)));
+    let d2 = done.clone();
+    let r = with_cookies(core, move |mgr, cookies| {
+        let mut n = 0;
+        for (c, domain) in &cookies {
+            if delete(domain) && mgr.DeleteCookie(c).is_ok() {
+                n += 1;
+            }
+        }
+        if let Some(done) = d2.borrow_mut().take() {
+            done(n);
+        }
+    });
+    if r.is_err() {
+        if let Some(done) = done.borrow_mut().take() {
+            done(0);
+        }
+    }
 }
 
 // ------------------------------------------------------------------ page dialogs

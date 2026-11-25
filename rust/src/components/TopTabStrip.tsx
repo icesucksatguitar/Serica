@@ -162,7 +162,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
         role="tab"
         aria-selected={active}
         tabIndex={0}
-        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}${item.tab?.isSleeping ? ' sleeping' : ''}`}
+        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}`}
         title={pinned ? item.title : undefined}
         onClick={() => onSelectTab(item.id)}
         onAuxClick={(e) => {

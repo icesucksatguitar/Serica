@@ -26,8 +26,9 @@ import {
 } from '../shared/settings';
 import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
-import { PasswordsSettings } from './PasswordsSettings';
 import { AboutSettings } from './AboutSettings';
+import { CookieSettings } from './CookieSettings';
+import { TOOLS, normalizePinnedTools, type ToolActions } from '../shared/tools';
 import { TEXT_SCALE_OPTIONS } from '../shared/settings';
 
 export type SettingsTabId =
@@ -55,6 +56,8 @@ export interface SettingsPanelProps {
   tabs?: TabState[];
   /** Optionally open with a specific tab selected. */
   initialTab?: SettingsTabId;
+  /** Runs a browser tool (the panel closes itself first). */
+  toolActions?: ToolActions;
 }
 
 export const tabSleepLabel = (minutes: TabSleepMinutes): string =>
@@ -64,7 +67,7 @@ const tabSleepLongLabel = (minutes: TabSleepMinutes): string =>
   minutes < 60 ? `${minutes} minutes` : minutes === 60 ? '1 hour' : `${minutes / 60} hours`;
 
 export const zenSleepHint = (minutes: TabSleepMinutes): string =>
-  `Sleeps background tabs unused for ${tabSleepLongLabel(minutes)} to free memory. Pinned tabs and tabs playing audio stay awake`;
+  `Frees memory from background tabs unused for ${tabSleepLongLabel(minutes)}. They reload when you go back to them. Pinned tabs and tabs playing audio are kept`;
 
 const ENGINE_IDS = Object.keys(SEARCH_ENGINES) as SearchEngineId[];
 
@@ -88,7 +91,7 @@ interface SwitchProps {
   onChange: (next: boolean) => void;
 }
 
-const SettingsSwitch: React.FC<SwitchProps> = ({ checked, label, onChange }) => (
+export const SettingsSwitch: React.FC<SwitchProps> = ({ checked, label, onChange }) => (
   <button
     type="button"
     role="switch"
@@ -136,7 +139,7 @@ export const SETTINGS_TABS: readonly SettingsTabMeta[] = [
     label: 'Performance',
     icon: Zap,
     title: 'Performance & Storage',
-    description: 'Optimize memory usage, background tab sleeping, and automatic tab archiving',
+    description: 'Optimize memory usage, memory saver, and automatic tab archiving',
   },
   {
     id: 'profiles',
@@ -149,8 +152,8 @@ export const SETTINGS_TABS: readonly SettingsTabMeta[] = [
     id: 'passwords',
     label: 'Passwords',
     icon: KeyRound,
-    title: 'Passwords Vault',
-    description: 'Securely manage stored credentials, search logins, and import or export data',
+    title: 'Passwords',
+    description: 'Saving and filling in passwords on websites',
   },
   {
     id: 'about',
@@ -173,6 +176,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUserNameChange,
   tabs,
   initialTab = 'appearance',
+  toolActions,
 }) => {
   const idBase = useId();
   const titleId = `${idBase}-title`;
@@ -397,6 +401,52 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="settings-row">
                     <div className="settings-row-text">
+                      <span className="settings-row-label">Top bar style</span>
+                      <span className="settings-hint">Flat, quiet buttons, or rounded outlined pills</span>
+                    </div>
+                    <div className="settings-segmented" role="radiogroup" aria-label="Top bar style">
+                      {([
+                        ['flat', 'Flat'],
+                        ['pill', 'Pills'],
+                      ] as const).map(([value, label]) => {
+                        const active = (settings.topBarStyle ?? 'flat') === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            aria-label={label}
+                            className={`settings-segment${active ? ' active' : ''}`}
+                            onClick={() => {
+                              if (!active) onUpdateSettings({ topBarStyle: value });
+                            }}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="settings-divider" />
+
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">Auto-hide top bar</span>
+                      <span className="settings-hint">On websites, show the top bar only when the pointer reaches the top edge</span>
+                    </div>
+                    <SettingsSwitch
+                      checked={settings.topBarAutoHide !== false}
+                      label="Auto-hide top bar"
+                      onChange={(next) => onUpdateSettings({ topBarAutoHide: next })}
+                    />
+                  </div>
+
+                  <div className="settings-divider" />
+
+                  <div className="settings-row">
+                    <div className="settings-row-text">
                       <span className="settings-row-label">Text size</span>
                       <span className="settings-hint">Scales the browser interface and new web pages</span>
                     </div>
@@ -481,6 +531,51 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </div>
+
+                <h3 className="settings-section-title">Top bar tools</h3>
+                <div className="settings-card">
+                  <p className="settings-hint top-bar-tools-intro">
+                    Open any tool from here. Pinned tools also show in the top bar's ⋯ menu, next to the light/dark
+                    switch and Settings.
+                  </p>
+                  {TOOLS.map((tool) => {
+                    const pinned = normalizePinnedTools(settings.pinnedTools);
+                    const isPinned = pinned.includes(tool.key);
+                    const Icon = tool.icon;
+                    return (
+                      <div className="settings-row top-bar-tool-row" key={tool.key}>
+                        <span className="top-bar-tool-icon" aria-hidden="true">
+                          <Icon size={15} />
+                        </span>
+                        <div className="settings-row-text">
+                          <span className="settings-row-label">{tool.name}</span>
+                          <span className="settings-hint">{tool.hint}</span>
+                        </div>
+                        {toolActions && (
+                          <button
+                            type="button"
+                            className="settings-button"
+                            onClick={() => {
+                              onClose();
+                              toolActions[tool.key]();
+                            }}
+                          >
+                            Open
+                          </button>
+                        )}
+                        <SettingsSwitch
+                          checked={isPinned}
+                          label={`Pin ${tool.name} to the top bar`}
+                          onChange={(next) =>
+                            onUpdateSettings({
+                              pinnedTools: next ? [...pinned, tool.key] : pinned.filter((k) => k !== tool.key),
+                            })
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </section>
             </div>
 
@@ -508,6 +603,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </div>
+
+                <CookieSettings settings={settings} onUpdateSettings={onUpdateSettings} />
 
                 <div className="settings-card">
                   <div className="settings-row">
@@ -599,12 +696,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <div className="settings-card">
                   <div className="settings-row">
                     <div className="settings-row-text">
-                      <span className="settings-row-label">Zen auto-sleep</span>
+                      <span className="settings-row-label">Memory saver</span>
                       <span className="settings-hint">{zenSleepHint(settings.tabSleepMinutes)}</span>
                     </div>
                     <SettingsSwitch
                       checked={settings.zenSleepEnabled}
-                      label="Zen auto-sleep"
+                      label="Memory saver"
                       onChange={(next) => onUpdateSettings({ zenSleepEnabled: next })}
                     />
                   </div>
@@ -612,12 +709,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   {settings.zenSleepEnabled && (
                     <>
                       <div className="settings-row-text" style={{ marginTop: 4 }}>
-                        <span className="settings-row-label">Sleep tabs after</span>
+                        <span className="settings-row-label">Free memory from tabs after</span>
                       </div>
                       <div
                         className="settings-segmented settings-segmented-full"
                         role="radiogroup"
-                        aria-label="Sleep tabs after"
+                        aria-label="Free memory from tabs after"
                         style={{ marginTop: 8 }}
                       >
                         {TAB_SLEEP_OPTIONS.map((value) => {
@@ -629,7 +726,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                               type="button"
                               role="radio"
                               aria-checked={selected}
-                              aria-label={`Sleep tabs after ${label}`}
+                              aria-label={`Free memory from tabs after ${label}`}
                               className={`settings-segment${selected ? ' active' : ''}`}
                               onClick={() => {
                                 if (!selected) onUpdateSettings({ tabSleepMinutes: value });
@@ -730,7 +827,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               hidden={activeTab !== 'passwords'}
               className="settings-tabpanel"
             >
-              <PasswordsSettings />
+              <section className="settings-section" aria-label="Passwords">
+                <h3 className="settings-section-title">Passwords</h3>
+                <div className="settings-info-card">
+                  <div className="settings-info-header">
+                    <KeyRound size={14} className="settings-info-icon" aria-hidden="true" />
+                    <span className="settings-info-title">Saved and filled in automatically</span>
+                  </div>
+                  <p className="settings-info-text">
+                    When you sign in to a website, Serica offers to save the password. The next time you visit, it fills
+                    in your username and password. Addresses and other form entries are filled in the same way. Passwords
+                    are stored encrypted on this device, separately for each profile.
+                  </p>
+                </div>
+              </section>
             </div>
 
             {/* 7. About Tab */}

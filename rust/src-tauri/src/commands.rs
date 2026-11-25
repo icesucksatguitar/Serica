@@ -494,11 +494,17 @@ pub async fn set_zoom_factor(factor: f64, tab_id: Option<String>, app: State<'_,
     let app = app.inner().clone();
     let id = tab_id.or_else(|| app.store.lock().active_tab_id.clone());
     if let Some(id) = id {
-        app.mutate(|s| {
-            if let Some(t) = s.tab_mut(&id) {
+        let remembered = app.mutate(|s| {
+            let url = s.tab_mut(&id).map(|t| {
                 t.zoom_factor = Some(factor);
-            }
+                t.url.clone()
+            });
+            // Zoom is per site, as in other browsers.
+            url.is_some_and(|u| s.settings.remember_zoom(&u, factor))
         });
+        if remembered {
+            app.notify(Notice::Settings);
+        }
         if let Some(wv) = TabHost::webview(&app, &id) {
             #[cfg(windows)]
             crate::webview_win::set_zoom(&wv, factor);
@@ -879,11 +885,104 @@ pub async fn window_control(action: String, window: Window, app: State<'_, Share
         }
         "close" => {
             app.save_now();
+            #[cfg(windows)]
+            clear_cookies_for_exit(app.inner()).await;
             let _ = window.close();
         }
         _ => return Err("unknown action".into()),
     }
     Ok(())
+}
+
+// ------------------------------------------------------------------ cookies
+
+/// The active space's profile and one of its page webviews.
+#[cfg(windows)]
+fn active_profile_webview(app: &Shared) -> Option<tauri::Webview> {
+    let profile = {
+        let s = app.store.lock();
+        s.space_profile(&s.active_space_id)
+    };
+    TabHost::profile_webview(app, &profile)
+}
+
+/// Sites with cookies in the current profile.
+#[tauri::command]
+pub async fn cookie_sites(app: State<'_, Shared>) -> R<Value> {
+    #[cfg(windows)]
+    {
+        let Some(wv) = active_profile_webview(app.inner()) else {
+            return Ok(err("no-page"));
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        crate::webview_win::cookie_sites(&wv, move |v| {
+            let _ = tx.send(v);
+        });
+        let sites = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await.ok().and_then(Result::ok).unwrap_or_default();
+        let list: Vec<Value> = sites.into_iter().map(|(site, count)| json!({ "site": site, "count": count })).collect();
+        Ok(json!({ "ok": true, "sites": list }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Ok(err("unavailable"))
+    }
+}
+
+/// Deletes the current profile's cookies for `site` (and its subdomains), or
+/// all of them without a site.
+#[tauri::command]
+pub async fn delete_cookies(site: Option<String>, app: State<'_, Shared>) -> R<Value> {
+    #[cfg(windows)]
+    {
+        let Some(wv) = active_profile_webview(app.inner()) else {
+            return Ok(err("no-page"));
+        };
+        let sites: Option<Vec<String>> = site.map(|s| vec![s]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        crate::webview_win::delete_cookies(
+            &wv,
+            move |domain| sites.as_ref().map(|s| crate::webview_win::cookie_in_sites(domain, s)).unwrap_or(true),
+            move |n| {
+                let _ = tx.send(n);
+            },
+        );
+        let n = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await.ok().and_then(Result::ok).unwrap_or(0);
+        Ok(json!({ "ok": true, "deleted": n }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (site, app);
+        Ok(err("unavailable"))
+    }
+}
+
+/// "Clear cookies when Serica closes": deletes every open profile's cookies
+/// except the kept sites. Bounded, so closing never hangs on it; whatever is
+/// missed is cleared before the next session's first page loads.
+#[cfg(windows)]
+async fn clear_cookies_for_exit(app: &Shared) {
+    let s = app.settings();
+    if !s.clear_cookies_on_exit {
+        return;
+    }
+    let mut waits = Vec::new();
+    for (_, wv) in TabHost::profile_webviews(app) {
+        let keep = s.cookie_keep_sites.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        crate::webview_win::delete_cookies(&wv, move |d| !crate::webview_win::cookie_in_sites(d, &keep), move |n| {
+            let _ = tx.send(n);
+        });
+        waits.push(rx);
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), futures_join(waits)).await;
+}
+
+#[cfg(windows)]
+async fn futures_join(waits: Vec<tokio::sync::oneshot::Receiver<usize>>) {
+    for w in waits {
+        let _ = w.await;
+    }
 }
 
 // ------------------------------------------------------------------ history
@@ -1206,6 +1305,38 @@ pub async fn clear_downloads(app: State<'_, Shared>) -> R<Vec<crate::downloads::
 pub async fn open_file(app: State<'_, Shared>) -> R<()> {
     crate::files::pick_and_open(&app);
     Ok(())
+}
+
+/// Text on the system clipboard, for Paste in the app's own context menu
+/// (the UI page may not read the clipboard itself).
+#[tauri::command]
+pub fn read_clipboard_text() -> Option<String> {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+        use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+        use windows::Win32::System::Ole::CF_UNICODETEXT;
+        OpenClipboard(None).ok()?;
+        let text = GetClipboardData(CF_UNICODETEXT.0 as u32).ok().and_then(|h| {
+            let g = HGLOBAL(h.0);
+            let p = GlobalLock(g) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let mut n = 0;
+            while *p.add(n) != 0 {
+                n += 1;
+            }
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));
+            let _ = GlobalUnlock(g);
+            Some(s)
+        });
+        let _ = CloseClipboard();
+        text
+    }
+    #[cfg(not(windows))]
+    None
 }
 
 #[tauri::command]

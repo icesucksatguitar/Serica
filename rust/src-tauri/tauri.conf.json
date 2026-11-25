@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Serica",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "identifier": "com.serica.browser",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -48,7 +48,9 @@
     "createUpdaterArtifacts": true,
     "fileAssociations": [
       {
-        "ext": ["pdf"],
+        "ext": [
+          "pdf"
+        ],
         "name": "Serica.PDF",
         "description": "PDF document",
         "role": "Viewer",

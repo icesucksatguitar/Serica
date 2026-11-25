@@ -21,11 +21,8 @@
   gap: 6px;
   box-sizing: border-box;
   color: var(--nsb-fg);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 6%, transparent), transparent 220px),
-    var(--bg-sidebar-translucent, rgba(10, 10, 14, 0.48));
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  /* Solid: no space-colored fade or see-through blur. */
+  background: var(--theme-bg-canvas, #0c0d10);
   border-right: 1px solid var(--nsb-border);
   font-size: 13px;
   user-select: none;
@@ -34,11 +31,7 @@
 }
 
 [data-theme="light"] .nsb {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 6%, transparent), transparent 220px),
-    var(--bg-sidebar-translucent, rgba(250, 247, 242, 0.62));
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  background: var(--theme-bg-canvas, #f7f4ef);
   border-right: 1px solid rgba(0, 0, 0, 0.08);
 }
 
@@ -86,9 +79,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   bottom: 0;
   left: 0;
   padding-top: 12px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 9%, transparent), transparent 260px),
-    var(--theme-bg-canvas, #0c0d10);
+  background: var(--theme-bg-canvas, #0c0d10);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border-right: 1px solid var(--nsb-border);
@@ -101,9 +92,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 }
 
 [data-theme="light"] .nsb.autohide {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nsb-space-color) 7%, transparent), transparent 260px),
-    var(--theme-bg-canvas, #f7f4ef);
+  background: var(--theme-bg-canvas, #f7f4ef);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   box-shadow: 18px 0 48px rgba(40, 30, 20, 0.16);
@@ -169,9 +158,8 @@ html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluste
   transform: translateX(var(--sidebar-cover, 0px));
 }
 
-html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
-  transform: translateX(calc(var(--sidebar-cover, 0px) / 2));
-}
+/* The address pill stays centered on the window: moving it with the
+   sidebar was distracting. */
 
 @media (max-width: 1240px) {
   html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
@@ -327,7 +315,6 @@ html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  scrollbar-width: thin;
 }
 .nsb-pane.inert {
   pointer-events: none;
@@ -428,8 +415,8 @@ html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
   background: var(--nsb-space-color);
 }
 
-.nsb-tab.sleeping .nsb-tab-favicon,
-.nsb-tab.sleeping .nsb-tab-title {
+.nsb-tab.unloaded .nsb-tab-favicon,
+.nsb-tab.unloaded .nsb-tab-title {
   opacity: 0.55;
 }
 
@@ -870,6 +857,12 @@ html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
   flex: 0 0 auto !important;
   color: var(--theme-fg-faint, #8fa39b);
   font-size: 11px;
+}
+
+.app-context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--theme-border, rgba(255, 255, 255, 0.1));
 }
 
 .nsb-menu-back {

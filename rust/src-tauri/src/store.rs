@@ -476,7 +476,8 @@ impl Store {
     pub fn create_tab(&mut self, url: Option<String>, space_id: Option<String>, activate: bool, after: Option<&str>) -> TabState {
         let space_id = space_id.filter(|s| self.space(s).is_some()).unwrap_or_else(|| self.active_space_id.clone());
         let mut tab = TabState::new(&space_id, url);
-        tab.zoom_factor = Some(self.settings.text_scale);
+        // The site's remembered zoom, else the default (text size).
+        tab.zoom_factor = Some(self.settings.zoom_for(&tab.url));
         let index = after.and_then(|a| {
             let list = self.list(&space_id, Section::Today);
             list.iter().position(|&i| self.tabs[i].id == a).map(|p| p as i64 + 1)

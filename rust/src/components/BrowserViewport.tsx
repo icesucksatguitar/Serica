@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Space, TabState, ActiveMediaState, SiteAction } from '../types';
 import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
-import { Moon, Sparkles, Globe } from 'lucide-react';
 import type { PageColorReport } from '../utils/topBarTint';
-import { setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { acquireViewportOverlay, setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { SPACE_SLIDE_MS, setSpaceTransitionRunner, type SpaceDirection } from '../utils/spaceTransition';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -58,18 +58,12 @@ function isWebUrl(url: string | undefined): url is string {
   return !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
 }
 
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
-
 /**
  * The web page area. Pages are native WebView2 views owned by the Rust tab
  * host; this component reports where they go, renders the app's own pages
- * (new tab, sleeping tab) and shows a snapshot while UI overlays cover it.
+ * (new tab) and shows a snapshot while UI overlays cover it. A tab whose
+ * memory was freed (sleeping, or a closed pinned tab) wakes as soon as it is
+ * shown, with its last capture in place until the page is back.
  */
 export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   activeTab,
@@ -97,6 +91,11 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [findQuery, setFindQuery] = useState('');
   const [findState, setFindState] = useState({ activeMatch: 0, totalMatches: 0 });
   const [frozenImage, setFrozenImage] = useState<string | null>(null);
+  const frozenImageRef = useRef<string | null>(null);
+  frozenImageRef.current = frozenImage;
+  // Space switch slide: the page left behind and the one arriving (captures).
+  const [spaceSlide, setSpaceSlide] = useState<{ out: string | null; in: string | null; dir: SpaceDirection; key: number } | null>(null);
+  const slideSeq = useRef(0);
   // The page's snapshot beneath it while UI slides over it (see setPageUnderlay).
   const underlayImage = usePageUnderlay();
 
@@ -261,6 +260,49 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     if (!freezeApplied.current) setViewportCovered(!isWebPage);
   }, [isWebPage]);
 
+  // ---- Space switch: slide the page out and the new space's page in.
+  useEffect(() => {
+    const waitUntil = async (ok: () => boolean, ms: number) => {
+      const end = performance.now() + ms;
+      while (!ok() && performance.now() < end) await sleep(16);
+      return ok();
+    };
+    setSpaceTransitionRunner(async ({ dir, doSwitch, onNothingToSlide }) => {
+      const key = ++slideSeq.current;
+      const fromTabId = activeTabRef.current?.id;
+      // Freeze first: the backend shows the new space's page the moment it
+      // switches, and it must not pop in ahead of the slide.
+      const release = acquireViewportOverlay();
+      try {
+        const fromWeb = isWebPageRef.current;
+        await waitUntil(() => freezeApplied.current === true && (!fromWeb || !!frozenImageRef.current), 700);
+        const out = fromWeb ? frozenImageRef.current : null;
+        await doSwitch();
+        // The new active tab arrives with the state update.
+        await waitUntil(() => activeTabRef.current?.id !== fromTabId, 400);
+        const tab = activeTabRef.current;
+        const incoming =
+          tab && isWebUrl(tab.url) ? ((await window.serica?.getTabPreview?.(tab.id).catch(() => null)) ?? null) : null;
+        if (slideSeq.current !== key) return;
+        if (!out && !incoming) {
+          onNothingToSlide();
+          return;
+        }
+        await Promise.all([out, incoming].map((img) => (img ? decodeImage(img) : Promise.resolve())));
+        if (slideSeq.current !== key) return;
+        setSpaceSlide({ out, in: incoming, dir, key });
+        await sleep(SPACE_SLIDE_MS + 20);
+      } finally {
+        release();
+        // The live page is back on screen before the slide layer goes.
+        await nextPaint();
+        await sleep(40);
+        setSpaceSlide((cur) => (cur && cur.key === key ? null : cur));
+      }
+    });
+    return () => setSpaceTransitionRunner(null);
+  }, []);
+
   // A tab being shown (or woken from sleep: its webview takes a moment to
   // build and paint) draws its last capture in its place meanwhile, instead
   // of an empty area. The live page covers it as soon as it is up; it is
@@ -268,10 +310,12 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [wakeImage, setWakeImage] = useState<{ tabId: string; img: string } | null>(null);
   const activeTabLoading = Boolean(activeTab?.isLoading);
   const wakeSawLoad = useRef(false);
+  const isWebTab = Boolean(activeTab && isWebUrl(activeTab.url));
+  const isAsleep = Boolean(activeTab?.isSleeping || activeTab?.unloaded);
   useEffect(() => {
     const id = activeTab?.id;
     wakeSawLoad.current = false;
-    if (!id || !isWebPage) {
+    if (!id || !isWebTab) {
       setWakeImage(null);
       return;
     }
@@ -282,7 +326,11 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeTab?.id, isWebPage]);
+  }, [activeTab?.id, isWebTab]);
+  // Memory freed in the background is never shown: wake the tab right away.
+  useEffect(() => {
+    if (activeTab && isWebTab && isAsleep) void window.serica?.selectTab(activeTab.id);
+  }, [activeTab?.id, isWebTab, isAsleep]);
   useEffect(() => {
     if (!wakeImage) return;
     if (activeTabLoading) {
@@ -466,8 +514,6 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   }
 
   const isNewTab = !isWebUrl(activeTab.url);
-  const showSleeping = activeTab.isSleeping && !isNewTab;
-  const showUnloaded = Boolean(activeTab.unloaded) && !isNewTab && !activeTab.isSleeping;
 
   return (
     <div className="webview-host">
@@ -497,7 +543,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
-        {isWebPage && (frozenImage || underlayImage || placeholder) && (
+        {(isWebPage || (isAsleep && !isNewTab)) && (frozenImage || underlayImage || placeholder) && (
           <img
             className="native-page-snapshot"
             src={(frozenImage || underlayImage || placeholder)!}
@@ -506,59 +552,20 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}
           />
         )}
+        {spaceSlide && (
+          <div
+            key={spaceSlide.key}
+            className={`space-slide-stage ${spaceSlide.dir > 0 ? 'to-next' : 'to-prev'}${spaceSlide.in ? ' opaque' : ''}`}
+            aria-hidden="true"
+          >
+            {spaceSlide.out && <img className="space-slide-out" src={spaceSlide.out} alt="" draggable={false} />}
+            {spaceSlide.in && <img className="space-slide-in" src={spaceSlide.in} alt="" draggable={false} />}
+          </div>
+        )}
       </div>
 
-      {isNewTab && !activeTab.isSleeping && (
+      {isNewTab && (
         <Homescreen isDarkMode={isDarkMode} onNavigate={onNavigate} onOpenCommandBar={onOpenCommandBar} userName={userName} />
-      )}
-
-      {(showSleeping || showUnloaded) && (
-        <div
-          className="zen-sleeping-screen"
-          onClick={() => window.serica?.selectTab(activeTab.id)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') window.serica?.selectTab(activeTab.id);
-          }}
-          title="Click anywhere to wake tab"
-        >
-          <div className="zen-sleeping-ambient-glow" />
-          <div className="zen-sleeping-card" onClick={(e) => e.stopPropagation()}>
-            <div className="zen-sleeping-icon-ring">
-              <Moon className="zen-sleeping-moon" size={26} strokeWidth={1.75} />
-              <span className="zen-sleeping-orbit" />
-            </div>
-            <div className="zen-sleeping-badge">
-              <span className="zen-sleeping-dot" />
-              <span>{showUnloaded ? 'Pinned tab' : 'Zen Memory Saver'}</span>
-            </div>
-            <h2 className="zen-sleeping-title">
-              {activeTab.title && !/^(serica|neutrino):\/\//.test(activeTab.title) ? activeTab.title : 'Tab is Sleeping'}
-            </h2>
-            <div className="zen-sleeping-url-pill">
-              <Globe size={12} className="zen-sleeping-globe" />
-              <span className="zen-sleeping-url-text">{hostnameOf(activeTab.url)}</span>
-            </div>
-            <p className="zen-sleeping-desc">
-              {showUnloaded
-                ? 'This pinned tab is closed. Open it again to load the page.'
-                : 'This tab was put to sleep to free memory. Waking it reloads the page.'}
-            </p>
-            <button
-              type="button"
-              className="zen-sleeping-wake-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                window.serica?.selectTab(activeTab.id);
-              }}
-            >
-              <Sparkles size={15} />
-              <span>{showUnloaded ? 'Open Tab' : 'Wake Tab'}</span>
-            </button>
-            <div className="zen-sleeping-hint">Click anywhere to resume</div>
-          </div>
-        </div>
       )}
     </div>
   );

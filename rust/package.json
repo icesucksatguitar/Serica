@@ -1,6 +1,6 @@
 {
   "name": "serica-rust",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Serica Browser - Rust + Tauri v2 implementation",
   "type": "module",
   "scripts": {

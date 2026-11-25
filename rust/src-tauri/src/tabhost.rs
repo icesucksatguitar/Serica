@@ -38,10 +38,18 @@ pub struct TabView {
     pub hidden_at: Option<std::time::Instant>,
 }
 
-/// Hidden tabs drop to WebView2's low-memory level after this long, and are
-/// frozen after `SUSPEND_AFTER`, unless they play media.
-const TRIM_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
-const SUSPEND_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// Hidden tabs drop to WebView2's low-memory level after `TRIM_AFTER`, and
+/// are frozen after `SUSPEND_AFTER`, unless they play media. With memory to
+/// spare they stay fully live much longer, so switching back is instant
+/// (a trimmed tab repaints from scratch, a frozen one wakes its scripts);
+/// memory grows linearly with the tabs used recently, and Memory saver
+/// still frees tabs unused for longer.
+const TRIM_AFTER: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const SUSPEND_AFTER: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+/// The same steps while system memory runs low (`LOW_MEMORY_LOAD`% in use).
+const TRIM_AFTER_LOW: std::time::Duration = std::time::Duration::from_secs(30);
+const SUSPEND_AFTER_LOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const LOW_MEMORY_LOAD: u32 = 75;
 
 /// Puts the largest playing video into native picture-in-picture.
 pub const PIP_ENTER_JS: &str = r#"(() => {
@@ -124,6 +132,9 @@ pub struct TabHost {
     /// Network setup the current page webviews were created with:
     /// (routed through the local tunnel proxy, WebRTC guard script).
     net: (bool, bool),
+    /// Third-party cookies blocked in the current page webviews (a browser
+    /// argument, fixed per WebView2 environment).
+    block_3pc: bool,
     /// Failed creations in a row (a profile's browser process may still be
     /// shutting down after a network change); creation is retried a few times.
     create_failures: u32,
@@ -275,7 +286,7 @@ fn sanitize(s: &str) -> String {
 }
 
 impl TabHost {
-    pub fn new(data_root: PathBuf, proxy_port: Option<u16>, net: (bool, bool)) -> Self {
+    pub fn new(data_root: PathBuf, proxy_port: Option<u16>, net: (bool, bool), block_3pc: bool) -> Self {
         Self {
             views: HashMap::new(),
             holes: HashMap::new(),
@@ -288,6 +299,7 @@ impl TabHost {
             data_root,
             proxy_port,
             net,
+            block_3pc,
             create_failures: 0,
             creating: std::collections::HashSet::new(),
         }
@@ -302,8 +314,14 @@ impl TabHost {
         let mut args = String::from(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,InterestFeedContentSuggestions,SpareRendererForSitePerProcess --no-pings",
         );
+        // Thin overlay scrollbars on pages (shown while scrolling), as in Edge
+        // and Chrome on Windows 11, instead of the classic always-on track.
+        args.push_str(" --enable-features=OverlayScrollbar,msOverlayScrollbarWinStyle:scrollbar_mode/full_mode,msOverlayScrollbarWinStyleAnimation");
         // Pages connect directly unless the VPN needs the tunnel: a proxy turns
         // off HTTP/3 and Chromium's own DNS and connection racing.
+        if self.block_3pc {
+            args.push_str(" --test-third-party-cookie-phaseout");
+        }
         if let (true, Some(p)) = (self.net.0, self.proxy_port) {
             args.push_str(&format!(" --proxy-server=http://127.0.0.1:{p}"));
         }
@@ -423,7 +441,12 @@ impl TabHost {
                         live: t.wants_webview(),
                         profile: s.space_profile(&t.space_id),
                         media: t.has_active_media,
-                        zoom: t.zoom_factor.filter(|z| z.is_finite() && *z > 0.0).unwrap_or(s.settings.text_scale),
+                        // Zoom is per site; other pages keep the tab's own.
+                        zoom: if crate::settings::zoom_site(&t.url).is_some() {
+                            s.settings.zoom_for(&t.url)
+                        } else {
+                            t.zoom_factor.filter(|z| z.is_finite() && *z > 0.0).unwrap_or(s.settings.text_scale)
+                        },
                     };
                     (t.id.clone(), want)
                 })
@@ -459,6 +482,11 @@ impl TabHost {
         let bounds = host.bounds;
         let mut previews_to_capture = Vec::new();
         let mut to_suspend = Vec::new();
+        // A page that comes on screen takes keyboard focus, as in other
+        // browsers. Without this, closing the focused tab left focus nowhere
+        // and shortcuts typed right after (Ctrl+T) were lost.
+        let mut focus_page: Option<Webview> = None;
+        let active_shown_before = active.as_ref().and_then(|id| host.views.get(id)).is_some_and(|v| v.shown);
         for (id, v) in host.views.iter_mut() {
             let should_show = visible && Some(id) == active.as_ref();
             if should_show {
@@ -466,6 +494,12 @@ impl TabHost {
                     Self::apply_bounds(&v.webview, b);
                 }
                 if !v.shown {
+                    // Not when the page only comes back from under UI that
+                    // covered it (menus, previews): moving focus then blurs the
+                    // UI, which closes the auto-hide sidebar.
+                    if previous.as_ref() != Some(id) || v.hidden_at.is_none() {
+                        focus_page = Some(v.webview.clone());
+                    }
                     #[cfg(windows)]
                     crate::webview_win::set_clip(&v.webview, clip.clone());
                     #[cfg(windows)]
@@ -493,7 +527,17 @@ impl TabHost {
                 to_suspend.push(id.clone());
             }
         }
+        // Switched to a tab without a page on screen (new tab page, or a page
+        // still being built): the UI takes focus so its shortcuts work.
+        let focus_ui = visible && focus_page.is_none() && !active_shown_before && previous != active;
         drop(host);
+        if let Some(wv) = focus_page {
+            let _ = wv.set_focus();
+        } else if focus_ui {
+            if let Some(main) = app.handle.get_webview("main") {
+                let _ = main.set_focus();
+            }
+        }
         #[cfg(windows)]
         for id in to_suspend {
             Self::schedule_suspend(app, id);
@@ -595,12 +639,14 @@ impl TabHost {
                     .filter(|v| !v.shown && v.hidden_at.is_some_and(|t| t.elapsed() >= after))
                     .map(|v| v.webview.clone())
             };
+            let low = crate::app::memory_load_percent().is_some_and(|l| l >= LOW_MEMORY_LOAD);
+            let (trim_after, suspend_after) = if low { (TRIM_AFTER_LOW, SUSPEND_AFTER_LOW) } else { (TRIM_AFTER, SUSPEND_AFTER) };
             let slack = std::time::Duration::from_millis(500);
-            tokio::time::sleep(TRIM_AFTER + slack).await;
-            let Some(wv) = still_hidden(TRIM_AFTER) else { return };
+            tokio::time::sleep(trim_after + slack).await;
+            let Some(wv) = still_hidden(trim_after) else { return };
             crate::webview_win::set_background(&wv, true);
-            tokio::time::sleep(SUSPEND_AFTER - TRIM_AFTER).await;
-            if let Some(wv) = still_hidden(SUSPEND_AFTER) {
+            tokio::time::sleep(suspend_after - trim_after).await;
+            if let Some(wv) = still_hidden(suspend_after) {
                 crate::webview_win::try_suspend(&wv);
             }
         });
@@ -726,6 +772,39 @@ impl TabHost {
                 finish(&app);
             }
         });
+    }
+
+    /// Recreates page webviews when third-party cookie blocking is switched:
+    /// it is a browser argument, fixed per WebView2 environment, so open pages
+    /// reload once.
+    pub fn sync_cookie_policy(app: &Shared, block: bool) {
+        {
+            let mut host = app.host.lock();
+            if host.block_3pc == block {
+                return;
+            }
+            host.block_3pc = block;
+            host.create_failures = 0;
+            for (_, v) in host.views.drain() {
+                let _ = v.webview.close();
+            }
+            if let Some((wv, _)) = host.assistant.take() {
+                let _ = wv.close();
+            }
+        }
+        Self::reconcile(app);
+    }
+
+    /// A page webview of `profile`, if one is open (cookies are per profile).
+    pub fn profile_webview(app: &Shared, profile: &str) -> Option<Webview> {
+        app.host.lock().views.values().find(|v| v.profile == profile).map(|v| v.webview.clone())
+    }
+
+    /// Every profile with an open page webview, with one of its webviews.
+    pub fn profile_webviews(app: &Shared) -> Vec<(String, Webview)> {
+        let host = app.host.lock();
+        let mut seen = std::collections::HashSet::new();
+        host.views.values().filter(|v| seen.insert(v.profile.clone())).map(|v| (v.profile.clone(), v.webview.clone())).collect()
     }
 
     /// Recreates page webviews when the VPN changes how they must connect

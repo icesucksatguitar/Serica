@@ -1,3 +1,4 @@
+import { normalizePinnedTools, type ToolKey } from './tools';
 // Pure browser-settings rules shared by the main process and the renderer.
 // No Electron import: the renderer imports this module too (Vite resolves it), and tests run it directly.
 
@@ -73,6 +74,9 @@ export function resolveReducedEffectsActive(
 
 export type TabLayout = 'sidebar' | 'top';
 
+/** Look of the top bar's controls: rounded bordered pills, or flat borderless buttons. */
+export type TopBarStyle = 'pill' | 'flat';
+
 /** Text size: scales the interface and is the default zoom for new pages. */
 export const TEXT_SCALE_OPTIONS: readonly { value: number; label: string }[] = Object.freeze([
   { value: 0.9, label: 'Small' },
@@ -97,6 +101,17 @@ export interface BrowserSettings {
   pdfDarkMode: boolean;
   /** Vertical sidebar with hover previews, or a horizontal strip of tabs under the top bar. */
   tabLayout: TabLayout;
+  topBarStyle: TopBarStyle;
+  /** On web pages, hide the top bar until the pointer reaches the top edge. */
+  topBarAutoHide: boolean;
+  /** Block cookies from sites other than the one in the address bar. */
+  blockThirdPartyCookies: boolean;
+  /** Delete cookies when Serica closes, except for `cookieKeepSites`. */
+  clearCookiesOnExit: boolean;
+  /** Sites (with their subdomains) whose cookies are always kept. */
+  cookieKeepSites: string[];
+  /** Tools shown in the top bar's menu besides light/dark and Settings. */
+  pinnedTools: ToolKey[];
   searchEngine: SearchEngineId;
   reducedEffectsMode?: ReducedEffectsMode;
   spaceThemes?: SpaceThemesMap;
@@ -128,6 +143,12 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   autoPictureInPicture: true,
   pdfDarkMode: true,
   tabLayout: 'sidebar' as TabLayout,
+  topBarStyle: 'flat' as TopBarStyle,
+  topBarAutoHide: true,
+  blockThirdPartyCookies: false,
+  clearCookiesOnExit: false,
+  cookieKeepSites: [] as string[],
+  pinnedTools: [] as ToolKey[],
   searchEngine: 'google' as SearchEngineId,
   reducedEffectsMode: 'auto' as ReducedEffectsMode,
   archiveIntervalHours: 12 as ArchiveIntervalHours,
@@ -250,6 +271,15 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     pdfDarkMode:
       typeof source.pdfDarkMode === 'boolean' ? source.pdfDarkMode : DEFAULT_SETTINGS.pdfDarkMode,
     tabLayout: source.tabLayout === 'top' ? 'top' : 'sidebar',
+    topBarStyle: source.topBarStyle === 'pill' ? 'pill' : 'flat',
+    topBarAutoHide:
+      typeof source.topBarAutoHide === 'boolean' ? source.topBarAutoHide : DEFAULT_SETTINGS.topBarAutoHide,
+    blockThirdPartyCookies: source.blockThirdPartyCookies === true,
+    clearCookiesOnExit: source.clearCookiesOnExit === true,
+    cookieKeepSites: Array.isArray(source.cookieKeepSites)
+      ? source.cookieKeepSites.filter((v): v is string => typeof v === 'string')
+      : [],
+    pinnedTools: normalizePinnedTools(source.pinnedTools),
     searchEngine: normalizeSearchEngine(source.searchEngine),
     reducedEffectsMode: normalizeReducedEffectsMode(source.reducedEffectsMode),
     spaceThemes: buildSpaceThemes(source.spaceThemes, source),

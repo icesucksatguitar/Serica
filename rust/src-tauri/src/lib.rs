@@ -5,8 +5,6 @@ mod commands;
 mod downloads;
 mod extensions;
 mod files;
-#[cfg(windows)]
-mod touchpad;
 mod history;
 mod importer;
 mod mcp;
@@ -64,7 +62,11 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init())
+        // No click script: it is injected into every webview, tabs included,
+        // and swallows left-clicks on target=_blank links (the page may not
+        // call the opener), so they did nothing. Tabs handle those links in
+        // `on_new_window`.
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app
@@ -78,10 +80,6 @@ pub fn run() {
             let scale = shared.settings().text_scale;
             if (scale - 1.0).abs() > 0.001 {
                 commands::apply_ui_zoom(&shared, scale);
-            }
-            #[cfg(windows)]
-            if let Some(hwnd) = app.get_webview_window("main").and_then(|w| w.hwnd().ok()) {
-                touchpad::attach(&shared, windows::Win32::Foundation::HWND(hwnd.0 as _));
             }
             files::open_args(&shared, std::env::args().skip(1));
             app.manage(shared);
@@ -152,6 +150,9 @@ pub fn run() {
             commands::window_control,
             commands::get_history,
             commands::open_file,
+            commands::read_clipboard_text,
+            commands::cookie_sites,
+            commands::delete_cookies,
             commands::history_suggest,
             commands::delete_history_entry,
             commands::clear_history,

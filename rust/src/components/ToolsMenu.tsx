@@ -1,15 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Download, FileText, History, Lock, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
+import { Ellipsis, Moon, Settings, Sun } from 'lucide-react';
+import { TOOLS, type ToolActions, type ToolKey } from '../shared/tools';
 
 export interface ToolsMenuProps {
   isDarkMode: boolean;
   vpnOn: boolean;
-  onHistory: () => void;
-  onDownloads: () => void;
-  onOpenFile: () => void;
-  onAssistants: () => void;
-  onVpn: () => void;
-  onThemeStudio: () => void;
+  /** Tools pinned to the top bar (Settings > Appearance > Top bar tools). */
+  pinned: readonly ToolKey[];
+  actions: ToolActions;
   onToggleDarkMode: () => void;
   onSettings: () => void;
   /** Lets the top bar make room (it hides the URL pill on narrow windows). */
@@ -25,7 +23,8 @@ interface Tool {
 }
 
 /**
- * The toolbar's "more" button. The browser tools slide out sideways from it,
+ * The toolbar's "more" button. The pinned tools, the light/dark switch and
+ * Settings slide out sideways from it,
  * inside the top bar (they never cover the page), and slide back after a pick,
  * on Escape or on a click elsewhere.
  */
@@ -53,19 +52,13 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = (p) => {
     };
   }, [open]);
 
+  const pinned = new Set(p.pinned);
   const tools: Tool[] = [
-    { key: 'history', label: 'History (Ctrl+H)', icon: <History size={15} />, run: p.onHistory },
-    { key: 'downloads', label: 'Downloads (Ctrl+J)', icon: <Download size={15} />, run: p.onDownloads },
-    { key: 'open-file', label: 'Open file, e.g. a PDF (Ctrl+O)', icon: <FileText size={15} />, run: p.onOpenFile },
-    { key: 'ai', label: 'AI assistants & tools', icon: <Sparkles size={15} />, run: p.onAssistants },
-    {
-      key: 'vpn',
-      label: p.vpnOn ? 'VPN & privacy tunnel (on)' : 'VPN & privacy tunnel',
-      icon: <Lock size={14} />,
-      run: p.onVpn,
-      active: p.vpnOn,
-    },
-    { key: 'theme', label: 'Theme Studio', icon: <Palette size={15} />, run: p.onThemeStudio },
+    ...TOOLS.filter((t) => pinned.has(t.key)).map((t) => {
+      const Icon = t.icon;
+      const on = t.key === 'vpn' && p.vpnOn;
+      return { key: t.key, label: on ? `${t.label} (on)` : t.label, icon: <Icon size={15} />, run: p.actions[t.key], active: on };
+    }),
     {
       key: 'mode',
       label: p.isDarkMode ? 'Switch to light mode' : 'Switch to dark mode',
@@ -108,7 +101,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = (p) => {
         title={open ? 'Hide browser tools' : 'Browser tools'}
         onClick={() => setOpen((o) => !o)}
       >
-        <ChevronLeft size={17} strokeWidth={2.2} className="tools-menu-glyph" />
+        <Ellipsis size={16} strokeWidth={2.2} className="tools-menu-glyph" />
       </button>
     </div>
   );

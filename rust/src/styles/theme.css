@@ -1560,90 +1560,80 @@ webview,
   contain: layout;
 }
 
-/* Space Name Overlay: shown briefly in the middle of the window on a space switch.
-   A full-window flex layer centers it, so the animation can use transform freely. */
-.macos-space-name-overlay {
-  position: fixed;
+/* Space switch over web pages: captures of the page being left and of the
+   one arriving slide across the page area together (see utils/spaceTransition).
+   Ease-out with no overshoot, so the new page settles into place. */
+.space-slide-stage {
+  position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
   pointer-events: none;
-  z-index: 2500;
+  z-index: 2;
 }
 
-.macos-space-name-card {
-  padding: 20px 44px 22px;
-  border-radius: 28px;
-  background: rgba(14, 14, 18, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 24px 64px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  -webkit-backdrop-filter: blur(28px) saturate(1.5);
-  backdrop-filter: blur(28px) saturate(1.5);
-  /* Only transform/opacity animate: a CSS filter here would disable backdrop-filter. */
-  animation: spaceOverlayShow 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+.space-slide-stage.opaque {
+  background: var(--theme-bg-canvas, #0c0d10);
+}
+
+.space-slide-stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
   will-change: transform, opacity;
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
 }
 
-html:not(.dark-mode) .macos-space-name-card {
-  background: rgba(255, 255, 255, 0.55);
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow:
-    0 24px 64px rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+/* A page arriving pushes in fully opaque over the one being left, which
+   drifts back and dims: something solid is on screen the whole way. */
+.space-slide-stage .space-slide-in {
+  box-shadow: 0 0 48px rgba(0, 0, 0, 0.35);
 }
 
-.macos-space-name-text {
-  display: block;
-  font-family: 'Outfit', var(--font-heading);
-  font-size: clamp(44px, 5.4vw, 72px);
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  /* Letter-spacing adds trailing space after the last glyph; balance it. */
-  margin-right: -0.16em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: #ffffff;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35);
-  user-select: none;
+.space-slide-stage.to-next .space-slide-in { animation-name: spacePushFromRight; }
+.space-slide-stage.to-prev .space-slide-in { animation-name: spacePushFromLeft; }
+.space-slide-stage.opaque.to-next .space-slide-out { animation-name: spaceRecedeLeft; }
+.space-slide-stage.opaque.to-prev .space-slide-out { animation-name: spaceRecedeRight; }
+/* Nothing arriving (a new tab page): the page slides away over it. */
+.space-slide-stage:not(.opaque).to-next .space-slide-out { animation-name: spaceLeaveLeft; }
+.space-slide-stage:not(.opaque).to-prev .space-slide-out { animation-name: spaceLeaveRight; }
+
+@keyframes spacePushFromRight {
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
 }
 
-html:not(.dark-mode) .macos-space-name-text {
-  color: #111114;
-  text-shadow: none;
+@keyframes spacePushFromLeft {
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
 }
 
-@keyframes spaceOverlayShow {
-  0% {
-    opacity: 0;
-    transform: translateY(10px) scale(0.94);
-  }
-
-  22% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-
-  78% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-6px) scale(1.02);
-  }
+@keyframes spaceRecedeLeft {
+  to { transform: translate3d(-28%, 0, 0); opacity: 0.45; }
 }
 
+@keyframes spaceRecedeRight {
+  to { transform: translate3d(28%, 0, 0); opacity: 0.45; }
+}
+
+@keyframes spaceLeaveLeft {
+  to { transform: translate3d(-40%, 0, 0); opacity: 0; }
+}
+
+@keyframes spaceLeaveRight {
+  to { transform: translate3d(40%, 0, 0); opacity: 0; }
+}
+
+/* Space switch without a page on either side: the new tab page slides in. */
 .space-transition-left {
-  animation: spaceSlideLeft 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: spaceSlideLeft 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .space-transition-right {
-  animation: spaceSlideRight 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: spaceSlideRight 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes spaceSlideLeft {
@@ -1671,25 +1661,14 @@ html:not(.dark-mode) .macos-space-name-text {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .macos-space-name-card {
-    animation-name: spaceOverlayFadeOnly;
-  }
-
   .space-transition-left,
-  .space-transition-right {
+  .space-transition-right,
+  .space-slide-stage img {
     animation: none;
   }
-}
 
-@keyframes spaceOverlayFadeOnly {
-  0%,
-  100% {
+  .space-slide-stage .space-slide-out {
     opacity: 0;
-  }
-
-  15%,
-  85% {
-    opacity: 1;
   }
 }
 
@@ -7605,10 +7584,7 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
 .mcp-modal-card,
 .theme-modal-backdrop,
 .theme-modal-card,
-.media-player-pip,
-.zen-sleeping-screen,
-.zen-sleeping-card,
-.zen-sleeping-wake-btn {
+.media-player-pip {
   -webkit-app-region: no-drag;
 }
 
@@ -7734,263 +7710,6 @@ html[data-glow-style="prism"] .ambient-glow-color-cycle {
   background: var(--theme-accent, #3b82f6);
   color: #ffffff;
   border-color: transparent;
-}
-
-/* ==========================================================================
-   ZEN MODE SLEEPING TAB VIEW
-   High-end monochromatic aesthetic, clears macOS window controls with 0 overlap
-   ========================================================================== */
-.zen-sleeping-screen {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 60;
-  background: #000000;
-  padding: 72px 24px 32px 24px;
-  cursor: pointer;
-  user-select: none;
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-body.light .zen-sleeping-screen {
-  background: #F8F7F4;
-}
-
-.zen-sleeping-ambient-glow {
-  position: absolute;
-  top: 45%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 520px;
-  height: 520px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 70%);
-  animation: zenAmbientPulse 6s ease-in-out infinite alternate;
-}
-
-body.light .zen-sleeping-ambient-glow {
-  background: radial-gradient(circle, rgba(0, 0, 0, 0.03) 0%, rgba(0, 0, 0, 0) 70%);
-}
-
-.zen-sleeping-card {
-  position: relative;
-  max-width: 440px;
-  width: 100%;
-  background: rgba(14, 14, 16, 0.88);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 24px;
-  padding: 36px 30px 28px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  cursor: default;
-  animation: zenCardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  z-index: 2;
-  box-sizing: border-box;
-}
-
-body.light .zen-sleeping-card {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.09);
-  box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-.zen-sleeping-icon-ring {
-  position: relative;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  margin-bottom: 18px;
-}
-
-body.light .zen-sleeping-icon-ring {
-  background: rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(0, 0, 0, 0.10);
-}
-
-.zen-sleeping-moon {
-  color: #FFFFFF;
-}
-
-body.light .zen-sleeping-moon {
-  color: #18181B;
-}
-
-.zen-sleeping-orbit {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 1px dashed rgba(255, 255, 255, 0.22);
-  animation: zenOrbitRotate 22s linear infinite;
-}
-
-body.light .zen-sleeping-orbit {
-  border-color: rgba(0, 0, 0, 0.16);
-}
-
-.zen-sleeping-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 12px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #A1A1AA;
-  margin-bottom: 12px;
-}
-
-body.light .zen-sleeping-badge {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
-  color: #52525B;
-}
-
-.zen-sleeping-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #60A5FA;
-  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
-}
-
-.zen-sleeping-title {
-  font-family: 'Claude Serif', 'Instrument Serif', Georgia, serif;
-  font-style: italic;
-  font-weight: 400;
-  font-size: 25px;
-  line-height: 1.25;
-  color: #FFFFFF;
-  margin: 0 0 8px 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-body.light .zen-sleeping-title {
-  color: #18181B;
-}
-
-.zen-sleeping-url-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
-  color: #71717A;
-  max-width: 280px;
-  margin-bottom: 14px;
-}
-
-body.light .zen-sleeping-url-pill {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.06);
-  color: #71717A;
-}
-
-.zen-sleeping-globe {
-  color: #71717A;
-  flex-shrink: 0;
-}
-
-.zen-sleeping-url-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.zen-sleeping-desc {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #9CA3AF;
-  margin: 0 0 22px 0;
-  max-width: 340px;
-}
-
-body.light .zen-sleeping-desc {
-  color: #4B5563;
-}
-
-.zen-sleeping-wake-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 9px 24px;
-  border-radius: 9999px;
-  background: #FFFFFF;
-  color: #000000;
-  font-weight: 500;
-  font-size: 13px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.16);
-}
-
-.zen-sleeping-wake-btn:hover {
-  background: #F4F4F5;
-  transform: scale(1.04);
-  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.25);
-}
-
-.zen-sleeping-wake-btn:active {
-  transform: scale(0.98);
-}
-
-body.light .zen-sleeping-wake-btn {
-  background: #18181B;
-  color: #FFFFFF;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-}
-
-body.light .zen-sleeping-wake-btn:hover {
-  background: #27272A;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-}
-
-.zen-sleeping-hint {
-  font-size: 11px;
-  color: #52525B;
-  margin-top: 14px;
-}
-
-body.light .zen-sleeping-hint {
-  color: #9CA3AF;
-}
-
-@keyframes zenAmbientPulse {
-  0% {
-    opacity: 0.35;
-    transform: translate(-50%, -50%) scale(0.9);
-  }
-
-  100% {
-    opacity: 0.75;
-    transform: translate(-50%, -50%) scale(1.1);
-  }
 }
 
 @keyframes zenCardIn {
@@ -10048,7 +9767,6 @@ html[data-reduced-effects="on"] .command-bar-card-wrapper,
 html[data-reduced-effects="on"] .mcp-drawer,
 html[data-reduced-effects="on"] .floating-media-player,
 html[data-reduced-effects="on"] .pin-add-modal-dialog,
-html[data-reduced-effects="on"] .zen-sleeping-card,
 html[data-reduced-effects="on"] .proper-space-slider-wrap,
 html[data-reduced-effects="on"] .spaces-smooth-slider,
 html[data-reduced-effects="on"] .mini-window-card,
@@ -10672,7 +10390,7 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 
 /* Under a web page's solid top bar the strip is part of the same chrome. */
 .top-tab-strip.on-webpage {
-  top: 44px;
+  top: var(--topbar-h, 30px);
   background: var(--theme-bg-canvas);
   border-bottom: 1px solid var(--border);
 }
@@ -11268,4 +10986,545 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 }
 .page-dialog-btn.secondary:hover {
   background: var(--surface-hover);
+}
+
+/* ==========================================================================
+   Scrollbars in the app's own UI: thin rounded thumbs with no track or arrow
+   buttons, instead of the default Windows ones. Lists that hide their
+   scrollbar (or style their own) keep doing so.
+   ========================================================================== */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.34);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.22);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.38);
+}
+
+/* ==========================================================================
+   TOP BAR ON WEB PAGES: 30px, optionally auto-hidden, pill or flat controls
+   ========================================================================== */
+.floating-top-chrome-capsule.on-webpage {
+  height: var(--topbar-h, 30px);
+  padding: 0 8px;
+  gap: 8px;
+}
+
+.macos-window-drag-bar.on-webpage {
+  height: var(--topbar-h, 30px);
+}
+
+.floating-top-chrome-capsule.on-webpage .macos-window-controls-cluster {
+  height: 24px;
+  gap: 6px;
+}
+
+.floating-top-chrome-capsule.on-webpage .site-nav-controls {
+  height: 24px;
+  padding: 0 2px;
+}
+
+.floating-top-chrome-capsule.on-webpage .site-nav-btn {
+  width: 22px;
+  height: 20px;
+}
+
+.floating-top-chrome-capsule.on-webpage .macos-tabs-toggle-pill {
+  height: 24px;
+  padding: 0 9px;
+}
+
+.floating-top-chrome-capsule.on-webpage .top-floating-url-pill {
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.floating-top-chrome-capsule.on-webpage .top-floating-url-pill.has-actions {
+  padding: 0 5px 0 11px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster {
+  gap: 6px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-pill-btn {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+/* Right-hand group (status pills, tools tray, window buttons) fits the bar. */
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster {
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 2px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-pill-btn,
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-icon-btn {
+  height: 20px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-pill-btn {
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-icon-btn {
+  width: 24px;
+}
+
+.floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-pill-btn + .minimal-icon-btn::before {
+  top: 5px;
+  bottom: 5px;
+}
+
+.floating-top-chrome-capsule.on-webpage .tools-tray {
+  --tools-btn: 22px;
+  --tools-gap: 2px;
+}
+
+.floating-top-chrome-capsule.on-webpage .tools-tray-items {
+  padding: 0;
+  margin: 0;
+}
+
+.floating-top-chrome-capsule.on-webpage .tools-tray.open .tools-tray-items {
+  padding: 0 2px;
+}
+
+.floating-top-chrome-capsule.on-webpage .tools-tray-btn {
+  width: var(--tools-btn);
+  height: 20px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-full);
+}
+
+.floating-top-chrome-capsule.on-webpage .tools-tray-btn:hover {
+  background: color-mix(in srgb, var(--theme-fg) 10%, transparent);
+  border-color: transparent;
+  transform: none;
+}
+
+.floating-top-chrome-capsule.on-webpage .macos-traffic-lights.window-controls-right {
+  gap: 8px;
+  padding: 0 4px 0 2px;
+}
+
+.floating-top-chrome-capsule.on-webpage .window-controls-divider {
+  height: 12px;
+}
+
+/* Auto-hide: the bar waits above the window and slides down over the page
+   (see hooks/useTopBarAutoHide). */
+.floating-top-chrome-capsule.on-webpage.topbar-autohide {
+  transform: translate3d(0, calc(-1 * var(--topbar-h, 30px) - 2px), 0) !important;
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease !important;
+  will-change: transform;
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-autohide.topbar-shown {
+  transform: translate3d(0, 0, 0) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-autohide:not(.topbar-shown),
+.floating-top-chrome-capsule.on-webpage.topbar-autohide:not(.topbar-shown) * {
+  pointer-events: none !important;
+}
+
+.topbar-reveal-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  z-index: 10001;
+  -webkit-app-region: no-drag;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-top-chrome-capsule.on-webpage.topbar-autohide {
+    transition: none !important;
+  }
+}
+
+/* Flat style: borderless controls that only show a background on hover,
+   and an address field without a pill outline. */
+.topbar-style-flat .site-nav-controls,
+.topbar-style-flat .minimal-top-right-cluster,
+.topbar-style-flat .macos-tabs-toggle-pill,
+.topbar-style-flat .minimal-pill-btn,
+.topbar-style-flat .minimal-icon-btn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.topbar-style-flat .macos-tabs-toggle-pill:hover,
+.topbar-style-flat .minimal-pill-btn:hover,
+.topbar-style-flat .minimal-icon-btn:hover {
+  background: var(--theme-surface-hover);
+  border-color: transparent;
+  transform: none;
+}
+
+.topbar-style-flat .top-floating-url-pill {
+  background: color-mix(in srgb, var(--theme-fg) 7%, transparent);
+  border-color: transparent;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.topbar-style-flat .top-floating-url-pill:hover {
+  background: color-mix(in srgb, var(--theme-fg) 11%, transparent);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-style-flat .top-floating-url-pill {
+  border-radius: 7px;
+}
+
+/* Cookies and site data (Settings > Privacy) */
+.cookie-keep {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cookie-keep-add {
+  display: flex;
+  gap: 6px;
+}
+
+.cookie-keep-add .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cookie-status {
+  margin: 8px 0 0;
+}
+
+.cookie-site-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.cookie-site {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  font-size: 12.5px;
+}
+
+.cookie-site + .cookie-site {
+  border-top: 1px solid var(--border);
+}
+
+.cookie-site-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--theme-fg);
+}
+
+.cookie-site-count {
+  color: var(--theme-fg-faint, var(--text-muted));
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cookie-site-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--theme-fg-muted, var(--text-muted));
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cookie-site-delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.cookie-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* ==========================================================================
+   FLAT TOP BAR (default): quiet, borderless chrome around a centered address
+   field. Icons sit muted and come forward on hover; nothing competes with
+   the address. The window dots stay grey until the pointer is over them.
+   ========================================================================== */
+.floating-top-chrome-capsule.on-webpage.topbar-style-flat {
+  border-bottom-color: color-mix(in srgb, var(--theme-fg) 8%, transparent);
+}
+
+.topbar-style-flat {
+  --tb-icon: color-mix(in srgb, var(--theme-fg) 66%, transparent);
+  --tb-hover: color-mix(in srgb, var(--theme-fg) 9%, transparent);
+  --tb-field: color-mix(in srgb, var(--theme-fg) 6.5%, transparent);
+  --tb-field-hover: color-mix(in srgb, var(--theme-fg) 10%, transparent);
+}
+
+.topbar-style-flat .site-nav-controls {
+  gap: 2px;
+  padding: 0;
+}
+
+.topbar-style-flat .site-nav-btn,
+.topbar-style-flat .minimal-icon-btn,
+.topbar-style-flat .minimal-top-right-cluster > .minimal-pill-btn,
+.topbar-style-flat .minimal-top-right-cluster > .minimal-icon-btn {
+  color: var(--tb-icon);
+  border-radius: 6px;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.topbar-style-flat .site-nav-btn:hover:not(:disabled),
+.topbar-style-flat .minimal-icon-btn:hover,
+.topbar-style-flat .minimal-top-right-cluster > .minimal-pill-btn:hover,
+.topbar-style-flat .minimal-top-right-cluster > .minimal-icon-btn:hover {
+  color: var(--theme-fg);
+  background: var(--tb-hover);
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-style-flat .site-nav-btn {
+  width: 26px;
+  height: 24px;
+}
+
+.topbar-style-flat .site-nav-btn:disabled {
+  opacity: 0.28;
+}
+
+/* Space switcher: sidebar icon, the space's dot and its name. */
+.topbar-style-flat .macos-tabs-toggle-pill {
+  gap: 7px;
+  padding: 0 9px 0 7px;
+  border-radius: 6px;
+  color: var(--tb-icon);
+}
+
+.topbar-style-flat .macos-tabs-toggle-pill:hover,
+.topbar-style-flat .macos-tabs-toggle-pill.active {
+  color: var(--theme-fg);
+  background: var(--tb-hover);
+}
+
+.topbar-style-flat .macos-tabs-count {
+  display: none;
+}
+
+.topbar-style-flat .macos-tabs-space-name {
+  max-width: 120px;
+  color: color-mix(in srgb, var(--theme-fg) 88%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Address field: centered text on a soft fill; its tools show on hover. */
+.topbar-style-flat .top-floating-url-pill {
+  min-width: clamp(220px, 34vw, 520px);
+  justify-content: center;
+  background: var(--tb-field);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.topbar-style-flat .top-floating-url-pill:hover {
+  background: var(--tb-field-hover);
+  transform: none;
+  box-shadow: none;
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-style-flat .top-floating-url-pill {
+  height: 22px;
+  border-radius: 6px;
+  padding: 0 64px;
+}
+
+.topbar-style-flat .url-pill-main {
+  flex: 0 1 auto;
+  gap: 6px;
+}
+
+.topbar-style-flat .url-lock-icon {
+  width: 11px;
+  height: 11px;
+  opacity: 0.5;
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-style-flat .url-domain-text {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--theme-fg) 92%, transparent);
+}
+
+.topbar-style-flat .url-pill-actions {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.topbar-style-flat .url-pill-action-btn {
+  width: 20px;
+  height: 18px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.topbar-style-flat .top-floating-url-pill:hover .url-pill-action-btn,
+.topbar-style-flat .url-pill-action-btn:focus-visible {
+  opacity: 1;
+}
+
+.topbar-style-flat .url-pill-zoom-badge {
+  height: 18px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: color-mix(in srgb, var(--theme-fg) 60%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-style-flat .url-pill-zoom-badge:hover {
+  background: var(--tb-hover);
+  color: var(--theme-fg);
+}
+
+/* Right side: no box around the group, no divider before the window dots. */
+.topbar-style-flat .window-controls-divider {
+  display: none;
+}
+
+.topbar-style-flat .macos-traffic-lights.window-controls-right {
+  margin-left: 6px;
+}
+
+.topbar-style-flat .traffic-light {
+  width: 11px;
+  height: 11px;
+  background-color: color-mix(in srgb, var(--theme-fg) 22%, transparent);
+  box-shadow: none;
+  transition: background-color 0.16s ease, transform 0.1s ease;
+}
+
+.topbar-style-flat .macos-traffic-lights:hover .traffic-light.close {
+  background-color: #ff5f57;
+}
+
+.topbar-style-flat .macos-traffic-lights:hover .traffic-light.minimize {
+  background-color: #febc2e;
+}
+
+.topbar-style-flat .macos-traffic-lights:hover .traffic-light.maximize {
+  background-color: #28c840;
+}
+
+/* The "⋯" tools button keeps still; the tray still grows out of it. */
+.topbar-style-flat .tools-tray.open .tools-menu-glyph {
+  transform: none;
+}
+
+.topbar-style-flat .tools-menu-btn.active {
+  background: var(--tb-hover);
+  border-color: transparent;
+  color: var(--theme-fg);
+}
+
+/* Settings > Appearance > Top bar tools */
+.top-bar-tools-intro {
+  margin: 0 0 6px;
+}
+
+.top-bar-tool-row {
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.top-bar-tool-row + .top-bar-tool-row {
+  border-top: 1px solid var(--border);
+}
+
+.top-bar-tool-row .settings-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.top-bar-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-fg) 7%, transparent);
+  color: var(--theme-fg-muted, var(--theme-fg));
 }

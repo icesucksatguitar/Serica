@@ -64,8 +64,6 @@ pub enum Shortcut {
     Downloads,
     Settings,
     SpaceIndex(usize),
-    /// Next (+1) or previous (-1) space, from a four-finger swipe.
-    SpaceStep(i32),
     Escape,
     Home,
     OpenFile,
@@ -90,6 +88,9 @@ pub struct App {
     written: Mutex<std::collections::HashMap<std::path::PathBuf, u64>>,
     /// Dark-PDF setting the open pages were last told about.
     pdf_dark: std::sync::atomic::AtomicBool,
+    /// Profiles whose cookies were already swept this session ("clear cookies
+    /// when Serica closes" also runs at start, in case it could not at exit).
+    cookie_swept: Mutex<std::collections::HashSet<String>>,
 }
 
 /// Emits to the app UI only, never to web pages in tab webviews.
@@ -98,7 +99,7 @@ pub fn ui_emit<S: serde::Serialize + Clone>(handle: &AppHandle, event: &str, pay
 }
 
 /// Percent of physical memory in use system-wide, if known.
-fn memory_load_percent() -> Option<u32> {
+pub fn memory_load_percent() -> Option<u32> {
     #[cfg(windows)]
     unsafe {
         use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -179,6 +180,7 @@ impl App {
         let port = vpn.start_proxy();
         let (tx, rx) = mpsc::channel();
         let pdf_dark = std::sync::atomic::AtomicBool::new(store.settings.pdf_dark_mode);
+        let block_3pc = store.settings.block_third_party_cookies;
         let app = Arc::new(App {
             handle,
             store: Mutex::new(store),
@@ -188,11 +190,12 @@ impl App {
             extensions: Extensions::new(data_dir.join("extensions")),
             downloads: Downloads::new(data_dir.join("downloads.json")),
             mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
-            host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net)),
+            host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net, block_3pc)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
             tx: Mutex::new(tx),
             pdf_dark,
+            cookie_swept: Mutex::new(Default::default()),
             save_lock: Mutex::new(()),
             written: Mutex::new(Default::default()),
         });
@@ -247,6 +250,7 @@ impl App {
                 if self.pdf_dark.swap(s.pdf_dark_mode, std::sync::atomic::Ordering::Relaxed) != s.pdf_dark_mode {
                     TabHost::apply_pdf_dark(&self, s.pdf_dark_mode);
                 }
+                TabHost::sync_cookie_policy(&self, s.block_third_party_cookies);
                 ui_emit(&self.handle, "serica:settings-updated", s);
                 crate::mcp_http::sync(&self);
             }
@@ -318,6 +322,11 @@ impl App {
         self.store.lock().settings.clone()
     }
 
+    /// True the first time it is asked for `profile` this session.
+    pub fn claim_cookie_sweep(&self, profile: &str) -> bool {
+        self.cookie_swept.lock().insert(profile.to_string())
+    }
+
     /// Mutates the store and schedules a broadcast. Keep `f` free of webview calls.
     pub fn mutate<T>(&self, f: impl FnOnce(&mut Store) -> T) -> T {
         let out = f(&mut self.store.lock());
@@ -373,6 +382,9 @@ impl App {
 
     pub fn tab_event(&self, tab_id: &str, ev: TabEvent) {
         let mut history_changed = false;
+        let mut settings_changed = false;
+        // Zoom to apply to the page after the locks are released (a new site).
+        let mut apply_zoom: Option<f64> = None;
         {
             let mut s = self.store.lock();
             let space = s.tab(tab_id).map(|t| t.space_id.clone());
@@ -393,6 +405,17 @@ impl App {
                 TabEvent::UrlChanged(url) => {
                     if !url.is_empty() && url != "about:blank" {
                         tab.url = url;
+                        // Zoom is per site: a page on another site takes that
+                        // site's zoom (or the default).
+                        if crate::settings::zoom_site(&tab.url).is_some() {
+                            let want = s.settings.zoom_for(&s.tab(tab_id).map(|t| t.url.clone()).unwrap_or_default());
+                            if let Some(tab) = s.tab_mut(tab_id) {
+                                if tab.zoom_factor.map(|z| (z - want).abs() >= 0.005).unwrap_or(true) {
+                                    tab.zoom_factor = Some(want);
+                                    apply_zoom = Some(want);
+                                }
+                            }
+                        }
                     }
                 }
                 TabEvent::History { back, forward } => {
@@ -433,11 +456,26 @@ impl App {
                     tab.has_active_media = playing;
                 }
                 TabEvent::Zoom(z) => {
-                    tab.zoom_factor = Some((z * 100.0).round() / 100.0);
-                    ui_emit(&self.handle, "serica:zoom-updated", serde_json::json!({ "tabId": tab_id, "zoomFactor": tab.zoom_factor }));
+                    let z = (z * 100.0).round() / 100.0;
+                    tab.zoom_factor = Some(z);
+                    let url = tab.url.clone();
+                    ui_emit(&self.handle, "serica:zoom-updated", serde_json::json!({ "tabId": tab_id, "zoomFactor": z }));
+                    settings_changed = s.settings.remember_zoom(&url, z);
                 }
             }
             drop(s);
+        }
+        if let Some(z) = apply_zoom {
+            let wv = self.host.lock().views.get(tab_id).map(|v| v.webview.clone());
+            #[cfg(windows)]
+            if let Some(wv) = wv {
+                crate::webview_win::set_zoom(&wv, z);
+            }
+            #[cfg(not(windows))]
+            let _ = (wv, z);
+        }
+        if settings_changed {
+            self.notify(Notice::Settings);
         }
         self.notify(Notice::State);
         if history_changed {
@@ -482,18 +520,10 @@ impl App {
             Shortcut::CycleTab(d) => {
                 self.mutate(|s| s.cycle_tab(d));
             }
-            Shortcut::SpaceIndex(_) | Shortcut::SpaceStep(_) => {
+            Shortcut::SpaceIndex(n) => {
                 let switched = self.mutate(|s| {
                     let order = s.switcher_order();
-                    let index = match sc {
-                        Shortcut::SpaceStep(d) => {
-                            let cur = order.iter().position(|id| *id == s.active_space_id)? as i64;
-                            usize::try_from(cur + d as i64).ok()?
-                        }
-                        Shortcut::SpaceIndex(n) => n.wrapping_sub(1),
-                        _ => return None,
-                    };
-                    let target = order.get(index).cloned()?;
+                    let target = order.get(n.wrapping_sub(1)).cloned()?;
                     if target == s.active_space_id {
                         return None;
                     }

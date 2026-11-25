@@ -153,11 +153,6 @@ export const TabPreviewCard: React.FC<TabPreviewCardProps> = ({ preview, onMouse
             {target.title || domainInfo.domain}
           </span>
         </div>
-        {target.isSleeping && (
-          <span className="mini-win-sleep-badge" title="Sleeping to free memory">
-            Sleeping
-          </span>
-        )}
       </div>
 
       {/* Window Preview Frame */}

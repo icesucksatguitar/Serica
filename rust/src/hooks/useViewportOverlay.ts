@@ -85,18 +85,6 @@ export function prewarmViewport(): void {
   void prewarmHandler?.();
 }
 
-/**
- * Captures the current page and resolves true once a freeze would show that
- * fresh capture (true right away when no capture is needed). False when the
- * page does not deliver one within `timeoutMs`: freezing then would show an
- * older snapshot of the page, which visibly jumps.
- */
-export function prepareViewportFreeze(timeoutMs = 900): Promise<boolean> {
-  const p = prewarmHandler?.();
-  if (!p) return Promise.resolve(true);
-  return Promise.race([p.catch(() => false), new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs))]);
-}
-
 /** True while `flag` is true and for `ms` after it turns false (lets exit animations finish over the snapshot). */
 export function useLingering(flag: boolean, ms: number): boolean {
   const [lingering, setLingering] = useState(flag);
