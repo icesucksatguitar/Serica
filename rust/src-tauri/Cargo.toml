@@ -1,6 +1,6 @@
 [package]
 name = "serica-rust"
-version = "0.4.6"
+version = "0.4.7"
 description = "Serica Browser - Rust + Tauri v2 implementation"
 edition = "2021"
 

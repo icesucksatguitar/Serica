@@ -5,6 +5,28 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.4.7': [
+    {
+      title: 'A new look for Serica',
+      text: 'A new icon, and a redesigned sidebar: calmer rows, your space shown up top, and actions that appear when you need them.',
+    },
+    {
+      title: 'Widgets on the new tab',
+      text: 'Add GitHub contributions, weather, notes, a calendar, your top sites, or quick widgets for Claude, Notion, Gmail and more. Use Customize > Edit widgets to move and resize them.',
+    },
+    {
+      title: 'Faster space swipes',
+      text: 'Swiping sideways on the sidebar switches spaces as soon as you swipe, instead of waiting for the trackpad to settle.',
+    },
+    {
+      title: 'Sizes your way',
+      text: 'Make the sidebar, dock, clock, search bar and widgets bigger or smaller, each on its own, in Settings > Appearance > Sizes.',
+    },
+    {
+      title: 'Little things',
+      text: 'The top bar is back to its slim size, the dock magnifies again, and short guides show you around (replay them in Settings > Appearance).',
+    },
+  ],
   '0.4.6': [
     {
       title: 'Instant space switching',
