@@ -16,6 +16,7 @@ mod store;
 mod tabhost;
 mod updater;
 mod vpn;
+mod widgets;
 mod window_state;
 #[cfg(windows)]
 mod webview_win;
@@ -88,6 +89,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_browser_state,
+            commands::page_menu_select,
+            commands::widget_github,
+            commands::widget_geocode,
+            commands::widget_weather,
+            commands::get_pdf_dark_tab,
+            commands::set_pdf_dark_tab,
             commands::create_tab,
             commands::close_tab,
             commands::select_tab,

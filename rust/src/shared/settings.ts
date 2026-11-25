@@ -123,7 +123,45 @@ export interface BrowserSettings {
   sidebarAutoHide: boolean;
   sidebarWidth?: number;
   textScale: number;
+  /** Widgets on the new-tab page. */
+  homeWidgets: HomeWidgets;
   [unknownKey: string]: unknown; // kept as saved, e.g. the legacy `theme` key
+}
+
+/** New-tab widgets; each can be turned on and set up from the page or Settings. */
+export interface HomeWidgets {
+  /** Greeting, date and clock above the search field. */
+  clock: boolean;
+  github: { enabled: boolean; user: string };
+  weather: { enabled: boolean; place: string; lat: number | null; lon: number | null; fahrenheit: boolean };
+  notes: { enabled: boolean; text: string };
+}
+
+export const DEFAULT_HOME_WIDGETS: Readonly<HomeWidgets> = Object.freeze({
+  clock: true,
+  github: { enabled: false, user: '' },
+  weather: { enabled: false, place: '', lat: null, lon: null, fahrenheit: false },
+  notes: { enabled: false, text: '' },
+});
+
+function normalizeHomeWidgets(raw: unknown): HomeWidgets {
+  const o = raw !== null && typeof raw === 'object' ? (raw as Record<string, any>) : {};
+  const g = o.github && typeof o.github === 'object' ? o.github : {};
+  const w = o.weather && typeof o.weather === 'object' ? o.weather : {};
+  const n = o.notes && typeof o.notes === 'object' ? o.notes : {};
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    clock: typeof o.clock === 'boolean' ? o.clock : DEFAULT_HOME_WIDGETS.clock,
+    github: { enabled: g.enabled === true, user: typeof g.user === 'string' ? g.user.slice(0, 39) : '' },
+    weather: {
+      enabled: w.enabled === true,
+      place: typeof w.place === 'string' ? w.place.slice(0, 80) : '',
+      lat: num(w.lat),
+      lon: num(w.lon),
+      fahrenheit: w.fahrenheit === true,
+    },
+    notes: { enabled: n.enabled === true, text: typeof n.text === 'string' ? n.text.slice(0, 4000) : '' },
+  };
 }
 
 /** How long an unused Today tab lives before it is archived. */
@@ -144,7 +182,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   pdfDarkMode: true,
   tabLayout: 'sidebar' as TabLayout,
   topBarStyle: 'flat' as TopBarStyle,
-  topBarAutoHide: true,
+  topBarAutoHide: false,
   blockThirdPartyCookies: false,
   clearCookiesOnExit: false,
   cookieKeepSites: [] as string[],
@@ -157,6 +195,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   sidebarAutoHide: false,
   sidebarWidth: 240,
   textScale: 1,
+  homeWidgets: DEFAULT_HOME_WIDGETS,
 });
 
 function isArchiveIntervalHours(value: unknown): value is ArchiveIntervalHours {
@@ -292,5 +331,6 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     sidebarExpanded: boolOr(source.sidebarExpanded, DEFAULT_SETTINGS.sidebarExpanded),
     sidebarAutoHide: boolOr(source.sidebarAutoHide, DEFAULT_SETTINGS.sidebarAutoHide),
     textScale: normalizeTextScale(source.textScale),
+    homeWidgets: normalizeHomeWidgets(source.homeWidgets),
   };
 }

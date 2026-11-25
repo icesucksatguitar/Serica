@@ -11,9 +11,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole } from './useViewportOverlay';
 
 /** Height of the top bar on web pages (CSS px). */
-export const TOP_BAR_HEIGHT = 30;
+export const TOP_BAR_HEIGHT = 40;
 /** Strip at the top edge left uncovered by the page, where the pointer reveals the bar. */
-export const TOP_BAR_REVEAL_STRIP = 4;
+export const TOP_BAR_REVEAL_STRIP = 6;
 
 const SLIDE_MS = 200;
 const HIDE_DELAY_MS = 260;

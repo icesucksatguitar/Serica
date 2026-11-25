@@ -66,6 +66,8 @@ export interface SidebarDrag {
   ghostRef: React.RefObject<HTMLDivElement>;
   itemProps: (item: SidebarItemRef) => DragItemProps;
   spaceProps: (spaceId: string) => DragItemProps;
+  /** The pinned folder the dragged item would land in (highlighted while dragging). */
+  dropFolderId: string | null;
 }
 
 /** Drop target under the pointer; `undefined` keeps the previous target (pointer between targets). */
@@ -81,10 +83,37 @@ function targetAt(x: number, y: number, draggedId: string, root: HTMLElement | n
   if (!sectionEl) return undefined;
   const section = sectionEl.getAttribute('data-sidebar-section') as SidebarItemKind | null;
   if (section !== 'favorite' && section !== 'pinned' && section !== 'today') return undefined;
-  const rects: Rect[] = Array.from(sectionEl.querySelectorAll<HTMLElement>('[data-sidebar-item]'))
-    .filter((n) => n.getAttribute('data-sidebar-id') !== draggedId)
-    .map((n) => n.getBoundingClientRect());
-  return { type: 'section', section, index: insertionIndex(rects, x, y, section === 'favorite' ? 'grid' : 'list') };
+  const rows = Array.from(sectionEl.querySelectorAll<HTMLElement>('[data-sidebar-item]')).filter(
+    (n) => n.getAttribute('data-sidebar-id') !== draggedId,
+  );
+  if (section !== 'pinned') {
+    const rects: Rect[] = rows.map((n) => n.getBoundingClientRect());
+    return { type: 'section', section, index: insertionIndex(rects, x, y, section === 'favorite' ? 'grid' : 'list') };
+  }
+  return pinnedTarget(el, rows, x, y);
+}
+
+/**
+ * Pinned tabs show in folders first, then at the root, so screen order is not
+ * section order. The drop goes into the group under the pointer (a folder, its
+ * header included, or the root), at the pointer's place among that group's
+ * rows; the result is mapped back to an index in section order.
+ */
+function pinnedTarget(el: Element, rows: HTMLElement[], x: number, y: number): DropTarget {
+  const folderEl = el.closest<HTMLElement>('[data-folder-id]');
+  const folderId = folderEl?.getAttribute('data-folder-id') ?? null;
+  const inGroup = (n: HTMLElement) =>
+    folderEl ? folderEl.contains(n) : n.closest('[data-folder-id]') === null;
+  const group = rows.filter(inGroup);
+  // The other pinned rows in section order (the preview keeps their relative order).
+  const order = [...rows]
+    .sort((a, b) => Number(a.getAttribute('data-sidebar-index')) - Number(b.getAttribute('data-sidebar-index')))
+    .map((n) => n.getAttribute('data-sidebar-id'));
+  const k = insertionIndex(group.map((n) => n.getBoundingClientRect()), x, y, 'list');
+  let index = order.length;
+  if (k < group.length) index = order.indexOf(group[k].getAttribute('data-sidebar-id'));
+  else if (group.length > 0) index = order.indexOf(group[group.length - 1].getAttribute('data-sidebar-id')) + 1;
+  return { type: 'section', section: 'pinned', index: Math.max(0, index), folderId };
 }
 
 export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => unknown): SidebarDrag {
@@ -177,7 +206,12 @@ export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => un
         const shown = committedRef.current ? withLayout(stateRef.current, committedRef.current.file) : stateRef.current;
         s = startDragSession(
           toProfilesFile(shown),
-          { kind: press.item.kind, id: press.item.id, index: press.item.index },
+          {
+            kind: press.item.kind,
+            id: press.item.id,
+            index: press.item.index,
+            ...(press.item.folderId ? { folderId: press.item.folderId } : {}),
+          },
           stateRef.current.activeSpaceId,
         );
         setGhost({ item: press.item, x: e.clientX, y: e.clientY });
@@ -282,6 +316,8 @@ export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => un
     displayState,
     dragging: session !== null,
     draggedId,
+    dropFolderId:
+      session && target?.type === 'section' && target.section === 'pinned' ? (target.folderId ?? null) : null,
     target,
     ghost,
     ghostRef,

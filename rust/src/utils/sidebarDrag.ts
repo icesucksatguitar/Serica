@@ -54,16 +54,28 @@ export interface DragSource {
   id: string;
   /** Position within its section in the layout shown when the drag started. */
   index: number;
+  /** Pinned folder the item sits in, if any. */
+  folderId?: string;
 }
 
+/**
+ * `index` counts the section's other items (the dragged one left out), in
+ * section order. A pinned target also names the folder the item lands in
+ * (`null`: the pinned root, outside any folder).
+ */
 export type DropTarget =
-  | { type: 'section'; section: SidebarItemKind; index: number }
+  | { type: 'section'; section: SidebarItemKind; index: number; folderId?: string | null }
   | { type: 'space'; spaceId: string };
 
 export function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
   if (a === null || b === null) return a === b;
   if (a.type === 'space') return b.type === 'space' && a.spaceId === b.spaceId;
-  return b.type === 'section' && a.section === b.section && a.index === b.index;
+  return (
+    b.type === 'section' &&
+    a.section === b.section &&
+    a.index === b.index &&
+    (a.folderId ?? null) === (b.folderId ?? null)
+  );
 }
 
 /**
@@ -78,9 +90,18 @@ export function dropOp(source: DragSource, target: DropTarget | null, activeSpac
     return { type: 'space', id: source.id, from: source.kind, targetSpaceId: target.spaceId };
   }
   const index = Math.max(0, Math.trunc(target.index));
+  const intoPinned = target.section === 'pinned';
+  const folderId = intoPinned ? (target.folderId ?? null) : undefined;
   if (target.section === source.kind) {
-    if (index === source.index) return null;
-    return { type: 'reorder', section: source.kind, id: source.id, toIndex: index };
+    const sameFolder = !intoPinned || folderId === (source.folderId ?? null);
+    if (index === source.index && sameFolder) return null;
+    return {
+      type: 'reorder',
+      section: source.kind,
+      id: source.id,
+      toIndex: index,
+      ...(intoPinned ? { folderId } : {}),
+    };
   }
   return {
     type: 'section',
@@ -89,6 +110,7 @@ export function dropOp(source: DragSource, target: DropTarget | null, activeSpac
     to: target.section,
     spaceId: activeSpaceId,
     toIndex: index,
+    ...(intoPinned ? { folderId } : {}),
   };
 }
 
@@ -157,7 +179,14 @@ export function withLayout(src: SidebarSource, file: ProfilesFile): SidebarSourc
       ...(e.favicon !== undefined ? { favicon: e.favicon } : {}),
       unloaded: true,
     };
-    return { ...live, spaceId: e.spaceId, section: e.section, isPinned: e.section === 'pinned' };
+    const { folderId: _old, ...rest } = live;
+    return {
+      ...rest,
+      spaceId: e.spaceId,
+      section: e.section,
+      isPinned: e.section === 'pinned',
+      ...(e.folderId ? { folderId: e.folderId } : {}),
+    };
   });
   return { ...src, tabs, favorites: file.favorites };
 }

@@ -238,14 +238,57 @@ pub const PAGE_SCRIPT: &str = r#"(() => {
 
 /// Dark mode for PDFs. WebView2's PDF viewer is a sealed frame that page
 /// scripts and Dark Reader can't reach, so a click-through overlay below the
-/// viewer's toolbar recolors what is behind it: colors are inverted (white
-/// pages turn black, black text white), hues are kept, and the light grey the
-/// viewer's backdrop inverts to is pulled back to dark grey. Only acts on a
-/// top-level PDF document. `pdf_dark_js(on)` switches it.
+/// viewer's toolbar recolors what is behind it with an SVG filter:
+///
+/// - Neutral and pastel pixels (paper, text, rules, grey diagrams, light
+///   highlights) are inverted with their hue kept, onto a soft dark page:
+///   white paper becomes #1c1c1c, black text #e3e3e3.
+/// - Vivid pixels (chart colors, colored figures) keep their own color, so a
+///   yellow bar stays yellow instead of turning brown. In between, the mix
+///   follows the color's strength.
+/// - The viewer's own dark backdrop stays dark (told apart from #333 text by
+///   shape: an erode + dilate keeps only wide areas).
+///
+/// Only acts on a top-level PDF document. `pdf_dark_js(on)` switches it.
 pub const PDF_DARK_SCRIPT: &str = r#"(() => {
   if (window.top !== window || window.__sericaPdfDark) return;
   let on = false;
   const TOOLBAR = 41;
+  // The viewer's backdrop is #333 (0.2). Text can be #333 too, so the backdrop
+  // is told apart by shape: only #333 areas wider than a few px survive an
+  // erode + dilate (text strokes do not), and those keep their own color.
+  const BG_TABLE = Array.from({ length: 101 }, (_, i) => (i >= 19 && i <= 21 ? 1 : 0)).join(' ');
+  const FILTER =
+    '<svg width="0" height="0" style="position:absolute"><filter id="serica-pdf-dark-f" color-interpolation-filters="sRGB" x="0" y="0" width="100%" height="100%">'
+    // Inverted luminance with hues kept, squeezed onto a soft dark range.
+    + '<feColorMatrix in="SourceGraphic" type="matrix" values="-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0" result="neg"/>'
+    + '<feColorMatrix in="neg" type="hueRotate" values="180" result="negHue"/>'
+    + '<feComponentTransfer in="negHue" result="dark">'
+    + ['R', 'G', 'B'].map((c) => '<feFunc' + c + ' type="linear" slope="0.78" intercept="0.11"/>').join('')
+    + '</feComponentTransfer>'
+    // Color mask: (|R-G| + |G-B| + |B-R|) / 2 per pixel (the table below
+    // yields 2|d|). Greys and pastel highlights (up to ~0.55, e.g. #ffffc0)
+    // are inverted like paper, so their text stays readable; vivid colors
+    // (0.8 and up) are kept as they are.
+    + '<feColorMatrix in="SourceGraphic" type="matrix" values="1 -1 0 0 0.5 0 1 -1 0 0.5 -1 0 1 0 0.5 0 0 0 0 1" result="diff"/>'
+    + '<feComponentTransfer in="diff" result="absdiff">'
+    + ['R', 'G', 'B'].map((c) => '<feFunc' + c + ' type="table" tableValues="1 0 1"/>').join('')
+    + '</feComponentTransfer>'
+    + '<feColorMatrix in="absdiff" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0.5 0.5 0 0" result="satRaw"/>'
+    + '<feComponentTransfer in="satRaw" result="mask"><feFuncA type="table" tableValues="0 0 0 0 0 0 0.3 0.65 1 1 1"/></feComponentTransfer>'
+    // Colored parts from the original, the rest from the dark version.
+    + '<feComposite in="SourceGraphic" in2="mask" operator="in" result="keep"/>'
+    + '<feComposite in="dark" in2="mask" operator="out" result="inv"/>'
+    + '<feComposite in="keep" in2="inv" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="mixed"/>'
+    // The viewer's own backdrop stays as it is.
+    + '<feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.299 0.587 0.114 0 0" result="lum"/>'
+    + '<feComponentTransfer in="lum" result="bgRaw"><feFuncA type="table" tableValues="' + BG_TABLE + '"/></feComponentTransfer>'
+    + '<feMorphology in="bgRaw" operator="erode" radius="4" result="bgCore"/>'
+    + '<feMorphology in="bgCore" operator="dilate" radius="4" result="bgMask"/>'
+    + '<feComposite in="SourceGraphic" in2="bgMask" operator="in" result="bgKeep"/>'
+    + '<feComposite in="mixed" in2="bgMask" operator="out" result="page"/>'
+    + '<feComposite in="bgKeep" in2="page" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>'
+    + '</filter></svg>';
   const apply = () => {
     if (document.contentType !== 'application/pdf') return;
     const root = document.body || document.documentElement;
@@ -253,20 +296,22 @@ pub const PDF_DARK_SCRIPT: &str = r#"(() => {
     let el = document.getElementById('serica-pdf-dark');
     if (!on) { if (el) el.remove(); return; }
     if (el) return;
-    const t = [];
-    for (let i = 0; i <= 20; i++) { const x = i / 20; t.push(x > 0.72 && x < 0.88 ? 0.13 : x); }
-    const f = '<feFunc_ type="table" tableValues="' + t.join(' ') + '"/>';
     el = document.createElement('serica-pdf-dark');
     el.id = 'serica-pdf-dark';
-    el.innerHTML = '<svg width="0" height="0" style="position:absolute"><filter id="serica-pdf-dark-f" color-interpolation-filters="sRGB">'
-      + '<feColorMatrix type="matrix" values="-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0"/><feColorMatrix type="hueRotate" values="180"/>'
-      + '<feComponentTransfer>' + ['R', 'G', 'B'].map((c) => f.replace('_', c)).join('') + '</feComponentTransfer></filter></svg>';
-    const veil = document.createElement('div');
-    veil.style.cssText = 'position:fixed;left:0;right:0;top:' + TOOLBAR + 'px;bottom:0;pointer-events:none;z-index:2147483647;backdrop-filter:url(#serica-pdf-dark-f);';
-    el.appendChild(veil);
+    el.innerHTML = FILTER;
     root.appendChild(el);
+    // The veil refers to the filter only once the filter is in the document:
+    // a reference made in the same frame is not resolved and does nothing.
+    const holder = el;
+    requestAnimationFrame(() => {
+      if (!on || !holder.isConnected) return;
+      const veil = document.createElement('div');
+      veil.style.cssText = 'position:fixed;left:0;right:0;top:' + TOOLBAR + 'px;bottom:0;pointer-events:none;z-index:2147483647;backdrop-filter:url(#serica-pdf-dark-f);';
+      holder.appendChild(veil);
+    });
   };
   Object.defineProperty(window, '__sericaPdfDark', { value: (v) => { on = !!v; apply(); } });
+  Object.defineProperty(window, '__sericaPdfDarkOn', { get: () => on });
 })();"#;
 
 pub fn pdf_dark_js(on: bool) -> String {
@@ -854,10 +899,9 @@ impl TabHost {
     }
 
     /// Applies the dark-PDF setting to every open page (no-op on non-PDFs).
-    pub fn apply_pdf_dark(app: &Shared, on: bool) {
-        let js = pdf_dark_js(on);
-        for v in app.host.lock().views.values() {
-            let _ = v.webview.eval(&js);
+    pub fn apply_pdf_dark(app: &Shared) {
+        for (tab_id, v) in app.host.lock().views.iter() {
+            let _ = v.webview.eval(&pdf_dark_js(app.pdf_dark_for(tab_id)));
         }
     }
 

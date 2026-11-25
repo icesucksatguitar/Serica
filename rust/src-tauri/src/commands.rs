@@ -156,10 +156,10 @@ pub async fn reorder_tabs(dragged_tab_id: String, target_tab_id: String, app: St
         let list: Vec<&String> = order.iter().filter(|id| s.tab(id).map(|x| x.is_pinned == t.is_pinned).unwrap_or(false)).collect();
         let to = list.iter().position(|id| **id == target_tab_id).unwrap_or(0) as i64;
         if d.is_pinned == t.is_pinned && d.space_id == t.space_id {
-            s.apply_move(&MoveOp::Reorder { section: section.into(), id: dragged_tab_id.clone(), to_index: to });
+            s.apply_move(&MoveOp::Reorder { section: section.into(), id: dragged_tab_id.clone(), to_index: to, folder_id: None });
         } else {
             let from = if d.is_pinned { "pinned" } else { "today" };
-            s.apply_move(&MoveOp::Section { id: dragged_tab_id.clone(), from: from.into(), to: section.into(), space_id: t.space_id.clone(), to_index: Some(to) });
+            s.apply_move(&MoveOp::Section { id: dragged_tab_id.clone(), from: from.into(), to: section.into(), space_id: t.space_id.clone(), to_index: Some(to), folder_id: None });
         }
     });
     Ok(())
@@ -387,6 +387,21 @@ pub async fn set_viewport_hole(
         let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx).await;
     }
     Ok(())
+}
+
+/// The pick from Serica's page context menu (`page-context-menu` event):
+/// an engine command id, one of Serica's own entries, or neither (dismissed).
+#[tauri::command]
+pub fn page_menu_select(id: u64, command: Option<i32>, custom: Option<usize>, refocus: Option<bool>, app: State<'_, Shared>) {
+    #[cfg(windows)]
+    {
+        let app = app.inner().clone();
+        let handle = app.handle.clone();
+        let refocus = refocus.unwrap_or(false);
+        let _ = handle.run_on_main_thread(move || crate::webview_win::finish_page_menu(&app, id, command, custom, refocus));
+    }
+    #[cfg(not(windows))]
+    let _ = (id, command, custom, refocus, app);
 }
 
 /// Where the cursor is over the app window: `[x, y, clientWidth]` in physical
@@ -768,14 +783,47 @@ fn apply_text_scale(app: &Shared, old: f64, new: f64) {
 }
 
 #[tauri::command]
-pub async fn set_theme_mode(mode: String, window: Window) -> R<Value> {
+pub async fn set_theme_mode(mode: String, window: Window, app: State<'_, Shared>) -> R<Value> {
     let theme = match mode.as_str() {
         "dark" => Some(tauri::Theme::Dark),
         "light" => Some(tauri::Theme::Light),
         _ => None,
     };
     let _ = window.set_theme(theme);
+    let dark = match theme {
+        Some(t) => t == tauri::Theme::Dark,
+        None => window.theme().map(|t| t == tauri::Theme::Dark).unwrap_or(true),
+    };
+    app.set_ui_dark(dark);
     Ok(json!({ "success": true, "isDark": mode == "dark" }))
+}
+
+// ------------------------------------------------------------------ new-tab widgets
+
+#[tauri::command]
+pub async fn widget_github(user: String) -> Result<crate::widgets::Contributions, String> {
+    crate::widgets::github_contributions(&user).await
+}
+
+#[tauri::command]
+pub async fn widget_geocode(query: String) -> Result<Value, String> {
+    crate::widgets::geocode(&query).await
+}
+
+#[tauri::command]
+pub async fn widget_weather(lat: f64, lon: f64, fahrenheit: bool) -> Result<Value, String> {
+    crate::widgets::weather(lat, lon, fahrenheit).await
+}
+
+/// Dark-PDF state of a tab (top-bar toggle on PDF tabs).
+#[tauri::command]
+pub fn get_pdf_dark_tab(tab_id: String, app: State<'_, Shared>) -> Value {
+    json!({ "available": app.pdf_dark_global(), "dark": app.pdf_dark_for(&tab_id) })
+}
+
+#[tauri::command]
+pub fn set_pdf_dark_tab(tab_id: String, dark: bool, app: State<'_, Shared>) {
+    app.set_pdf_dark_tab(&tab_id, dark);
 }
 
 #[tauri::command]

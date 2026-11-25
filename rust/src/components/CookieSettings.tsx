@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Cookie, Trash2, X } from 'lucide-react';
 import type { BrowserSettings } from '../shared/settings';
-import { SettingsSwitch } from './SettingsPanel';
+import { Switch as SettingsSwitch } from './Switch';
 
 interface CookieSettingsProps {
   settings: BrowserSettings;

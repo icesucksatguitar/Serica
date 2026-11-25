@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { SlidersHorizontal, X } from 'lucide-react';
+import { DEFAULT_HOME_WIDGETS, type HomeWidgets } from '../shared/settings';
+import { GithubWidget, NotesWidget, WeatherWidget, WidgetSettings } from './HomeWidgets';
+import { Switch } from './Switch';
 
 interface HomescreenProps {
   isDarkMode?: boolean;
   onNavigate: (url: string) => void;
   onOpenCommandBar?: () => void;
   userName?: string;
+  widgets?: HomeWidgets;
+  onUpdateWidgets?: (next: HomeWidgets) => void;
 }
 
 function formatClockParts(now: Date) {
@@ -20,7 +26,20 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   onNavigate,
   onOpenCommandBar,
   userName,
+  widgets = DEFAULT_HOME_WIDGETS,
+  onUpdateWidgets,
 }) => {
+  const [customizing, setCustomizing] = useState(false);
+  useEffect(() => {
+    if (!customizing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCustomizing(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [customizing]);
+  const showGithub = widgets.github.enabled && widgets.github.user.length > 0;
+  const hasWidgets = showGithub || widgets.weather.enabled || widgets.notes.enabled;
   const [displayName, setDisplayName] = useState<string>(() => {
     if (userName) return userName;
     try {
@@ -114,7 +133,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
 
   return (
     <div
-      className={`serica-minimal-newtab neutrino-minimal-newtab ${isSearchFocused ? 'search-focused' : ''}`}
+      className={`serica-minimal-newtab neutrino-minimal-newtab${isSearchFocused ? ' search-focused' : ''}${hasWidgets ? ' with-widgets' : ''}`}
       onClick={() => {
         if (!isSearchRevealed) setIsSearchRevealed(true);
       }}
@@ -136,12 +155,12 @@ export const Homescreen: React.FC<HomescreenProps> = ({
 
       {/* Main Peaceful Hero Center */}
       <div className="homescreen-hero-center">
-        {/* Y Combinator Italic Serif Greeting */}
+        {widgets.clock && (
+        <>
         <div className="yc-italic-greeting" ref={greetRef}>
           {getGreeting()}
         </div>
 
-        {/* Refined, Smaller Modern Digital Clock */}
         <div className="digital-clock-container compact-clock">
           <div className="digital-clock-date" ref={dateRef}>{initialClock.dateStr}</div>
           <div className="digital-clock-time">
@@ -149,6 +168,8 @@ export const Homescreen: React.FC<HomescreenProps> = ({
             <span className="digital-clock-seconds" ref={secRef}>{initialClock.seconds}</span>
           </div>
         </div>
+        </>
+        )}
 
         {/* Search URL Bar Pill */}
         <div
@@ -201,7 +222,48 @@ export const Homescreen: React.FC<HomescreenProps> = ({
             <span className="reveal-text">Search or enter URL</span>
           </button>
         )}
+        {hasWidgets && (
+          <div className="home-widgets" onClick={(e) => e.stopPropagation()}>
+            {widgets.weather.enabled && <WeatherWidget widgets={widgets.weather} />}
+            {showGithub && <GithubWidget user={widgets.github.user} onOpen={onNavigate} />}
+            {widgets.notes.enabled && (
+              <NotesWidget
+                text={widgets.notes.text}
+                onChange={(text) => onUpdateWidgets?.({ ...widgets, notes: { ...widgets.notes, text } })}
+              />
+            )}
+          </div>
+        )}
       </div>
+
+      {onUpdateWidgets && (
+        <div className="home-customize" onClick={(e) => e.stopPropagation()}>
+          {customizing && (
+            <div className="home-customize-panel" role="dialog" aria-label="Customize new tab">
+              <header className="home-customize-head">
+                <span>New tab</span>
+                <button type="button" className="btn btn-quiet btn-icon" aria-label="Close" onClick={() => setCustomizing(false)}>
+                  <X size={14} />
+                </button>
+              </header>
+              <WidgetSettings
+                widgets={widgets}
+                onChange={onUpdateWidgets}
+                renderSwitch={(checked, label, onChange) => <Switch checked={checked} label={label} onChange={onChange} />}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className={`home-customize-btn${customizing ? ' active' : ''}`}
+            aria-expanded={customizing}
+            onClick={() => setCustomizing((c) => !c)}
+          >
+            <SlidersHorizontal size={13} aria-hidden="true" />
+            <span>Customize</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

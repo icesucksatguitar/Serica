@@ -5,6 +5,36 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.4.6': [
+    {
+      title: 'Instant space switching',
+      text: 'Switching spaces, by click, swipe or Ctrl+1-9, now happens at once, and the sidebar never shows one space while you are still in another.',
+    },
+    {
+      title: 'Manage spaces from the sidebar',
+      text: 'Add a space with +, double-click its name to rename it, or use ⋯ or a right-click to change its icon and color, move it, add a folder or delete it.',
+    },
+    {
+      title: 'Folders that take drops',
+      text: 'Drag any tab into a folder, between folders or back out. The folder lights up when a drop will land in it.',
+    },
+    {
+      title: 'Serica’s own right-click menu',
+      text: 'Right-clicking a page shows Serica’s menu, with copy, paste, spelling, Inspect and new-tab options for links and images.',
+    },
+    {
+      title: 'Better dark PDFs',
+      text: 'Pages turn dark and text light, while chart colors stay true. PDFs follow light and dark mode, and the address bar has a button to show a PDF in its own colors.',
+    },
+    {
+      title: 'New tab widgets',
+      text: 'Add your GitHub contributions, the weather or a notes pad to the new tab page with Customize.',
+    },
+    {
+      title: 'A calmer, steadier look',
+      text: 'Settings no longer shifts around, and Appearance, the VPN panel and the website dock are simpler and flatter. The top bar has more room and stays put on websites.',
+    },
+  ],
   '0.4.5': [
     {
       title: 'A slimmer top bar',

@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   Puzzle,
   PanelLeft,
@@ -12,12 +12,12 @@ import {
   Zap,
   Layers,
   KeyRound,
-  SlidersHorizontal,
   Info,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
   ARCHIVE_INTERVAL_OPTIONS,
+  DEFAULT_HOME_WIDGETS,
   SEARCH_ENGINES,
   TAB_SLEEP_OPTIONS,
   type ArchiveIntervalHours,
@@ -28,6 +28,8 @@ import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
 import { AboutSettings } from './AboutSettings';
 import { CookieSettings } from './CookieSettings';
+import { WidgetSettings } from './HomeWidgets';
+import { Switch } from './Switch';
 import { TOOLS, normalizePinnedTools, type ToolActions } from '../shared/tools';
 import { TEXT_SCALE_OPTIONS } from '../shared/settings';
 
@@ -48,7 +50,7 @@ export interface SettingsPanelProps {
   isDarkMode: boolean;
   /** Same side effects as the top-bar theme button; `true` picks Dark, `false` picks Light. */
   onSetDarkMode: (dark: boolean) => void;
-  /** Opens the Theme & Appearance modal. The panel closes itself first. */
+  /** Opens the space theme editor. The panel closes itself first. */
   onOpenThemeStudio: () => void;
   userName: string;
   onUserNameChange: (name: string) => void;
@@ -85,84 +87,131 @@ export const RIGHT_PINS_DOCK_HINT = 'One-click sites on the right edge. On web p
 const archiveIntervalLabel = (value: ArchiveIntervalHours): string =>
   ARCHIVE_INTERVAL_LABELS[String(value)];
 
-interface SwitchProps {
-  checked: boolean;
-  label: string;
-  onChange: (next: boolean) => void;
-}
-
-export const SettingsSwitch: React.FC<SwitchProps> = ({ checked, label, onChange }) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    aria-label={label}
-    className={`settings-switch${checked ? ' on' : ''}`}
-    onClick={() => onChange(!checked)}
-  >
-    <span className="settings-switch-thumb" aria-hidden="true" />
-  </button>
-);
+/** Kept for existing imports; the control itself lives in Switch.tsx. */
+export const SettingsSwitch = Switch;
 
 interface SettingsTabMeta {
   id: SettingsTabId;
   label: string;
   icon: LucideIcon;
-  title: string;
-  description: string;
 }
 
 export const SETTINGS_TABS: readonly SettingsTabMeta[] = [
-  {
-    id: 'appearance',
-    label: 'Appearance',
-    icon: Palette,
-    title: 'Appearance & Theme',
-    description: 'Customize theme mode, space colors, display greeting, and sidebar layout',
-  },
-  {
-    id: 'privacy',
-    label: 'Privacy',
-    icon: Shield,
-    title: 'Privacy & Shields',
-    description: 'Protect your browsing data, block tracking, and control website shields',
-  },
-  {
-    id: 'search',
-    label: 'Search',
-    icon: Search,
-    title: 'Search Engine',
-    description: 'Select your default search provider for omnibox queries and address bar navigation',
-  },
-  {
-    id: 'performance',
-    label: 'Performance',
-    icon: Zap,
-    title: 'Performance & Storage',
-    description: 'Optimize memory usage, memory saver, and automatic tab archiving',
-  },
-  {
-    id: 'profiles',
-    label: 'Profiles & Spaces',
-    icon: Layers,
-    title: 'Profiles & Spaces',
-    description: 'Manage browser profiles, organize spaces, and customize space colors',
-  },
-  {
-    id: 'passwords',
-    label: 'Passwords',
-    icon: KeyRound,
-    title: 'Passwords',
-    description: 'Saving and filling in passwords on websites',
-  },
-  {
-    id: 'about',
-    label: 'About',
-    icon: Info,
-    title: 'About Serica',
-    description: 'Your version of Serica and automatic updates',
-  },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'privacy', label: 'Privacy', icon: Shield },
+  { id: 'search', label: 'Search', icon: Search },
+  { id: 'performance', label: 'Performance', icon: Zap },
+  { id: 'profiles', label: 'Profiles & Spaces', icon: Layers },
+  { id: 'passwords', label: 'Passwords', icon: KeyRound },
+  { id: 'about', label: 'About', icon: Info },
 ];
+
+// ---------------------------------------------------------------------------
+// Building blocks: a group is a label over hairline-separated rows.
+
+const Group: React.FC<{ title?: string; children: React.ReactNode }> = ({ title, children }) => (
+  <section className="settings-group">
+    {title && <h3 className="settings-group-label">{title}</h3>}
+    <div className="settings-group-rows">{children}</div>
+  </section>
+);
+
+const Row: React.FC<{ label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode; htmlFor?: string }> = ({
+  label,
+  hint,
+  children,
+  htmlFor,
+}) => (
+  <div className="settings-row">
+    <div className="settings-row-text">
+      {htmlFor ? (
+        <label className="settings-row-label" htmlFor={htmlFor}>
+          {label}
+        </label>
+      ) : (
+        <span className="settings-row-label">{label}</span>
+      )}
+      {hint && <span className="settings-hint">{hint}</span>}
+    </div>
+    {children !== undefined && <div className="settings-row-control">{children}</div>}
+  </div>
+);
+
+function Segmented<T extends string | number | boolean>(props: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string; icon?: LucideIcon }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="settings-segmented" role="radiogroup" aria-label={props.label}>
+      {props.options.map((o) => {
+        const active = o.value === props.value;
+        const Icon = o.icon;
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            className={`settings-segment${active ? ' active' : ''}`}
+            onClick={() => {
+              if (!active) props.onChange(o.value);
+            }}
+          >
+            {Icon && <Icon size={13} aria-hidden="true" />}
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * A miniature of the browser drawn with the live theme variables, so it shows
+ * exactly what the current mode, space colors and layout choices look like.
+ */
+const AppearancePreview: React.FC<{ topTabs: boolean; pills: boolean; dock: boolean }> = ({ topTabs, pills, dock }) => (
+  <div className={`appearance-preview${topTabs ? ' top-tabs' : ''}${pills ? ' pills' : ''}`} aria-hidden="true">
+    <div className="ap-topbar">
+      <span className="ap-dot" />
+      <span className="ap-ctrl" />
+      <span className="ap-ctrl" />
+      <span className="ap-url" />
+      <span className="ap-ctrl" />
+    </div>
+    {topTabs && (
+      <div className="ap-tabstrip">
+        <span className="ap-tab active" />
+        <span className="ap-tab" />
+        <span className="ap-tab" />
+      </div>
+    )}
+    <div className="ap-body">
+      {!topTabs && (
+        <div className="ap-sidebar">
+          <span className="ap-row active" />
+          <span className="ap-row" />
+          <span className="ap-row" />
+          <span className="ap-row short" />
+        </div>
+      )}
+      <div className="ap-page">
+        <span className="ap-line wide" />
+        <span className="ap-line" />
+        <span className="ap-line" />
+      </div>
+      {dock && (
+        <div className="ap-dock">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+    </div>
+  </div>
+);
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen,
@@ -184,19 +233,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
   const [nameDraft, setNameDraft] = useState(userName);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Fresh form state each time the panel opens, and follow name changes made elsewhere.
+  // Fresh state each time the panel opens. A name change made elsewhere only
+  // updates the field; it never switches the page under the user.
   useEffect(() => {
-    if (isOpen) {
-      setNameDraft(userName);
-      setActiveTab(initialTab);
-    }
-  }, [isOpen, userName, initialTab]);
+    if (isOpen) setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
+  useEffect(() => setNameDraft(userName), [userName]);
+
+  // Every page starts at its top: one scroll position shared by all pages
+  // would leave a short page scrolled past its end.
+  useLayoutEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
         onClose();
       }
@@ -223,52 +278,46 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleTablistKeyDown = (e: React.KeyboardEvent) => {
-    const currentIndex = SETTINGS_TABS.findIndex((t) => t.id === activeTab);
-    if (currentIndex < 0) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault();
-      const nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
-      const nextTab = SETTINGS_TABS[nextIndex];
-      setActiveTab(nextTab.id);
-      document.getElementById(`${idBase}-tab-${nextTab.id}`)?.focus();
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault();
-      const prevIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
-      const prevTab = SETTINGS_TABS[prevIndex];
-      setActiveTab(prevTab.id);
-      document.getElementById(`${idBase}-tab-${prevTab.id}`)?.focus();
-    }
+    const i = SETTINGS_TABS.findIndex((t) => t.id === activeTab);
+    if (i < 0) return;
+    let next = -1;
+    if (e.key === 'ArrowDown') next = (i + 1) % SETTINGS_TABS.length;
+    else if (e.key === 'ArrowUp') next = (i - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = SETTINGS_TABS.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    setActiveTab(SETTINGS_TABS[next].id);
+    document.getElementById(`${idBase}-tab-${SETTINGS_TABS[next].id}`)?.focus();
   };
 
-  const currentTabMeta =
-    SETTINGS_TABS.find((t) => t.id === activeTab) ?? SETTINGS_TABS[0];
+  const currentTab = SETTINGS_TABS.find((t) => t.id === activeTab) ?? SETTINGS_TABS[0];
+  const panel = (id: SettingsTabId, body: React.ReactNode) => (
+    <div
+      role="tabpanel"
+      id={`${idBase}-tabpanel-${id}`}
+      aria-labelledby={`${idBase}-tab-${id}`}
+      hidden={activeTab !== id}
+      className="settings-tabpanel"
+    >
+      {body}
+    </div>
+  );
+  const pinnedTools = normalizePinnedTools(settings.pinnedTools);
+  const topTabs = (settings.tabLayout ?? 'sidebar') === 'top';
+  const widgets = settings.homeWidgets ?? DEFAULT_HOME_WIDGETS;
 
   return (
-    <div className="modal-overlay settings-overlay" onClick={onClose}>
-      <div
-        className="modal-content-card settings-panel-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Left Navigation Sidebar */}
+    <div
+      className="modal-overlay settings-overlay"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="settings-panel-card" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <aside className="settings-nav-sidebar" aria-label="Settings navigation">
-          <div className="modal-header settings-nav-header">
-            <div className="settings-nav-brand">
-              <SlidersHorizontal size={17} className="settings-brand-icon" aria-hidden="true" />
-              <span className="modal-title" id={titleId}>
-                Settings
-              </span>
-            </div>
-          </div>
-
-          <nav
-            className="settings-nav-list"
-            role="tablist"
-            aria-label="Settings categories"
-            onKeyDown={handleTablistKeyDown}
-          >
+          <span className="settings-nav-title">Settings</span>
+          <nav className="settings-nav-list" role="tablist" aria-orientation="vertical" onKeyDown={handleTablistKeyDown}>
             {SETTINGS_TABS.map((tab) => {
               const Icon = tab.icon;
               const isSelected = activeTab === tab.id;
@@ -278,232 +327,114 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   id={`${idBase}-tab-${tab.id}`}
                   type="button"
                   role="tab"
+                  tabIndex={isSelected ? 0 : -1}
                   aria-selected={isSelected}
                   aria-controls={`${idBase}-tabpanel-${tab.id}`}
-                  aria-label={`${tab.label} settings`}
                   className={`settings-nav-tab${isSelected ? ' active' : ''}`}
                   onClick={() => setActiveTab(tab.id)}
                 >
-                  <Icon size={16} className="settings-tab-icon" aria-hidden="true" />
+                  <Icon size={15} className="settings-tab-icon" aria-hidden="true" />
                   <span className="settings-tab-label">{tab.label}</span>
                 </button>
               );
             })}
           </nav>
-
-          <div className="settings-nav-footer">
-            <span className="settings-nav-hint">
-              <kbd className="settings-kbd">Esc</kbd> to close
-            </span>
-          </div>
         </aside>
 
-        {/* Right Content Area */}
         <main className="settings-content-pane">
           <header className="settings-pane-header">
-            <div className="settings-pane-header-text">
-              <h2 className="settings-pane-title">{currentTabMeta.title}</h2>
-              <p className="settings-pane-description">{currentTabMeta.description}</p>
-            </div>
-            <button
-              type="button"
-              className="close-btn settings-close-btn"
-              onClick={onClose}
-              title="Close settings"
-              aria-label="Close settings"
-            >
+            <h2 className="settings-pane-title" id={titleId}>
+              {currentTab.label}
+            </h2>
+            <button type="button" className="btn btn-quiet btn-icon" onClick={onClose} title="Close (Esc)" aria-label="Close settings">
               <X size={16} />
             </button>
           </header>
 
-          <div className="settings-content-scroll">
-            {/* 1. Appearance Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-appearance`}
-              aria-labelledby={`${idBase}-tab-appearance`}
-              hidden={activeTab !== 'appearance'}
-              className="settings-tabpanel"
-            >
-              <section className="settings-section" aria-label="Appearance">
-                <h3 className="settings-section-title">Appearance</h3>
-
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Mode</span>
-                      <span className="settings-hint">Select your preferred color scheme</span>
-                    </div>
-                    <div className="settings-segmented" role="radiogroup" aria-label="Theme mode">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={isDarkMode}
-                        aria-label="Dark"
-                        className={`settings-segment${isDarkMode ? ' active' : ''}`}
-                        onClick={() => {
-                          if (!isDarkMode) onSetDarkMode(true);
-                        }}
-                      >
-                        <Moon size={13} aria-hidden="true" />
-                        Dark
-                      </button>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={!isDarkMode}
-                        aria-label="Light"
-                        className={`settings-segment${!isDarkMode ? ' active' : ''}`}
-                        onClick={() => {
-                          if (isDarkMode) onSetDarkMode(false);
-                        }}
-                      >
-                        <Sun size={13} aria-hidden="true" />
-                        Light
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Tab layout</span>
-                      <span className="settings-hint">Vertical sidebar with hover previews, or tabs along the top</span>
-                    </div>
-                    <div className="settings-segmented" role="radiogroup" aria-label="Tab layout">
-                      {([
-                        ['sidebar', 'Sidebar', PanelLeft],
-                        ['top', 'Top tabs', PanelTop],
-                      ] as const).map(([value, label, Icon]) => {
-                        const active = (settings.tabLayout ?? 'sidebar') === value;
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            aria-label={label}
-                            className={`settings-segment${active ? ' active' : ''}`}
-                            onClick={() => {
-                              if (!active) onUpdateSettings({ tabLayout: value });
-                            }}
-                          >
-                            <Icon size={13} aria-hidden="true" />
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Top bar style</span>
-                      <span className="settings-hint">Flat, quiet buttons, or rounded outlined pills</span>
-                    </div>
-                    <div className="settings-segmented" role="radiogroup" aria-label="Top bar style">
-                      {([
-                        ['flat', 'Flat'],
-                        ['pill', 'Pills'],
-                      ] as const).map(([value, label]) => {
-                        const active = (settings.topBarStyle ?? 'flat') === value;
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            aria-label={label}
-                            className={`settings-segment${active ? ' active' : ''}`}
-                            onClick={() => {
-                              if (!active) onUpdateSettings({ topBarStyle: value });
-                            }}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Auto-hide top bar</span>
-                      <span className="settings-hint">On websites, show the top bar only when the pointer reaches the top edge</span>
-                    </div>
-                    <SettingsSwitch
-                      checked={settings.topBarAutoHide !== false}
-                      label="Auto-hide top bar"
-                      onChange={(next) => onUpdateSettings({ topBarAutoHide: next })}
+          <div className="settings-content-scroll" ref={scrollRef}>
+            {panel(
+              'appearance',
+              <>
+                <div className="appearance-hero">
+                  <AppearancePreview topTabs={topTabs} pills={settings.topBarStyle === 'pill'} dock={settings.rightPinsDockVisible} />
+                  <div className="appearance-hero-controls">
+                    <Segmented
+                      label="Theme mode"
+                      value={isDarkMode}
+                      options={[
+                        { value: true, label: 'Dark', icon: Moon },
+                        { value: false, label: 'Light', icon: Sun },
+                      ]}
+                      onChange={(dark) => onSetDarkMode(dark)}
                     />
+                    <div className="appearance-colors">
+                      <span className="appearance-swatches" aria-hidden="true">
+                        <span style={{ background: 'var(--theme-c1)' }} />
+                        <span style={{ background: 'var(--theme-c2)' }} />
+                        <span style={{ background: 'var(--theme-c3)' }} />
+                      </span>
+                      <button type="button" className="btn" onClick={openThemeStudio}>
+                        <Palette size={13} aria-hidden="true" />
+                        Edit space colors
+                      </button>
+                    </div>
+                    <p className="settings-hint">Mode and colors belong to the current space.</p>
                   </div>
+                </div>
 
-                  <div className="settings-divider" />
+                <Group title="Layout">
+                  <Row label="Tabs">
+                    <Segmented
+                      label="Tab layout"
+                      value={topTabs ? 'top' : 'sidebar'}
+                      options={[
+                        { value: 'sidebar', label: 'Sidebar', icon: PanelLeft },
+                        { value: 'top', label: 'Top', icon: PanelTop },
+                      ]}
+                      onChange={(tabLayout) => onUpdateSettings({ tabLayout })}
+                    />
+                  </Row>
+                  <Row label="Top bar buttons">
+                    <Segmented
+                      label="Top bar style"
+                      value={settings.topBarStyle === 'pill' ? 'pill' : 'flat'}
+                      options={[
+                        { value: 'flat', label: 'Flat' },
+                        { value: 'pill', label: 'Outlined' },
+                      ]}
+                      onChange={(topBarStyle) => onUpdateSettings({ topBarStyle })}
+                    />
+                  </Row>
+                  <Row label="Hide the top bar on websites" hint="It slides in when the pointer reaches the top edge">
+                    <Switch
+                      checked={settings.topBarAutoHide === true}
+                      label="Hide the top bar on websites"
+                      onChange={(topBarAutoHide) => onUpdateSettings({ topBarAutoHide })}
+                    />
+                  </Row>
+                  <Row label="Website dock" hint={RIGHT_PINS_DOCK_HINT}>
+                    <Switch
+                      checked={settings.rightPinsDockVisible}
+                      label="Website dock"
+                      onChange={(rightPinsDockVisible) => onUpdateSettings({ rightPinsDockVisible })}
+                    />
+                  </Row>
+                  <Row label="Text size" hint="The interface and newly opened pages">
+                    <Segmented
+                      label="Text size"
+                      value={TEXT_SCALE_OPTIONS.find((o) => Math.abs((settings.textScale ?? 1) - o.value) < 0.001)?.value ?? 1}
+                      options={TEXT_SCALE_OPTIONS}
+                      onChange={(textScale) => onUpdateSettings({ textScale })}
+                    />
+                  </Row>
+                </Group>
 
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Text size</span>
-                      <span className="settings-hint">Scales the browser interface and new web pages</span>
-                    </div>
-                    <div className="settings-segmented" role="radiogroup" aria-label="Text size">
-                      {TEXT_SCALE_OPTIONS.map(({ value, label }) => {
-                        const active = Math.abs((settings.textScale ?? 1) - value) < 0.001;
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            aria-label={label}
-                            className={`settings-segment${active ? ' active' : ''}`}
-                            onClick={() => {
-                              if (!active) onUpdateSettings({ textScale: value });
-                            }}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Colors</span>
-                      <span className="settings-hint">Customize space colors, gradients, and ambient glows</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="settings-button"
-                      aria-label="Theme & accent"
-                      onClick={openThemeStudio}
-                    >
-                      <Palette size={13} aria-hidden="true" />
-                      Theme &amp; accent
-                    </button>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <label className="settings-row-label" htmlFor={nameId}>
-                        Display name
-                      </label>
-                      <span className="settings-hint">Used for home greeting and profile identity</span>
-                    </div>
+                <Group title="New tab">
+                  <Row label="Your name" hint="Used in the greeting" htmlFor={nameId}>
                     <input
                       id={nameId}
                       className="settings-input settings-name-input"
                       type="text"
-                      aria-label="Display name"
                       value={nameDraft}
                       maxLength={40}
                       onChange={(e) => setNameDraft(e.target.value)}
@@ -515,106 +446,72 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         }
                       }}
                     />
-                  </div>
-                </div>
+                  </Row>
+                  <WidgetSettings
+                    widgets={widgets}
+                    onChange={(homeWidgets) => onUpdateSettings({ homeWidgets })}
+                    renderSwitch={(checked, label, onChange) => <Switch checked={checked} label={label} onChange={onChange} />}
+                  />
+                </Group>
 
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Website dock</span>
-                      <span className="settings-hint">{RIGHT_PINS_DOCK_HINT}</span>
-                    </div>
-                    <SettingsSwitch
-                      checked={settings.rightPinsDockVisible}
-                      label="Show right pins dock"
-                      onChange={(next) => onUpdateSettings({ rightPinsDockVisible: next })}
-                    />
-                  </div>
-                </div>
-
-                <h3 className="settings-section-title">Top bar tools</h3>
-                <div className="settings-card">
-                  <p className="settings-hint top-bar-tools-intro">
-                    Open any tool from here. Pinned tools also show in the top bar's ⋯ menu, next to the light/dark
-                    switch and Settings.
-                  </p>
+                <Group title="Top bar menu">
                   {TOOLS.map((tool) => {
-                    const pinned = normalizePinnedTools(settings.pinnedTools);
-                    const isPinned = pinned.includes(tool.key);
+                    const isPinned = pinnedTools.includes(tool.key);
                     const Icon = tool.icon;
                     return (
-                      <div className="settings-row top-bar-tool-row" key={tool.key}>
-                        <span className="top-bar-tool-icon" aria-hidden="true">
+                      <div className="settings-row" key={tool.key}>
+                        <span className="settings-row-icon" aria-hidden="true">
                           <Icon size={15} />
                         </span>
                         <div className="settings-row-text">
                           <span className="settings-row-label">{tool.name}</span>
                           <span className="settings-hint">{tool.hint}</span>
                         </div>
-                        {toolActions && (
-                          <button
-                            type="button"
-                            className="settings-button"
-                            onClick={() => {
-                              onClose();
-                              toolActions[tool.key]();
-                            }}
-                          >
-                            Open
-                          </button>
-                        )}
-                        <SettingsSwitch
-                          checked={isPinned}
-                          label={`Pin ${tool.name} to the top bar`}
-                          onChange={(next) =>
-                            onUpdateSettings({
-                              pinnedTools: next ? [...pinned, tool.key] : pinned.filter((k) => k !== tool.key),
-                            })
-                          }
-                        />
+                        <div className="settings-row-control">
+                          {toolActions && (
+                            <button
+                              type="button"
+                              className="btn btn-quiet"
+                              onClick={() => {
+                                onClose();
+                                toolActions[tool.key]();
+                              }}
+                            >
+                              Open
+                            </button>
+                          )}
+                          <Switch
+                            checked={isPinned}
+                            label={`Show ${tool.name} in the top bar menu`}
+                            onChange={(next) =>
+                              onUpdateSettings({
+                                pinnedTools: next ? [...pinnedTools, tool.key] : pinnedTools.filter((k) => k !== tool.key),
+                              })
+                            }
+                          />
+                        </div>
                       </div>
                     );
                   })}
-                </div>
-              </section>
-            </div>
+                </Group>
+              </>,
+            )}
 
-            {/* 2. Privacy Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-privacy`}
-              aria-labelledby={`${idBase}-tab-privacy`}
-              hidden={activeTab !== 'privacy'}
-              className="settings-tabpanel"
-            >
-              <section className="settings-section" aria-label="Privacy">
-                <h3 className="settings-section-title">Privacy</h3>
-
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Shields</span>
-                      <span className="settings-hint">Blocks ads, trackers and fingerprinting</span>
-                    </div>
-                    <SettingsSwitch
+            {panel(
+              'privacy',
+              <>
+                <Group>
+                  <Row label="Shields" hint="Blocks ads, trackers and fingerprinting on every site">
+                    <Switch
                       checked={settings.adblockEnabled}
                       label="Shields"
-                      onChange={(next) => onUpdateSettings({ adblockEnabled: next })}
+                      onChange={(adblockEnabled) => onUpdateSettings({ adblockEnabled })}
                     />
-                  </div>
-                </div>
-
-                <CookieSettings settings={settings} onUpdateSettings={onUpdateSettings} />
-
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Extensions</span>
-                      <span className="settings-hint">Add, disable or remove Chrome Web Store extensions</span>
-                    </div>
+                  </Row>
+                  <Row label="Extensions" hint="Add, turn off or remove Chrome Web Store extensions">
                     <button
                       type="button"
-                      className="settings-button"
+                      className="btn"
                       onClick={() => {
                         onClose();
                         window.dispatchEvent(new CustomEvent('serica:open-extensions'));
@@ -623,236 +520,87 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <Puzzle size={13} aria-hidden="true" />
                       Manage
                     </button>
-                  </div>
-                </div>
+                  </Row>
+                </Group>
+                <CookieSettings settings={settings} onUpdateSettings={onUpdateSettings} />
+                <p className="settings-footnote">Cookies, sessions and site storage are kept separately for each profile.</p>
+              </>,
+            )}
 
-                <div className="settings-info-card">
-                  <div className="settings-info-header">
-                    <Shield size={14} className="settings-info-icon" aria-hidden="true" />
-                    <span className="settings-info-title">Shields Active Protection</span>
-                  </div>
-                  <p className="settings-info-text">
-                    Serica shields block known tracking domains, intrusive scripts, and analytics beacons automatically. Website cookies, sessions, and storage remain strictly partitioned per profile.
-                  </p>
-                </div>
-              </section>
-            </div>
+            {panel(
+              'search',
+              <Group>
+                <Row label="Search engine" hint="For searches typed in the address bar">
+                  <Segmented
+                    label="Search engine"
+                    value={settings.searchEngine}
+                    options={ENGINE_IDS.map((id) => ({ value: id, label: SEARCH_ENGINES[id].label }))}
+                    onChange={(searchEngine) => onUpdateSettings({ searchEngine })}
+                  />
+                </Row>
+              </Group>,
+            )}
 
-            {/* 3. Search Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-search`}
-              aria-labelledby={`${idBase}-tab-search`}
-              hidden={activeTab !== 'search'}
-              className="settings-tabpanel"
-            >
-              <section className="settings-section" aria-label="Search">
-                <h3 className="settings-section-title">Search</h3>
-
-                <div className="settings-card">
-                  <div className="settings-row-text" style={{ marginBottom: 10 }}>
-                    <span className="settings-row-label">Default Search Engine</span>
-                    <span className="settings-hint">Used for address bar queries and suggestions</span>
-                  </div>
-                  <div
-                    className="settings-segmented settings-segmented-full"
-                    role="radiogroup"
-                    aria-label="Search engine"
-                  >
-                    {ENGINE_IDS.map((id) => {
-                      const selected = settings.searchEngine === id;
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          aria-label={SEARCH_ENGINES[id].label}
-                          className={`settings-segment${selected ? ' active' : ''}`}
-                          onClick={() => {
-                            if (!selected) onUpdateSettings({ searchEngine: id });
-                          }}
-                        >
-                          {SEARCH_ENGINES[id].label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            {/* 4. Performance Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-performance`}
-              aria-labelledby={`${idBase}-tab-performance`}
-              hidden={activeTab !== 'performance'}
-              className="settings-tabpanel"
-            >
-              <section className="settings-section" aria-label="Performance">
-                <h3 className="settings-section-title">Performance</h3>
-
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Memory saver</span>
-                      <span className="settings-hint">{zenSleepHint(settings.tabSleepMinutes)}</span>
-                    </div>
-                    <SettingsSwitch
+            {panel(
+              'performance',
+              <>
+                <Group title="Memory">
+                  <Row label="Memory saver" hint={zenSleepHint(settings.tabSleepMinutes)}>
+                    <Switch
                       checked={settings.zenSleepEnabled}
                       label="Memory saver"
-                      onChange={(next) => onUpdateSettings({ zenSleepEnabled: next })}
+                      onChange={(zenSleepEnabled) => onUpdateSettings({ zenSleepEnabled })}
                     />
-                  </div>
-
+                  </Row>
                   {settings.zenSleepEnabled && (
-                    <>
-                      <div className="settings-row-text" style={{ marginTop: 4 }}>
-                        <span className="settings-row-label">Free memory from tabs after</span>
-                      </div>
-                      <div
-                        className="settings-segmented settings-segmented-full"
-                        role="radiogroup"
-                        aria-label="Free memory from tabs after"
-                        style={{ marginTop: 8 }}
-                      >
-                        {TAB_SLEEP_OPTIONS.map((value) => {
-                          const selected = settings.tabSleepMinutes === value;
-                          const label = tabSleepLabel(value);
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              role="radio"
-                              aria-checked={selected}
-                              aria-label={`Free memory from tabs after ${label}`}
-                              className={`settings-segment${selected ? ' active' : ''}`}
-                              onClick={() => {
-                                if (!selected) onUpdateSettings({ tabSleepMinutes: value });
-                              }}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
+                    <Row label="Free memory from tabs after">
+                      <Segmented
+                        label="Free memory from tabs after"
+                        value={settings.tabSleepMinutes}
+                        options={TAB_SLEEP_OPTIONS.map((v) => ({ value: v, label: tabSleepLabel(v) }))}
+                        onChange={(tabSleepMinutes) => onUpdateSettings({ tabSleepMinutes })}
+                      />
+                    </Row>
                   )}
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Video mini player</span>
-                      <span className="settings-hint">
-                        Keep watching in a floating picture-in-picture window when you switch away from a playing video
-                      </span>
-                    </div>
-                    <SettingsSwitch
+                  <Row label="Archive tabs after" hint={ARCHIVE_INTERVAL_HINT}>
+                    <Segmented
+                      label="Archive interval"
+                      value={settings.archiveIntervalHours}
+                      options={ARCHIVE_INTERVAL_OPTIONS.map((v) => ({ value: v, label: archiveIntervalLabel(v) }))}
+                      onChange={(archiveIntervalHours) => onUpdateSettings({ archiveIntervalHours })}
+                    />
+                  </Row>
+                </Group>
+                <Group title="Media and documents">
+                  <Row label="Video mini player" hint="Keep watching in a floating window when you switch away from a playing video">
+                    <Switch
                       checked={settings.autoPictureInPicture}
                       label="Video mini player"
-                      onChange={(next) => onUpdateSettings({ autoPictureInPicture: next })}
+                      onChange={(autoPictureInPicture) => onUpdateSettings({ autoPictureInPicture })}
                     />
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <span className="settings-row-label">Dark PDFs</span>
-                      <span className="settings-hint">
-                        Show PDFs with black pages and white text. Only affects PDFs, not websites
-                      </span>
-                    </div>
-                    <SettingsSwitch
-                      checked={settings.pdfDarkMode}
-                      label="Dark PDFs"
-                      onChange={(next) => onUpdateSettings({ pdfDarkMode: next })}
-                    />
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-row-text" style={{ marginTop: 4 }}>
-                    <span className="settings-row-label">Archive tabs after</span>
-                    <span className="settings-hint">{ARCHIVE_INTERVAL_HINT}</span>
-                  </div>
-                  <div
-                    className="settings-segmented settings-segmented-full"
-                    role="radiogroup"
-                    aria-label="Archive interval"
-                    style={{ marginTop: 8 }}
+                  </Row>
+                  <Row
+                    label="Dark PDFs"
+                    hint="In dark mode, PDF pages are dark and text is light; chart colors stay as they are. Each PDF can switch back from the address bar"
                   >
-                    {ARCHIVE_INTERVAL_OPTIONS.map((value) => {
-                      const selected = settings.archiveIntervalHours === value;
-                      const label = archiveIntervalLabel(value);
-                      return (
-                        <button
-                          key={String(value)}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          aria-label={`Archive after ${label}`}
-                          className={`settings-segment${selected ? ' active' : ''}`}
-                          onClick={() => {
-                            if (!selected) onUpdateSettings({ archiveIntervalHours: value });
-                          }}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </section>
-            </div>
+                    <Switch checked={settings.pdfDarkMode} label="Dark PDFs" onChange={(pdfDarkMode) => onUpdateSettings({ pdfDarkMode })} />
+                  </Row>
+                </Group>
+              </>,
+            )}
 
-            {/* 5. Profiles & Spaces Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-profiles`}
-              aria-labelledby={`${idBase}-tab-profiles`}
-              hidden={activeTab !== 'profiles'}
-              className="settings-tabpanel"
-            >
-              <ProfilesSettings tabs={tabs} />
-            </div>
+            {panel('profiles', <ProfilesSettings tabs={tabs} />)}
 
-            {/* 6. Passwords Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-passwords`}
-              aria-labelledby={`${idBase}-tab-passwords`}
-              hidden={activeTab !== 'passwords'}
-              className="settings-tabpanel"
-            >
-              <section className="settings-section" aria-label="Passwords">
-                <h3 className="settings-section-title">Passwords</h3>
-                <div className="settings-info-card">
-                  <div className="settings-info-header">
-                    <KeyRound size={14} className="settings-info-icon" aria-hidden="true" />
-                    <span className="settings-info-title">Saved and filled in automatically</span>
-                  </div>
-                  <p className="settings-info-text">
-                    When you sign in to a website, Serica offers to save the password. The next time you visit, it fills
-                    in your username and password. Addresses and other form entries are filled in the same way. Passwords
-                    are stored encrypted on this device, separately for each profile.
-                  </p>
-                </div>
-              </section>
-            </div>
+            {panel(
+              'passwords',
+              <p className="settings-prose">
+                When you sign in to a website, Serica offers to save the password, and fills it in the next time you visit.
+                Addresses and other form entries are filled in the same way. Passwords are encrypted on this device and kept
+                separately for each profile.
+              </p>,
+            )}
 
-            {/* 7. About Tab */}
-            <div
-              role="tabpanel"
-              id={`${idBase}-tabpanel-about`}
-              aria-labelledby={`${idBase}-tab-about`}
-              hidden={activeTab !== 'about'}
-              className="settings-tabpanel"
-            >
-              <AboutSettings active={isOpen && activeTab === 'about'} />
-            </div>
+            {panel('about', <AboutSettings active={isOpen && activeTab === 'about'} />)}
           </div>
         </main>
       </div>

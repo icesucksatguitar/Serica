@@ -1,16 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Lock,
-  Globe,
-  RefreshCw,
-  AlertTriangle,
-  CheckCircle2,
-  Wifi,
-  X,
-  Server,
-} from 'lucide-react';
+import { ChevronRight, RefreshCw, X } from 'lucide-react';
 import { DOH_PROVIDERS } from '../shared/vpnPresets';
 import type { DohProviderId, ProxyProtocol, VpnConfig, VpnMode, VpnStatus } from '../types';
+import { Switch } from './Switch';
 
 interface VpnModalProps {
   isOpen: boolean;
@@ -24,33 +16,18 @@ interface VpnModalProps {
   ipCheckError: string | null;
 }
 
-const MODE_OPTIONS: Array<{
-  id: VpnMode;
-  label: string;
-  tagline: string;
-}> = [
-    {
-      id: 'doh-only',
-      label: 'Encrypted DNS',
-      tagline: 'DNS-over-HTTPS + WebRTC leak guard inside Serica (built-in, zero setup).',
-    },
-    {
-      id: 'system-vpn',
-      label: 'OS VPN Tunnel',
-      tagline: 'Routes via your active system VPN adapter / proxy + DoH + WebRTC guard.',
-    },
-    {
-      id: 'tor-local',
-      label: 'Tor SOCKS5',
-      tagline: 'Routes browser traffic via local Tor daemon on 127.0.0.1:9050 / 9150.',
-    },
-    {
-      id: 'custom-proxy',
-      label: 'Custom Tunnel',
-      tagline: 'Connects Serica sessions through your SOCKS5, HTTPS, or HTTP tunnel endpoint.',
-    },
-  ];
+const ROUTES: Array<{ id: VpnMode; label: string; hint: string }> = [
+  { id: 'doh-only', label: 'Encrypted DNS', hint: 'Hides the sites you look up from your network. Built in, nothing to set up' },
+  { id: 'system-vpn', label: 'System VPN', hint: 'Uses the VPN app already connected on this PC' },
+  { id: 'tor-local', label: 'Tor', hint: 'Through the Tor service running on this PC (port 9050 or 9150)' },
+  { id: 'custom-proxy', label: 'Proxy server', hint: 'Through a SOCKS5, HTTPS or HTTP server you choose' },
+];
 
+/**
+ * The VPN in one glance: whether it is on, what it routes through, and one
+ * button to turn it on or off. Route details and leak protection are a
+ * click away, not in the way.
+ */
 export const VpnModal: React.FC<VpnModalProps> = ({
   isOpen,
   onClose,
@@ -69,6 +46,7 @@ export const VpnModal: React.FC<VpnModalProps> = ({
   const [proxyUser, setProxyUser] = useState('');
   const [proxyPass, setProxyPass] = useState('');
   const [bypassRules, setBypassRules] = useState('localhost,127.0.0.1,<local>');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (config) {
@@ -103,47 +81,25 @@ export const VpnModal: React.FC<VpnModalProps> = ({
 
   if (!isOpen || !status || !config) return null;
 
-  const isConnected = status.state === 'connected';
-  const isConnecting = status.state === 'connecting';
-  const isError = status.state === 'error';
+  const state = status.state;
+  const isConnected = state === 'connected';
+  const isConnecting = state === 'connecting';
+  const isError = state === 'error';
+  const route = ROUTES.find((r) => r.id === config.mode) ?? ROUTES[0];
+  const doh = DOH_PROVIDERS[config.dohProvider];
 
-  const statusColor = isConnected
-    ? 'var(--shield-green, #10b981)'
-    : isError
-      ? '#ef4444'
-      : isConnecting
-        ? '#f59e0b'
-        : 'var(--text-muted)';
+  const headline = isConnected ? 'Connected' : isConnecting ? 'Connecting…' : isError ? 'Could not connect' : 'Off';
+  const detail = isError && status.lastError
+    ? status.lastError
+    : isConnected
+      ? config.mode === 'system-vpn' && status.detectedOsVpn
+        ? `Through ${status.detectedOsVpn.name}`
+        : config.mode === 'custom-proxy' || config.mode === 'tor-local'
+          ? `Through ${status.activeProxyRule || route.label}`
+          : `Encrypted DNS with ${doh?.label ?? 'your resolver'}`
+      : `Turn on to use ${route.id === "doh-only" ? "encrypted DNS" : route.label}`;
 
-  const statusLabel = isConnected
-    ? config.mode === 'custom-proxy' || config.mode === 'tor-local'
-      ? `Tunneled (${status.activeProxyRule || config.mode})`
-      : config.mode === 'system-vpn' && status.detectedOsVpn
-        ? `OS VPN Active (${status.detectedOsVpn.name})`
-        : `Encrypted DNS Active`
-    : isConnecting
-      ? 'Connecting...'
-      : isError
-        ? 'Connection Failed'
-        : 'Disconnected';
-
-  const handleTogglePower = () => {
-    if (config.enabled) {
-      void onDisconnect();
-    } else {
-      void onConnect();
-    }
-  };
-
-  const handleModeSelect = (mode: VpnMode) => {
-    void onUpdateConfig({ mode });
-  };
-
-  const handleDohSelect = (dohProvider: DohProviderId) => {
-    void onUpdateConfig({ dohProvider });
-  };
-
-  const handleApplyProxy = (e: React.FormEvent) => {
+  const applyProxy = (e: React.FormEvent) => {
     e.preventDefault();
     const portNum = Math.max(1, Math.min(65535, parseInt(proxyPort, 10) || 1080));
     void onUpdateConfig({
@@ -160,264 +116,219 @@ export const VpnModal: React.FC<VpnModalProps> = ({
     });
   };
 
-  const activeModeMeta = MODE_OPTIONS.find((m) => m.id === config.mode) || MODE_OPTIONS[0];
-
   return (
     <div
-      className="modal-overlay vpn-modal-overlay"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Built-in VPN and Privacy Tunnel"
+      className="modal-overlay vpn-overlay"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        className="modal-content-card vpn-modal-card"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div className="modal-title">
-            <Lock size={18} style={{ color: statusColor }} />
-            <span>Serica Privacy Tunnel (VPN)</span>
-          </div>
-          <button className="close-btn" onClick={onClose} aria-label="Close VPN panel">
+      <div className="panel vpn-panel" role="dialog" aria-modal="true" aria-label="VPN">
+        <header className="panel-head">
+          <h2 className="panel-title">VPN</h2>
+          <button type="button" className="btn btn-quiet btn-icon" onClick={onClose} aria-label="Close" title="Close (Esc)">
             <X size={16} />
           </button>
-        </div>
+        </header>
 
-        {/* Master Connection Card */}
-        <div className="vpn-status-card">
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="vpn-status-headline">
-              <span className="vpn-status-dot" style={{ backgroundColor: statusColor }} />
-              <span style={{ fontWeight: 700, fontSize: '13.5px' }}>{statusLabel}</span>
+        <div className="panel-body">
+          <div className={`vpn-hero state-${state}`}>
+            <span className="vpn-state-dot" aria-hidden="true" />
+            <div className="vpn-hero-text">
+              <span className="vpn-headline" role="status">
+                {headline}
+              </span>
+              <span className={`vpn-detail${isError ? ' error' : ''}`}>{detail}</span>
             </div>
-            <div className="vpn-status-sub">
-              {status.lastError ? (
-                <span style={{ color: '#ef4444' }}>{status.lastError}</span>
-              ) : (
-                <span>{activeModeMeta.tagline}</span>
-              )}
-            </div>
+            <button
+              type="button"
+              className={`btn ${config.enabled ? '' : 'btn-primary'} vpn-power`}
+              disabled={isConnecting}
+              onClick={() => void (config.enabled ? onDisconnect() : onConnect())}
+            >
+              {config.enabled ? 'Turn off' : 'Turn on'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleTogglePower}
-            disabled={isConnecting}
-            aria-pressed={config.enabled}
-            className={`vpn-power-btn ${config.enabled ? 'on' : 'off'}`}
-          >
-            {config.enabled ? 'ON' : 'OFF'}
-          </button>
-        </div>
 
-        {/* Tunnel Mode Selector */}
-        <div className="vpn-section">
-          <div className="vpn-section-label">Routing Mode</div>
-          <div className="vpn-mode-grid">
-            {MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`vpn-mode-pill ${config.mode === opt.id ? 'active' : ''}`}
-                onClick={() => handleModeSelect(opt.id)}
-              >
-                {opt.label}
+          <section className="panel-section">
+            <h3 className="panel-label">Route</h3>
+            <div className="radio-list" role="radiogroup" aria-label="Route">
+              {ROUTES.map((r) => {
+                const selected = config.mode === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    className={`radio-row${selected ? ' selected' : ''}`}
+                    onClick={() => {
+                      if (!selected) void onUpdateConfig({ mode: r.id });
+                    }}
+                  >
+                    <span className="radio-mark" aria-hidden="true" />
+                    <span className="radio-text">
+                      <span className="radio-label">{r.label}</span>
+                      {selected && <span className="radio-hint">{r.hint}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {config.mode === 'custom-proxy' && (
+              <form className="vpn-proxy" onSubmit={applyProxy}>
+                <div className="field-row">
+                  <select
+                    value={proxyProtocol}
+                    onChange={(e) => setProxyProtocol(e.target.value as ProxyProtocol)}
+                    className="field field-proto"
+                    aria-label="Protocol"
+                  >
+                    <option value="socks5">SOCKS5</option>
+                    <option value="https">HTTPS</option>
+                    <option value="http">HTTP</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={proxyHost}
+                    onChange={(e) => setProxyHost(e.target.value)}
+                    placeholder="Host"
+                    className="field"
+                    aria-label="Host"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={proxyPort}
+                    onChange={(e) => setProxyPort(e.target.value)}
+                    placeholder="Port"
+                    className="field field-port"
+                    aria-label="Port"
+                  />
+                </div>
+                <div className="field-row">
+                  <input
+                    type="text"
+                    value={proxyUser}
+                    onChange={(e) => setProxyUser(e.target.value)}
+                    placeholder="Username (optional)"
+                    className="field"
+                    aria-label="Username"
+                  />
+                  <input
+                    type="password"
+                    value={proxyPass}
+                    onChange={(e) => setProxyPass(e.target.value)}
+                    placeholder="Password (optional)"
+                    className="field"
+                    aria-label="Password"
+                  />
+                </div>
+                <div className="field-row">
+                  <input
+                    type="text"
+                    value={bypassRules}
+                    onChange={(e) => setBypassRules(e.target.value)}
+                    placeholder="Skip for: localhost,127.0.0.1,<local>"
+                    className="field"
+                    aria-label="Addresses that skip the proxy"
+                  />
+                  <button type="submit" className="btn btn-primary">
+                    Save and connect
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+
+          <section className="panel-section">
+            <div className="kv-row">
+              <span className="kv-key">Your IP address</span>
+              <span className="kv-val">
+                {status.ipCheck
+                  ? `${status.ipCheck.ip}${status.ipCheck.location ? ` · ${status.ipCheck.location}` : ''}`
+                  : 'Not checked'}
+              </span>
+              <button type="button" className="btn btn-quiet" onClick={() => void onCheckIp()} disabled={isCheckingIp}>
+                <RefreshCw size={12} className={isCheckingIp ? 'spin-icon' : ''} aria-hidden="true" />
+                {isCheckingIp ? 'Checking' : 'Check'}
               </button>
-            ))}
-          </div>
-        </div>
+            </div>
+            {ipCheckError && <p className="panel-error">{ipCheckError}</p>}
+          </section>
 
-        {/* Custom Proxy Tunnel Configuration */}
-        {config.mode === 'custom-proxy' && (
-          <form className="vpn-proxy-form" onSubmit={handleApplyProxy}>
-            <div className="vpn-section-label">Tunnel Endpoint</div>
-            <div className="vpn-proxy-row">
-              <select
-                value={proxyProtocol}
-                onChange={(e) => setProxyProtocol(e.target.value as ProxyProtocol)}
-                className="vpn-input vpn-select-proto"
-                aria-label="Tunnel protocol"
-              >
-                <option value="socks5">SOCKS5</option>
-                <option value="https">HTTPS</option>
-                <option value="http">HTTP</option>
-              </select>
-              <input
-                type="text"
-                value={proxyHost}
-                onChange={(e) => setProxyHost(e.target.value)}
-                placeholder="Host / IP (e.g. 127.0.0.1)"
-                className="vpn-input"
-                aria-label="Tunnel host"
-              />
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={proxyPort}
-                onChange={(e) => setProxyPort(e.target.value)}
-                placeholder="Port"
-                className="vpn-input vpn-input-port"
-                aria-label="Tunnel port"
-              />
-            </div>
-            <div className="vpn-proxy-row">
-              <input
-                type="text"
-                value={proxyUser}
-                onChange={(e) => setProxyUser(e.target.value)}
-                placeholder="Username (optional)"
-                className="vpn-input"
-                aria-label="Tunnel username"
-              />
-              <input
-                type="password"
-                value={proxyPass}
-                onChange={(e) => setProxyPass(e.target.value)}
-                placeholder="Password (optional)"
-                className="vpn-input"
-                aria-label="Tunnel password"
-              />
-            </div>
-            <div className="vpn-proxy-row">
-              <input
-                type="text"
-                value={bypassRules}
-                onChange={(e) => setBypassRules(e.target.value)}
-                placeholder="Bypass: localhost,127.0.0.1,<local>"
-                className="vpn-input"
-                aria-label="Proxy bypass rules"
-              />
-              <button type="submit" className="vpn-apply-btn">
-                Apply & Connect
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Encrypted DNS Provider */}
-        <div className="vpn-section">
-          <div className="vpn-section-label">DNS-over-HTTPS Resolver</div>
-          <div className="vpn-doh-grid">
-            {(Object.keys(DOH_PROVIDERS) as DohProviderId[]).map((id) => {
-              const p = DOH_PROVIDERS[id];
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className={`vpn-doh-pill ${config.dohProvider === id ? 'active' : ''}`}
-                  onClick={() => handleDohSelect(id)}
-                  title={p.description}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Leak Guards */}
-        <div className="vpn-toggles-box">
-          <div className="vpn-toggle-row">
-            <div>
-              <div className="vpn-toggle-title">WebRTC IP Leak Guard</div>
-              <div className="vpn-toggle-desc">
-                Disables non-proxied UDP candidates inside pages & assistants
-              </div>
-            </div>
+          <section className="panel-section">
             <button
               type="button"
-              className={`vpn-mini-switch ${config.webrtcGuard ? 'on' : 'off'}`}
-              onClick={() => void onUpdateConfig({ webrtcGuard: !config.webrtcGuard })}
-              aria-pressed={config.webrtcGuard}
+              className="disclosure"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
             >
-              {config.webrtcGuard ? 'ON' : 'OFF'}
+              <ChevronRight size={13} className="disclosure-chevron" aria-hidden="true" />
+              Advanced
             </button>
-          </div>
-
-          <div className="vpn-toggle-row">
-            <div>
-              <div className="vpn-toggle-title">
-                Kill Switch {status.killSwitchBlockedCount > 0 ? `(${status.killSwitchBlockedCount} blocked)` : ''}
+            {showAdvanced && (
+              <div className="settings-group-rows">
+                <div className="settings-row">
+                  <div className="settings-row-text">
+                    <span className="settings-row-label">DNS resolver</span>
+                    <span className="settings-hint">{doh?.description}</span>
+                  </div>
+                  <select
+                    className="field"
+                    value={config.dohProvider}
+                    aria-label="DNS resolver"
+                    onChange={(e) => void onUpdateConfig({ dohProvider: e.target.value as DohProviderId })}
+                  >
+                    {(Object.keys(DOH_PROVIDERS) as DohProviderId[]).map((id) => (
+                      <option key={id} value={id}>
+                        {DOH_PROVIDERS[id].label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-text">
+                    <span className="settings-row-label">WebRTC leak protection</span>
+                    <span className="settings-hint">Stops calls and pages from revealing your real IP address</span>
+                  </div>
+                  <Switch
+                    checked={config.webrtcGuard}
+                    label="WebRTC leak protection"
+                    onChange={(webrtcGuard) => void onUpdateConfig({ webrtcGuard })}
+                  />
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-text">
+                    <span className="settings-row-label">Kill switch</span>
+                    <span className="settings-hint">
+                      Blocks pages if the route drops, so nothing goes out unprotected
+                      {status.killSwitchBlockedCount > 0 ? ` (${status.killSwitchBlockedCount} blocked)` : ''}
+                    </span>
+                  </div>
+                  <Switch
+                    checked={config.killSwitch}
+                    label="Kill switch"
+                    onChange={(killSwitch) => void onUpdateConfig({ killSwitch })}
+                  />
+                </div>
+                <div className="kv-row">
+                  <span className="kv-key">System VPN</span>
+                  <span className="kv-val">
+                    {status.detectedOsVpn
+                      ? `${status.detectedOsVpn.name} (${status.detectedOsVpn.addresses[0] ?? ''})`
+                      : 'None found'}
+                  </span>
+                </div>
+                <div className="kv-row">
+                  <span className="kv-key">DNS</span>
+                  <span className="kv-val">{status.activeDnsUrl ?? 'Your network’s DNS'}</span>
+                </div>
               </div>
-              <div className="vpn-toggle-desc">
-                Blocks clearnet page requests if your active tunnel becomes unreachable
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`vpn-mini-switch ${config.killSwitch ? 'on' : 'off'}`}
-              onClick={() => void onUpdateConfig({ killSwitch: !config.killSwitch })}
-              aria-pressed={config.killSwitch}
-            >
-              {config.killSwitch ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        </div>
-
-        {/* Live Telemetry: Exit IP & OS VPN Interface */}
-        <div className="vpn-telemetry-box">
-          <div className="vpn-telemetry-row">
-            <span className="vpn-telemetry-key">
-              <Server size={13} />
-              OS VPN Interface
-            </span>
-            <span className="vpn-telemetry-val">
-              {status.detectedOsVpn
-                ? `${status.detectedOsVpn.name} (${status.detectedOsVpn.addresses[0]})`
-                : 'None detected'}
-            </span>
-          </div>
-
-          <div className="vpn-telemetry-row">
-            <span className="vpn-telemetry-key">
-              <Globe size={13} />
-              Observed Exit IP
-            </span>
-            <span className="vpn-telemetry-val">
-              {status.ipCheck ? (
-                <>
-                  {status.ipCheck.ip}
-                  {status.ipCheck.location ? ` · ${status.ipCheck.location}` : ''}
-                  {` (${status.ipCheck.latencyMs}ms)`}
-                </>
-              ) : (
-                'Not verified yet'
-              )}
-            </span>
-          </div>
-
-          {ipCheckError && (
-            <div className="vpn-telemetry-error">
-              <AlertTriangle size={12} />
-              <span>{ipCheckError}</span>
-            </div>
-          )}
-
-          <div className="vpn-footer-actions">
-            <div className="vpn-dns-active-note">
-              {status.activeDnsUrl ? (
-                <>
-                  <CheckCircle2 size={12} style={{ color: 'var(--shield-green, #10b981)' }} />
-                  <span>DoH: {status.activeDnsUrl}</span>
-                </>
-              ) : (
-                <>
-                  <Wifi size={12} />
-                  <span>Direct System Network</span>
-                </>
-              )}
-            </div>
-            <button
-              type="button"
-              className="vpn-check-ip-btn"
-              onClick={() => void onCheckIp()}
-              disabled={isCheckingIp}
-            >
-              <RefreshCw size={12} className={isCheckingIp ? 'spin-icon' : ''} />
-              <span>{isCheckingIp ? 'Checking...' : 'Check Exit IP'}</span>
-            </button>
-          </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

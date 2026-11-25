@@ -35,9 +35,12 @@ import {
   PerformanceStatus,
 } from './types';
 import { AppContextMenu } from './components/AppContextMenu';
-import { runSpaceTransition } from './utils/spaceTransition';
+import { PageContextMenu } from './components/PageContextMenu';
 import { normalizePinnedTools, type ToolActions } from './shared/tools';
 import './styles/theme.css';
+import './styles/system.css';
+import './styles/settings.css';
+import './styles/panels.css';
 
 const ArchiveList = lazy(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
@@ -147,20 +150,6 @@ export function App() {
   useEffect(() => {
     if (!isCommandBarOpen) setIsCommandBarNewTab(false);
   }, [isCommandBarOpen]);
-  const [spaceTransitionClass, setSpaceTransitionClass] = useState<string>('');
-  const spaceSlideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Slides the page on a space switch; a new switch restarts the slide cleanly. */
-  const playSpaceSlide = useCallback((slide: 'space-transition-left' | 'space-transition-right') => {
-    if (spaceSlideTimer.current) clearTimeout(spaceSlideTimer.current);
-    // Drop the class for one frame so the animation restarts on rapid switches.
-    setSpaceTransitionClass('');
-    requestAnimationFrame(() => setSpaceTransitionClass(slide));
-    spaceSlideTimer.current = setTimeout(() => {
-      spaceSlideTimer.current = null;
-      setSpaceTransitionClass('');
-    }, 460);
-  }, []);
-
   // User Profile & First Launch Welcome Screen State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
     try {
@@ -511,30 +500,29 @@ export function App() {
   const spaceSwitcherOrder = useMemo(() => buildSidebarView(state).spaceOrder, [state]);
   const pageDialogTabIds = useMemo(() => state.tabs.map((t) => t.id), [state.tabs]);
 
-  // Fluid space switching animation
-  const handleSelectSpace = (spaceId: string) => {
-    if (spaceId === state.activeSpaceId) return;
-
-    const currentIdx = state.spaces.findIndex((s) => s.id === state.activeSpaceId);
-    const nextIdx = state.spaces.findIndex((s) => s.id === spaceId);
-    triggerThemeCrossFade();
-
-    const forward = nextIdx >= currentIdx;
-    void runSpaceTransition({
-      dir: forward ? 1 : -1,
-      doSwitch: () => selectSpace(spaceId),
-      onNothingToSlide: () => playSpaceSlide(forward ? 'space-transition-left' : 'space-transition-right'),
-    });
-  };
-
-  const handleCreateSpace = async (name: string, color?: string) => {
-    const created = await createSpace(name, color);
-    if (created) {
+  // Space switching is immediate: the UI state and the backend switch in the
+  // same tick, so the sidebar, the top bar and the page never disagree about
+  // which space is active. Only the theme colors cross-fade.
+  const activeSpaceIdRef = useRef(state.activeSpaceId);
+  activeSpaceIdRef.current = state.activeSpaceId;
+  const handleSelectSpace = useCallback(
+    (spaceId: string) => {
+      if (spaceId === activeSpaceIdRef.current) return;
+      activeSpaceIdRef.current = spaceId;
       triggerThemeCrossFade();
-      playSpaceSlide('space-transition-left');
-    }
-    return created;
-  };
+      void selectSpace(spaceId);
+    },
+    [selectSpace, triggerThemeCrossFade],
+  );
+
+  const handleCreateSpace = useCallback(
+    async (name: string, color?: string) => {
+      const created = await createSpace(name, color);
+      if (created) triggerThemeCrossFade();
+      return created;
+    },
+    [createSpace, triggerThemeCrossFade],
+  );
 
   // Keyboard shortcuts & events
   useEffect(() => {
@@ -915,7 +903,7 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
 // The top bar on web pages: 30px, and (by default) hidden until the pointer
 // reaches the top edge. The tab strip of top-tabs mode keeps it shown.
 const TOP_TAB_STRIP_HEIGHT = 38;
-const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide !== false;
+const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide === true;
 const overlayCount = useViewportOverlayCount();
 const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0);
 // Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
@@ -1003,7 +991,7 @@ return (
       <Sidebar
         className="app-sidebar"
         state={state}
-        actions={{ ...browser, selectSpace: handleSelectSpace, openCommandBar: openNewTabCommandBar }}
+        actions={{ ...browser, selectSpace: handleSelectSpace, createSpace: handleCreateSpace, openCommandBar: openNewTabCommandBar }}
         expanded
         autoHide
         pinnedOpen={sidebarOpen}
@@ -1114,6 +1102,8 @@ return (
         onClick={() => setIsCommandBarOpen(true)}
         onResetZoom={() => window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'reset' }))}
         onOpenFind={() => dispatchSiteAction('open-find')}
+        tabId={activeTab?.id}
+        pdfDarkKey={`${isDarkMode}-${settings.pdfDarkMode}`}
       />
 
       {/* Top right: status pills and the browser menu, then the window controls */}
@@ -1242,7 +1232,7 @@ return (
 
     {/* Edge-to-Edge Web Canvas Viewport (pulled down on web pages so site controls never collide;
         pushed right of a docked sidebar) */}
-    <main className={`arc-viewport-container edge-to-edge ${isWebpage && !isHtmlFullscreen ? 'with-site-top-offset' : ''} ${spaceTransitionClass} ${isSettingsOpen ? 'settings-page-blur' : ''}`}>
+    <main className={`arc-viewport-container edge-to-edge ${isWebpage && !isHtmlFullscreen ? 'with-site-top-offset' : ''}`}>
       <div className="arc-web-canvas-frame seamless">
         <BrowserViewport
           activeTab={activeTab}
@@ -1264,6 +1254,8 @@ return (
           contentTop={contentTop}
           insetLeft={showSidebar ? 8 : 0}
           insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
+          homeWidgets={settings.homeWidgets}
+          onUpdateHomeWidgets={(homeWidgets) => void updateSettings({ homeWidgets })}
         />
       </div>
     </main>
@@ -1274,6 +1266,7 @@ return (
     {/* A downloaded update is ready: offer to restart into it */}
     <UpdateNotice />
     <AppContextMenu />
+    <PageContextMenu />
     <WhatsNew onboarded={!isWelcomeOpen} />
 
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}

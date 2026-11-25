@@ -33,9 +33,12 @@ export interface Layout {
  *   of `spaceId`'s owning profile. `toIndex` defaults to the end.
  * - `space`: drop onto a Space_Switcher icon. Pinned tabs go to the target's
  *   pinned section, everything else to its Today list, appended at the end.
+ *
+ * `folderId` (reorder/section into pinned only): the pinned folder the tab
+ * lands in, `null` for the pinned root. Left out, a tab keeps its folder.
  */
 export type MoveOp =
-  | { type: 'reorder'; section: LayoutSection; id: string; toIndex: number }
+  | { type: 'reorder'; section: LayoutSection; id: string; toIndex: number; folderId?: string | null }
   | {
       type: 'section';
       id: string;
@@ -43,6 +46,7 @@ export type MoveOp =
       to: LayoutSection;
       spaceId: string;
       toIndex?: number;
+      folderId?: string | null;
     }
   | { type: 'space'; id: string; from: LayoutSection; targetSpaceId: string };
 
@@ -104,7 +108,23 @@ function locate(file: ProfilesFile, id: string, section: LayoutSection): Located
 
 type Destination =
   | { section: 'favorite'; profileId: string; index?: number }
-  | { section: TabSection; spaceId: string; profileId: string; index?: number };
+  | { section: TabSection; spaceId: string; profileId: string; index?: number; folderId?: string | null };
+
+/** The folder a tab ends up in after a move (see `MoveOp.folderId`). */
+function landedFolder(
+  prev: string | undefined,
+  dest: { section: TabSection; spaceId: string; folderId?: string | null },
+  fromSpace: string | undefined,
+): string | undefined {
+  if (dest.section !== 'pinned') return undefined;
+  if (dest.folderId !== undefined) return dest.folderId ?? undefined;
+  return fromSpace === dest.spaceId ? prev : undefined;
+}
+
+function withFolder(entry: TabEntry, folderId: string | undefined): TabEntry {
+  const { folderId: _old, ...rest } = entry;
+  return folderId ? { ...rest, folderId } : rest;
+}
 
 /** Replaces the entries of one tab list (section+space) with `list`, renumbered. */
 function writeTabList(
@@ -168,7 +188,12 @@ function relocate(file: ProfilesFile, src: Located, dest: Destination, now: numb
     list.splice(clampIndex(dest.index, list.length), 0, moved);
     favorites = writeFavoriteList(favorites, dest.profileId, list);
   } else {
-    const moved: TabEntry =
+    const folderId = landedFolder(
+      src.kind === 'tab' ? src.item.folderId : undefined,
+      dest,
+      src.kind === 'tab' ? src.item.spaceId : undefined,
+    );
+    const moved: TabEntry = withFolder(
       src.kind === 'tab'
         ? { ...src.item, spaceId: dest.spaceId, section: dest.section }
         : {
@@ -180,7 +205,9 @@ function relocate(file: ProfilesFile, src: Located, dest: Destination, now: numb
             order: 0,
             lastActiveAt: now,
             ...(base.favicon !== undefined ? { favicon: base.favicon } : {}),
-          };
+          },
+      folderId,
+    );
     const list = byOrder(tabs.filter((t) => t.section === dest.section && t.spaceId === dest.spaceId));
     list.splice(clampIndex(dest.index, list.length), 0, moved);
     tabs = writeTabList(tabs, dest.section, dest.spaceId, list);
@@ -285,6 +312,7 @@ export function move(file: ProfilesFile, op: MoveOp, now: number = Date.now()): 
             spaceId: src.item.spaceId,
             profileId: src.profileId ?? '',
             index: op.toIndex,
+            ...(op.folderId !== undefined ? { folderId: op.folderId } : {}),
           };
     return { file: relocate(file, src, dest, now), needsReload: false };
   }
@@ -311,7 +339,13 @@ export function move(file: ProfilesFile, op: MoveOp, now: number = Date.now()): 
   const dest: Destination =
     toSection === 'favorite'
       ? { section: 'favorite', profileId: destProfile, index }
-      : { section: toSection, spaceId: targetSpaceId, profileId: destProfile, index };
+      : {
+          section: toSection,
+          spaceId: targetSpaceId,
+          profileId: destProfile,
+          index,
+          ...(op.type === 'section' && op.folderId !== undefined ? { folderId: op.folderId } : {}),
+        };
 
   return {
     file: relocate(file, src, dest, now),

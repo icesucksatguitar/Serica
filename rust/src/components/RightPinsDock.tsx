@@ -59,7 +59,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     }
   }, [persistedPins]);
 
-  const [scales, setScales] = useState<{ [id: string]: number }>({});
   const [isHoveredDock, setIsHoveredDock] = useState(false);
   const revealedAtRef = useRef<number>(0);
   const hideTimerRef = useRef<number | null>(null);
@@ -205,46 +204,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     onPersistPins?.(updated);
   };
 
-  // macOS Dock Fish-Eye Magnification physics
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLElement>) => {
-    const dock = dockRef.current;
-    if (!dock) return;
-
-    const dockRect = dock.getBoundingClientRect();
-    const mouseY = e.clientY;
-    const maxRadius = 72; // Influence radius in px
-    // On sites the page is clipped to the dock's pill: icons must stay inside it.
-    const maxScale = isOnWebpage ? 1.2 : 1.48; // Peak magnification scale
-
-    const newScales: { [id: string]: number } = {};
-
-    [...pins.map(p => p.id), 'add-btn'].forEach((id) => {
-      const el = itemRefs.current[id];
-      if (!el) {
-        newScales[id] = 1;
-        return;
-      }
-
-      const rect = el.getBoundingClientRect();
-      const centerY = rect.top + rect.height / 2;
-      const dist = Math.abs(mouseY - centerY);
-
-      if (dist < maxRadius) {
-        // Cosine falloff curve for organic fluid magnification
-        const factor = Math.cos((dist / maxRadius) * (Math.PI / 2));
-        newScales[id] = 1 + (maxScale - 1) * Math.pow(factor, 1.5);
-      } else {
-        newScales[id] = 1;
-      }
-    });
-
-    setScales(newScales);
-  }, [pins, isOnWebpage]);
-
-  const handleMouseLeave = () => {
-    setScales({});
-    setHoveredPinId(null);
-  };
+  const handleMouseLeave = () => setHoveredPinId(null);
 
   const handleAddPin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,7 +275,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         onMouseMove={(e) => {
           cancelHide();
           setIsHoveredDock(true);
-          if (!menuPos) handleMouseMove(e);
         }}
         onMouseLeave={() => {
           scheduleHide();
@@ -324,17 +283,15 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         onContextMenu={(e) => {
           e.preventDefault();
           cancelHide();
-          setScales({});
           setHoveredPinId(null);
           // Open beside the dock, never over it.
           const left = dockRef.current?.querySelector('.vertical-pins-dock-track')?.getBoundingClientRect().left ?? e.clientX;
           setMenuPos({ x: Math.max(8, left - DOCK_MENU_WIDTH - 10), y: Math.max(8, Math.min(e.clientY - 16, window.innerHeight - 124)) });
         }}
-        aria-label="Pinned Websites Dock"
+        aria-label="Website dock"
       >
         <div className="vertical-pins-dock-track">
           {pins.map((pin) => {
-            const scale = scales[pin.id] || 1;
             const favicon = getFaviconUrl(pin.url);
             const isItemHovered = hoveredPinId === pin.id;
 
@@ -343,10 +300,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                 key={pin.id}
                 ref={(el) => (itemRefs.current[pin.id] = el)}
                 className="pin-dock-item"
-                style={{
-                  transform: `scale(${scale}) translateX(${scale > 1.05 && !isOnWebpage ? -(scale - 1) * 14 : 0}px)`,
-                  zIndex: Math.round(scale * 10),
-                }}
                 onClick={() => onNavigate(pin.url)}
                 onMouseEnter={() => {
                   if (!menuPos) setHoveredPinId(pin.id);
@@ -354,8 +307,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                 onMouseLeave={() => setHoveredPinId(null)}
                 title={pin.title}
               >
-                {/* Monochromatic Frosted Icon Capsule */}
-                <div className="pin-dock-icon-capsule">
+                                <div className="pin-dock-icon-capsule">
                   {favicon ? (
                     <img
                       src={favicon}
@@ -366,7 +318,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                       }}
                     />
                   ) : (
-                    <Globe size={18} className="pin-dock-fallback-icon" />
+                    <Globe size={16} className="pin-dock-fallback-icon" />
                   )}
 
                   {/* Remove pill button when hovered */}
@@ -381,7 +333,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                   )}
                 </div>
 
-                {/* macOS Style Name Tooltip (on sites the native title tooltip is used: it draws above the page) */}
+                {/* Name beside the icon (on sites the native title tooltip is used: it draws above the page) */}
                 {isItemHovered && !isOnWebpage && (
                   <div className="pin-dock-tooltip">
                     <span>{pin.title}</span>
@@ -398,14 +350,11 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           <div
             ref={(el) => (itemRefs.current['add-btn'] = el)}
             className="pin-dock-item pin-dock-add-item"
-            style={{
-              transform: `scale(${scales['add-btn'] || 1})`,
-            }}
             onClick={() => setIsAddModalOpen(true)}
-            title="Add Website Pin"
+            title="Add a website"
           >
             <div className="pin-dock-icon-capsule add-capsule">
-              <Plus size={16} />
+              <Plus size={14} />
             </div>
             {hoveredPinId === 'add-btn' && !isOnWebpage && (
               <div className="pin-dock-tooltip">
@@ -461,7 +410,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         <div className="pin-add-modal-backdrop" onClick={() => setIsAddModalOpen(false)}>
           <div className="pin-add-modal-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="pin-add-modal-header">
-              <h3>Pin Website</h3>
+              <h3>Add a website</h3>
               <button
                 className="pin-add-close-btn"
                 onClick={() => setIsAddModalOpen(false)}
@@ -486,7 +435,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
               </div>
 
               <div className="pin-add-field">
-                <label htmlFor="pin-title">Display Name (Optional)</label>
+                <label htmlFor="pin-title">Name (optional)</label>
                 <input
                   id="pin-title"
                   type="text"
@@ -506,7 +455,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                   Cancel
                 </button>
                 <button type="submit" className="pin-add-submit-btn">
-                  Pin to Dock
+                  Add to dock
                 </button>
               </div>
             </form>

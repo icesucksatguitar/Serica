@@ -257,6 +257,17 @@ export interface SericaAPI {
   findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
   onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
   onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
+  /** New-tab widget data (fetched by the backend, straight from the source). */
+  widgetGithub?: (user: string) => Promise<GithubContributions>;
+  widgetGeocode?: (query: string) => Promise<GeoPlace>;
+  widgetWeather?: (lat: number, lon: number, fahrenheit: boolean) => Promise<WeatherNow>;
+  /** Dark PDFs: whether they apply at all (setting + dark theme) and for this tab. */
+  getPdfDarkTab?: (tabId: string) => Promise<{ available: boolean; dark: boolean }>;
+  setPdfDarkTab?: (tabId: string, dark: boolean) => Promise<void>;
+  /** Right-click in a page: Serica draws the menu (see PageContextMenu). */
+  onPageContextMenu?: (cb: (m: PageContextMenuRequest) => void) => () => void;
+  /** Ends a page menu with the picked engine command or Serica entry; neither dismisses it. */
+  pageMenuSelect?: (id: number, pick: { command?: number; custom?: number; refocus?: boolean }) => Promise<void>;
   onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
   onPageDialog?: (cb: (d: PageDialogRequest) => void) => () => void;
   getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
@@ -482,4 +493,55 @@ export interface PageDialogRequest {
   defaultText?: string;
   /** For `external`: the link's scheme, e.g. "mailto" or "spotify". */
   scheme?: string;
+}
+
+/** One entry of a page context menu, as sent by the tab host. */
+export type PageMenuItem =
+  | { type: 'separator' }
+  | { type: 'custom'; index: number; label: string; name: string }
+  | {
+      type: 'command' | 'submenu';
+      id: number;
+      name: string;
+      label: string;
+      shortcut: string;
+      enabled: boolean;
+      checked: boolean;
+      children: PageMenuItem[];
+    };
+
+export interface PageContextMenuRequest {
+  id: number;
+  tabId: string;
+  /** Physical pixels in the window's client area. */
+  x: number;
+  y: number;
+  context: 'page' | 'link' | 'image' | 'selection' | 'editable';
+  link: string | null;
+  image: string | null;
+  selection: string | null;
+  items: PageMenuItem[];
+}
+
+export interface GithubContributions {
+  user: string;
+  total: number;
+  /** Oldest first; `level` is GitHub's 0-4 shading. */
+  days: { date: string; level: number; count: number }[];
+}
+
+export interface GeoPlace {
+  name: string;
+  country?: string;
+  lat: number;
+  lon: number;
+}
+
+export interface WeatherNow {
+  temperature: number;
+  /** WMO weather code. */
+  code: number;
+  isDay: boolean;
+  max: number | null;
+  min: number | null;
 }

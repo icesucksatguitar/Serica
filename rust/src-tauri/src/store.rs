@@ -48,7 +48,15 @@ struct PersistedState {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum MoveOp {
-    Reorder { section: String, id: String, #[serde(rename = "toIndex")] to_index: i64 },
+    Reorder {
+        section: String,
+        id: String,
+        #[serde(rename = "toIndex")]
+        to_index: i64,
+        /// Pinned folder to land in: absent keeps the tab's folder, `null` is the root.
+        #[serde(rename = "folderId", default, deserialize_with = "present_option")]
+        folder_id: Option<Option<String>>,
+    },
     Section {
         id: String,
         from: String,
@@ -57,8 +65,15 @@ pub enum MoveOp {
         space_id: String,
         #[serde(rename = "toIndex", default)]
         to_index: Option<i64>,
+        #[serde(rename = "folderId", default, deserialize_with = "present_option")]
+        folder_id: Option<Option<String>>,
     },
     Space { id: String, from: String, #[serde(rename = "targetSpaceId")] target_space_id: String },
+}
+
+/// Tells a field sent as `null` (`Some(None)`) from a missing one (`None`).
+fn present_option<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Ok(Some(Option::<String>::deserialize(d)?))
 }
 
 #[derive(Debug)]
@@ -602,7 +617,7 @@ impl Store {
     /// Applies a sidebar move. Returns `Some(needs_reload)` when something moved.
     pub fn apply_move(&mut self, op: &MoveOp) -> Option<bool> {
         match op {
-            MoveOp::Reorder { section, id, to_index } => {
+            MoveOp::Reorder { section, id, to_index, folder_id } => {
                 if section == "favorite" {
                     let fav = self.favorites.iter().find(|f| f.id == *id)?.clone();
                     let mut list: Vec<FavoriteEntry> = self.profile_favorites(&fav.profile_id).into_iter().filter(|f| f.id != *id).collect();
@@ -615,10 +630,18 @@ impl Store {
                 let tab = self.tab(id).filter(|t| t.section() == sec)?.clone();
                 let space = tab.space_id.clone();
                 self.place(tab, &space, sec, Some(*to_index));
+                if let (Section::Pinned, Some(folder)) = (sec, folder_id) {
+                    self.set_tab_folder(id, folder.as_deref());
+                }
                 Some(false)
             }
-            MoveOp::Section { id, from, to, space_id, to_index } => {
-                self.relocate(id, from, to, space_id, *to_index)
+            MoveOp::Section { id, from, to, space_id, to_index, folder_id } => {
+                let moved = self.relocate(id, from, to, space_id, *to_index)?;
+                if let ("pinned", Some(folder)) = (to.as_str(), folder_id) {
+                    // A favorite dropped here became a tab with the favorite's id.
+                    self.set_tab_folder(id, folder.as_deref());
+                }
+                Some(moved)
             }
             MoveOp::Space { id, from, target_space_id } => {
                 let to = if from == "pinned" { "pinned" } else { "today" };
@@ -797,6 +820,22 @@ impl Store {
             }
         }
         before != self.folders.len()
+    }
+
+    /// Puts a pinned tab into one of its own space's folders (`None`: the
+    /// pinned root). A folder of another space is ignored.
+    fn set_tab_folder(&mut self, tab_id: &str, folder_id: Option<&str>) {
+        let Some(space) = self.tab(tab_id).map(|t| t.space_id.clone()) else { return };
+        if let Some(fid) = folder_id {
+            if !self.folders.iter().any(|f| f.id == fid && f.space_id == space) {
+                return;
+            }
+        }
+        if let Some(t) = self.tab_mut(tab_id) {
+            if t.section() == Section::Pinned {
+                t.folder_id = folder_id.map(str::to_string);
+            }
+        }
     }
 
     pub fn move_tab_to_folder(&mut self, tab_id: &str, folder_id: Option<&str>) -> bool {
@@ -1175,8 +1214,54 @@ mod tests {
         let first = today_ids(&s, &space)[0].clone();
         let a = s.create_tab(Some("https://a.com".into()), None, false, None).id;
         let b = s.create_tab(Some("https://b.com".into()), None, false, None).id;
-        s.apply_move(&MoveOp::Reorder { section: "today".into(), id: b.clone(), to_index: 0 });
+        s.apply_move(&MoveOp::Reorder { section: "today".into(), id: b.clone(), to_index: 0, folder_id: None });
         assert_eq!(today_ids(&s, &space), vec![b, first, a]);
+    }
+
+    #[test]
+    fn drag_into_and_out_of_folders() {
+        let mut s = store();
+        let space = s.active_space_id.clone();
+        let f = s.create_folder(&space, "Docs").unwrap().id;
+        let g = s.create_folder(&space, "Other").unwrap().id;
+        // A Today tab dropped on a folder becomes a pinned tab inside it.
+        let t = s.create_tab(Some("https://a.com".into()), None, false, None).id;
+        let op: MoveOp = serde_json::from_value(serde_json::json!({
+            "type": "section", "id": t, "from": "today", "to": "pinned", "spaceId": space, "toIndex": 0, "folderId": f
+        }))
+        .unwrap();
+        assert!(s.apply_move(&op).is_some());
+        assert!(s.tab(&t).unwrap().is_pinned);
+        assert_eq!(s.tab(&t).unwrap().folder_id.as_deref(), Some(f.as_str()));
+        // Pinned reorder into another folder, then to the root (null).
+        let op: MoveOp = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "section": "pinned", "id": t, "toIndex": 0, "folderId": g
+        }))
+        .unwrap();
+        s.apply_move(&op);
+        assert_eq!(s.tab(&t).unwrap().folder_id.as_deref(), Some(g.as_str()));
+        let op: MoveOp = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "section": "pinned", "id": t, "toIndex": 0, "folderId": null
+        }))
+        .unwrap();
+        s.apply_move(&op);
+        assert_eq!(s.tab(&t).unwrap().folder_id, None);
+        // Without folderId a reorder keeps the folder.
+        s.move_tab_to_folder(&t, Some(&f));
+        let op: MoveOp = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "section": "pinned", "id": t, "toIndex": 0
+        }))
+        .unwrap();
+        s.apply_move(&op);
+        assert_eq!(s.tab(&t).unwrap().folder_id.as_deref(), Some(f.as_str()));
+        // A folder of another space is ignored.
+        let other = s.create_folder("space-work", "Elsewhere").unwrap().id;
+        let op: MoveOp = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "section": "pinned", "id": t, "toIndex": 0, "folderId": other
+        }))
+        .unwrap();
+        s.apply_move(&op);
+        assert_eq!(s.tab(&t).unwrap().folder_id.as_deref(), Some(f.as_str()));
     }
 
     #[test]

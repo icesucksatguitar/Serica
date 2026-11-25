@@ -86,8 +86,12 @@ pub struct App {
     save_lock: Mutex<()>,
     /// Hash of what each saved file last held, to skip rewriting it unchanged.
     written: Mutex<std::collections::HashMap<std::path::PathBuf, u64>>,
-    /// Dark-PDF setting the open pages were last told about.
+    /// Dark-PDF state the open pages were last told about (setting and theme).
     pdf_dark: std::sync::atomic::AtomicBool,
+    /// The UI shows a dark theme (dark PDFs follow it; light mode never gets them).
+    ui_dark: std::sync::atomic::AtomicBool,
+    /// Tabs whose PDF was switched back to its own colors from the top bar.
+    pdf_light_tabs: Mutex<std::collections::HashSet<String>>,
     /// Profiles whose cookies were already swept this session ("clear cookies
     /// when Serica closes" also runs at start, in case it could not at exit).
     cookie_swept: Mutex<std::collections::HashSet<String>>,
@@ -170,6 +174,43 @@ pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
 }
 
 impl App {
+    /// Whether PDFs are shown dark: the setting is on and the UI is dark.
+    pub fn pdf_dark_global(&self) -> bool {
+        self.settings().pdf_dark_mode && self.ui_dark.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether this tab's PDF is shown dark (the global state, unless the
+    /// tab was switched back to the PDF's own colors).
+    pub fn pdf_dark_for(&self, tab_id: &str) -> bool {
+        self.pdf_dark_global() && !self.pdf_light_tabs.lock().contains(tab_id)
+    }
+
+    /// Re-applies dark PDFs to open pages when the setting or theme changed.
+    pub fn refresh_pdf_dark(self: &Arc<Self>) {
+        let on = self.pdf_dark_global();
+        if self.pdf_dark.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+            TabHost::apply_pdf_dark(self);
+        }
+    }
+
+    pub fn set_ui_dark(self: &Arc<Self>, dark: bool) {
+        self.ui_dark.store(dark, std::sync::atomic::Ordering::Relaxed);
+        self.refresh_pdf_dark();
+    }
+
+    /// Top-bar toggle on a PDF tab: `false` shows the PDF's own colors.
+    pub fn set_pdf_dark_tab(self: &Arc<Self>, tab_id: &str, dark: bool) {
+        {
+            let mut light = self.pdf_light_tabs.lock();
+            if dark {
+                light.remove(tab_id);
+            } else {
+                light.insert(tab_id.to_string());
+            }
+        }
+        TabHost::apply_pdf_dark(self);
+    }
+
     pub fn new(handle: AppHandle, data_dir: std::path::PathBuf) -> Shared {
         let store = Store::load(data_dir.clone());
         let history = History::load(data_dir.join("history.json"));
@@ -195,6 +236,8 @@ impl App {
             blocked_queue: Mutex::new(Vec::new()),
             tx: Mutex::new(tx),
             pdf_dark,
+            ui_dark: std::sync::atomic::AtomicBool::new(true),
+            pdf_light_tabs: Mutex::new(Default::default()),
             cookie_swept: Mutex::new(Default::default()),
             save_lock: Mutex::new(()),
             written: Mutex::new(Default::default()),
@@ -247,9 +290,7 @@ impl App {
             if settings {
                 let s = self.store.lock().settings.clone();
                 self.shields.configure(s.adblock_enabled, &s.shield_whitelist);
-                if self.pdf_dark.swap(s.pdf_dark_mode, std::sync::atomic::Ordering::Relaxed) != s.pdf_dark_mode {
-                    TabHost::apply_pdf_dark(&self, s.pdf_dark_mode);
-                }
+                self.refresh_pdf_dark();
                 TabHost::sync_cookie_policy(&self, s.block_third_party_cookies);
                 ui_emit(&self.handle, "serica:settings-updated", s);
                 crate::mcp_http::sync(&self);

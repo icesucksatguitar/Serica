@@ -3,8 +3,8 @@ import { Space, TabState, ActiveMediaState, SiteAction } from '../types';
 import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
 import type { PageColorReport } from '../utils/topBarTint';
+import type { HomeWidgets } from '../shared/settings';
 import { acquireViewportOverlay, setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
-import { SPACE_SLIDE_MS, setSpaceTransitionRunner, type SpaceDirection } from '../utils/spaceTransition';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -31,6 +31,8 @@ interface BrowserViewportProps {
   /** Strips at the page edges kept free for hover-reveal zones (auto-hide sidebar, pins dock). */
   insetLeft?: number;
   insetRight?: number;
+  homeWidgets?: HomeWidgets;
+  onUpdateHomeWidgets?: (next: HomeWidgets) => void;
 }
 
 /** Height reserved above the page while the find bar is open (bar + margins). */
@@ -80,6 +82,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   insetRight = 0,
   defaultZoom = 1,
   contentTop = 44,
+  homeWidgets,
+  onUpdateHomeWidgets,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
@@ -93,9 +97,6 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [frozenImage, setFrozenImage] = useState<string | null>(null);
   const frozenImageRef = useRef<string | null>(null);
   frozenImageRef.current = frozenImage;
-  // Space switch slide: the page left behind and the one arriving (captures).
-  const [spaceSlide, setSpaceSlide] = useState<{ out: string | null; in: string | null; dir: SpaceDirection; key: number } | null>(null);
-  const slideSeq = useRef(0);
   // The page's snapshot beneath it while UI slides over it (see setPageUnderlay).
   const underlayImage = usePageUnderlay();
 
@@ -259,49 +260,6 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   useEffect(() => {
     if (!freezeApplied.current) setViewportCovered(!isWebPage);
   }, [isWebPage]);
-
-  // ---- Space switch: slide the page out and the new space's page in.
-  useEffect(() => {
-    const waitUntil = async (ok: () => boolean, ms: number) => {
-      const end = performance.now() + ms;
-      while (!ok() && performance.now() < end) await sleep(16);
-      return ok();
-    };
-    setSpaceTransitionRunner(async ({ dir, doSwitch, onNothingToSlide }) => {
-      const key = ++slideSeq.current;
-      const fromTabId = activeTabRef.current?.id;
-      // Freeze first: the backend shows the new space's page the moment it
-      // switches, and it must not pop in ahead of the slide.
-      const release = acquireViewportOverlay();
-      try {
-        const fromWeb = isWebPageRef.current;
-        await waitUntil(() => freezeApplied.current === true && (!fromWeb || !!frozenImageRef.current), 700);
-        const out = fromWeb ? frozenImageRef.current : null;
-        await doSwitch();
-        // The new active tab arrives with the state update.
-        await waitUntil(() => activeTabRef.current?.id !== fromTabId, 400);
-        const tab = activeTabRef.current;
-        const incoming =
-          tab && isWebUrl(tab.url) ? ((await window.serica?.getTabPreview?.(tab.id).catch(() => null)) ?? null) : null;
-        if (slideSeq.current !== key) return;
-        if (!out && !incoming) {
-          onNothingToSlide();
-          return;
-        }
-        await Promise.all([out, incoming].map((img) => (img ? decodeImage(img) : Promise.resolve())));
-        if (slideSeq.current !== key) return;
-        setSpaceSlide({ out, in: incoming, dir, key });
-        await sleep(SPACE_SLIDE_MS + 20);
-      } finally {
-        release();
-        // The live page is back on screen before the slide layer goes.
-        await nextPaint();
-        await sleep(40);
-        setSpaceSlide((cur) => (cur && cur.key === key ? null : cur));
-      }
-    });
-    return () => setSpaceTransitionRunner(null);
-  }, []);
 
   // A tab being shown (or woken from sleep: its webview takes a moment to
   // build and paint) draws its last capture in its place meanwhile, instead
@@ -552,20 +510,17 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}
           />
         )}
-        {spaceSlide && (
-          <div
-            key={spaceSlide.key}
-            className={`space-slide-stage ${spaceSlide.dir > 0 ? 'to-next' : 'to-prev'}${spaceSlide.in ? ' opaque' : ''}`}
-            aria-hidden="true"
-          >
-            {spaceSlide.out && <img className="space-slide-out" src={spaceSlide.out} alt="" draggable={false} />}
-            {spaceSlide.in && <img className="space-slide-in" src={spaceSlide.in} alt="" draggable={false} />}
-          </div>
-        )}
       </div>
 
       {isNewTab && (
-        <Homescreen isDarkMode={isDarkMode} onNavigate={onNavigate} onOpenCommandBar={onOpenCommandBar} userName={userName} />
+        <Homescreen
+          isDarkMode={isDarkMode}
+          onNavigate={onNavigate}
+          onOpenCommandBar={onOpenCommandBar}
+          userName={userName}
+          widgets={homeWidgets}
+          onUpdateWidgets={onUpdateHomeWidgets}
+        />
       )}
     </div>
   );

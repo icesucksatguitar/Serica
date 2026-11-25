@@ -44,6 +44,10 @@ export function useBrowser() {
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
   const [isShieldModalOpen, setIsShieldModalOpen] = useState(false);
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
+  // A space switch the backend has not confirmed yet. State updates sent
+  // before it (for an earlier switch, say) must not flip the UI back.
+  const pendingSpaceRef = useRef<{ id: string; seq: number } | null>(null);
+  const spaceSeqRef = useRef(0);
 
   useEffect(() => {
     if (!window.serica) return;
@@ -52,10 +56,18 @@ export function useBrowser() {
       // Spaces come from the ProfileStore as-is: legacy ids (DEFAULT/PLAN/MAX) are already
       // migrated in main, and rewriting them here would undo user renames and drop `profileId`.
       const spaces = newState.spaces || [];
-      setState({
-        ...newState,
-        spaces: spaces.length > 0 ? spaces : INITIAL_STATE.spaces,
-        activeSpaceId: newState.activeSpaceId || spaces[0]?.id || INITIAL_STATE.activeSpaceId,
+      const incomingSpace = newState.activeSpaceId || spaces[0]?.id || INITIAL_STATE.activeSpaceId;
+      const pending = pendingSpaceRef.current;
+      if (pending && pending.id === incomingSpace) pendingSpaceRef.current = null;
+      setState((prev) => {
+        const keepOptimistic =
+          pendingSpaceRef.current !== null && spaces.some((s) => s.id === pendingSpaceRef.current!.id);
+        return {
+          ...newState,
+          spaces: spaces.length > 0 ? spaces : INITIAL_STATE.spaces,
+          activeSpaceId: keepOptimistic ? prev.activeSpaceId : incomingSpace,
+          activeTabId: keepOptimistic ? prev.activeTabId : newState.activeTabId,
+        };
       });
     };
 
@@ -230,7 +242,14 @@ export function useBrowser() {
   }, []);
 
   const selectSpace = useCallback((spaceId: string): Promise<void> => {
-    const done = Promise.resolve(window.serica?.selectSpace(spaceId)).catch(() => undefined);
+    const seq = ++spaceSeqRef.current;
+    pendingSpaceRef.current = { id: spaceId, seq };
+    const done = Promise.resolve(window.serica?.selectSpace(spaceId))
+      .catch(() => undefined)
+      .finally(() => {
+        // Confirmed (or failed): backend updates are authoritative again.
+        if (pendingSpaceRef.current?.seq === seq) pendingSpaceRef.current = null;
+      });
     setState((prev) => {
       if (!prev.spaces.some((s) => s.id === spaceId)) return prev;
       // Same pick as the backend (`Store::activate_space`): the space's most

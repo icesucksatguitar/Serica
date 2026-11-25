@@ -166,7 +166,7 @@ unsafe fn install(
         }
     }
 
-    if let Err(e) = install_context_menu(&app, &tab_id, &core, &env) {
+    if let Err(e) = install_context_menu(&app, &tab_id, &core, &controller) {
         tracing::warn!("context menu hook install failed: {e}");
     }
 
@@ -224,7 +224,7 @@ unsafe fn install(
         )?;
     }
     {
-        let (ctx, app) = (ctx.clone(), app.clone());
+        let (ctx, app, id) = (ctx.clone(), app.clone(), tab_id.clone());
         core.add_ContentLoading(
             &ContentLoadingEventHandler::create(Box::new(move |sender, args| {
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
@@ -232,7 +232,7 @@ unsafe fn install(
                 args.IsErrorPage(&mut error_page)?;
                 if !error_page.as_bool() {
                     verify_scriptlets(&sender, &ctx);
-                    if app.settings().pdf_dark_mode {
+                    if app.pdf_dark_for(&id) {
                         let js = crate::tabhost::pdf_dark_js(true);
                         let _ = sender.ExecuteScript(&HSTRING::from(js), None);
                     }
@@ -883,12 +883,113 @@ fn search_engine_label(id: &str) -> &'static str {
     }
 }
 
-/// Turns the stock WebView2 page menu into Serica's: drops Edge-only items and
-/// adds tab actions for links, images, selections and the page.
-unsafe fn install_context_menu(app: &Shared, tab_id: &str, core: &ICoreWebView2, env: &ICoreWebView2Environment) -> windows::core::Result<()> {
+/// A page context menu shown by the UI and waiting for the user's pick.
+/// COM objects live on the UI thread only, so this map is thread-local.
+struct PendingMenu {
+    args: ICoreWebView2ContextMenuRequestedEventArgs,
+    deferral: ICoreWebView2Deferral,
+    controller: ICoreWebView2Controller,
+    tab_id: String,
+    /// Serica's own entries: (url, open in foreground).
+    custom: Vec<(String, bool)>,
+}
+
+thread_local! {
+    static PENDING_MENUS: RefCell<HashMap<u64, PendingMenu>> = RefCell::new(HashMap::new());
+}
+static NEXT_MENU_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Strips Windows menu mnemonics ("Cu&t" -> "Cut", "&&" -> "&").
+fn menu_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The engine's menu items as JSON for the UI, without Edge-only entries.
+unsafe fn native_items(items: &ICoreWebView2ContextMenuItemCollection, editable: bool) -> windows::core::Result<Vec<serde_json::Value>> {
+    let mut out = Vec::new();
+    let mut n = 0u32;
+    items.Count(&mut n)?;
+    for i in 0..n {
+        let item = items.GetValueAtIndex(i)?;
+        let mut p = PWSTR::null();
+        item.Name(&mut p)?;
+        let name = take(p);
+        if HIDDEN_MENU_ITEMS.contains(&name.as_str()) || (name == "other" && !editable) {
+            continue;
+        }
+        let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
+        item.Kind(&mut kind)?;
+        if kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR {
+            out.push(serde_json::json!({ "type": "separator" }));
+            continue;
+        }
+        let mut p = PWSTR::null();
+        item.Label(&mut p)?;
+        let label = menu_label(&take(p));
+        let mut p = PWSTR::null();
+        let _ = item.ShortcutKeyDescription(&mut p);
+        let shortcut = take(p);
+        let (mut enabled, mut checked) = (Default::default(), Default::default());
+        item.IsEnabled(&mut enabled)?;
+        item.IsChecked(&mut checked)?;
+        let mut id = 0i32;
+        item.CommandId(&mut id)?;
+        let submenu = kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU;
+        let children = if submenu { native_items(&item.Children()?, editable)? } else { Vec::new() };
+        if submenu && children.is_empty() {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "type": if submenu { "submenu" } else { "command" },
+            "id": id,
+            "name": name,
+            "label": label,
+            "shortcut": shortcut,
+            "enabled": enabled.as_bool(),
+            "checked": checked.as_bool(),
+            "children": children,
+        }));
+    }
+    // No doubled, leading or trailing separators after the removals.
+    let mut clean: Vec<serde_json::Value> = Vec::with_capacity(out.len());
+    for v in out {
+        let sep = v["type"] == "separator";
+        if sep && clean.last().map_or(true, |l| l["type"] == "separator") {
+            continue;
+        }
+        clean.push(v);
+    }
+    if clean.last().is_some_and(|l| l["type"] == "separator") {
+        clean.pop();
+    }
+    Ok(clean)
+}
+
+/// Shows Serica's own menu for a right-click in a page. The engine's menu is
+/// suppressed (`Handled`); its items (copy, paste, spelling, inspect...) are
+/// sent to the UI, which draws the menu and reports the pick through
+/// `finish_page_menu`. A native pick runs as the engine's own command, so
+/// editing, spelling and clipboard behave exactly as in the stock menu.
+unsafe fn install_context_menu(
+    app: &Shared,
+    tab_id: &str,
+    core: &ICoreWebView2,
+    controller: &ICoreWebView2Controller,
+) -> windows::core::Result<()> {
     let c11 = core.cast::<ICoreWebView2_11>()?;
-    let env9 = env.cast::<ICoreWebView2Environment9>()?;
-    let (app, tab_id) = (app.clone(), tab_id.to_string());
+    let (app, tab_id, controller) = (app.clone(), tab_id.to_string(), controller.clone());
     let mut token = Default::default();
     c11.add_ContextMenuRequested(
         &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
@@ -898,33 +999,6 @@ unsafe fn install_context_menu(app: &Shared, tab_id: &str, core: &ICoreWebView2,
             let mut editable = Default::default();
             target.IsEditable(&mut editable)?;
             let editable = editable.as_bool();
-
-            let mut n = 0u32;
-            items.Count(&mut n)?;
-            for i in (0..n).rev() {
-                let mut name = PWSTR::null();
-                items.GetValueAtIndex(i)?.Name(&mut name)?;
-                let name = take(name);
-                if HIDDEN_MENU_ITEMS.contains(&name.as_str()) || (name == "other" && !editable) {
-                    items.RemoveValueAtIndex(i)?;
-                }
-            }
-            // Drop separators the removals left doubled, leading or trailing.
-            items.Count(&mut n)?;
-            let mut prev_sep = true;
-            let mut i = 0u32;
-            while i < n {
-                let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
-                items.GetValueAtIndex(i)?.Kind(&mut kind)?;
-                let sep = kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR;
-                if sep && (prev_sep || i + 1 == n) {
-                    items.RemoveValueAtIndex(i)?;
-                    n -= 1;
-                    continue;
-                }
-                prev_sep = sep;
-                i += 1;
-            }
 
             let mut has = Default::default();
             let mut p = PWSTR::null();
@@ -950,7 +1024,7 @@ unsafe fn install_context_menu(app: &Shared, tab_id: &str, core: &ICoreWebView2,
             target.PageUri(&mut p)?;
             let page = take(p);
 
-            // (label, url, activate)
+            // Serica's entries: (label, url, foreground).
             let mut top: Vec<(String, String, bool)> = Vec::new();
             if let Some(l) = link.as_ref().filter(|l| l.starts_with("http") || l.starts_with("file:")) {
                 top.push(("Open link in new tab".into(), l.clone(), true));
@@ -969,58 +1043,120 @@ unsafe fn install_context_menu(app: &Shared, tab_id: &str, core: &ICoreWebView2,
                     true,
                 ));
             }
-            let mut bottom: Vec<(String, String, bool)> = Vec::new();
-            if link.is_none() && image.is_none() && selection.is_none() && !editable && page.starts_with("http") {
-                bottom.push(("View page source".into(), format!("view-source:{page}"), true));
-            }
+            let source = (link.is_none() && image.is_none() && selection.is_none() && !editable && page.starts_with("http"))
+                .then(|| ("View page source".to_string(), format!("view-source:{page}"), true));
 
-            let make = |label: &str, action: Option<(String, bool)>| -> windows::core::Result<ICoreWebView2ContextMenuItem> {
-                let kind = if action.is_some() { COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND } else { COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR };
-                let item = env9.CreateContextMenuItem(&HSTRING::from(label), None, kind)?;
-                if let Some((url, activate)) = action {
-                    let (app, tab_id) = (app.clone(), tab_id.clone());
-                    let mut t = Default::default();
-                    item.add_CustomItemSelected(
-                        &CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
-                            let (url, tab_id) = (url.clone(), tab_id.clone());
-                            app.mutate(move |s| {
-                                let space = s.tab(&tab_id).map(|t| t.space_id.clone());
-                                s.create_tab(Some(url), space, activate, Some(&tab_id));
-                            });
-                            Ok(())
-                        })),
-                        &mut t,
-                    )?;
-                }
-                Ok(item)
-            };
-            let mut at = 0u32;
-            for (label, url, activate) in &top {
-                items.InsertValueAtIndex(at, &make(label, Some((url.clone(), *activate)))?)?;
-                at += 1;
+            let mut list: Vec<serde_json::Value> = Vec::new();
+            let mut custom: Vec<(String, bool)> = Vec::new();
+            for (label, url, fg) in &top {
+                list.push(serde_json::json!({ "type": "custom", "index": custom.len(), "label": label, "name": "serica" }));
+                custom.push((url.clone(), *fg));
             }
-            items.Count(&mut n)?;
-            if at > 0 && n > at {
-                items.InsertValueAtIndex(at, &make("", None)?)?;
+            let native = native_items(&items, editable)?;
+            if !list.is_empty() && !native.is_empty() {
+                list.push(serde_json::json!({ "type": "separator" }));
             }
-            for (label, url, activate) in &bottom {
-                items.Count(&mut n)?;
-                // Just above "Inspect" when it is last.
-                let mut idx = n;
-                if n > 0 {
-                    let mut name = PWSTR::null();
-                    items.GetValueAtIndex(n - 1)?.Name(&mut name)?;
-                    if take(name) == "inspectElement" {
-                        idx = n - 1;
+            let inspect_at = native.iter().position(|v| v["name"] == "inspectElement");
+            for (i, v) in native.into_iter().enumerate() {
+                if Some(i) == inspect_at {
+                    if let Some((label, url, fg)) = &source {
+                        list.push(serde_json::json!({ "type": "custom", "index": custom.len(), "label": label, "name": "viewSource" }));
+                        custom.push((url.clone(), *fg));
                     }
                 }
-                items.InsertValueAtIndex(idx, &make(label, Some((url.clone(), *activate)))?)?;
+                list.push(v);
+            }
+            if list.is_empty() {
+                return Ok(()); // nothing to offer: leave it to the engine
+            }
+
+            // Where the click was, in physical pixels of the window's client area.
+            let mut pt = windows::Win32::Foundation::POINT::default();
+            args.Location(&mut pt)?;
+            // `Location` is in DIPs, `Bounds` in physical pixels.
+            let mut bounds = windows::Win32::Foundation::RECT::default();
+            controller.Bounds(&mut bounds)?;
+            let mut scale = 1.0f64;
+            if let Ok(c3) = controller.cast::<ICoreWebView2Controller3>() {
+                let _ = c3.RasterizationScale(&mut scale);
+            }
+
+            // One menu at a time: a new request ends any earlier one unpicked.
+            PENDING_MENUS.with(|m| {
+                for (_, old) in m.borrow_mut().drain() {
+                    let _ = old.deferral.Complete();
+                }
+            });
+            let deferral = args.GetDeferral()?;
+            args.SetHandled(true)?;
+            let id = NEXT_MENU_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            PENDING_MENUS.with(|m| {
+                m.borrow_mut().insert(
+                    id,
+                    PendingMenu { args: args.clone(), deferral, controller: controller.clone(), tab_id: tab_id.clone(), custom },
+                )
+            });
+            let context = if editable {
+                "editable"
+            } else if link.is_some() {
+                "link"
+            } else if image.is_some() {
+                "image"
+            } else if selection.is_some() {
+                "selection"
+            } else {
+                "page"
+            };
+            ui_emit(
+                &app.handle,
+                "serica:page-context-menu",
+                serde_json::json!({
+                    "id": id,
+                    "tabId": tab_id,
+                    "x": bounds.left as f64 + pt.x as f64 * scale,
+                    "y": bounds.top as f64 + pt.y as f64 * scale,
+                    "context": context,
+                    "link": link,
+                    "image": image,
+                    "selection": selection,
+                    "items": list,
+                }),
+            );
+            // The menu takes keyboard focus (arrows, Enter, Escape); a click
+            // back into the page then blurs the UI, which closes it.
+            if let Some(main) = tauri::Manager::get_webview(&app.handle, "main") {
+                let _ = main.set_focus();
             }
             Ok(())
         })),
         &mut token,
     )?;
     Ok(())
+}
+
+/// Ends a page menu: runs the picked engine command (`command`) or Serica
+/// entry (`custom`), or nothing when the menu was dismissed. UI thread only.
+/// `refocus` hands keyboard focus back to the page (a pick, or Escape).
+pub fn finish_page_menu(app: &Shared, id: u64, command: Option<i32>, custom: Option<usize>, refocus: bool) {
+    let Some(menu) = PENDING_MENUS.with(|m| m.borrow_mut().remove(&id)) else { return };
+    unsafe {
+        if command.is_some() || refocus {
+            // The UI had focus while its menu was open; commands such as
+            // paste act on the page's focused field.
+            let _ = menu.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        if let Some(cmd) = command {
+            let _ = menu.args.SetSelectedCommandId(cmd);
+        }
+        let _ = menu.deferral.Complete();
+    }
+    if let Some((url, foreground)) = custom.and_then(|i| menu.custom.get(i).cloned()) {
+        let tab_id = menu.tab_id;
+        app.mutate(move |s| {
+            let space = s.tab(&tab_id).map(|t| t.space_id.clone());
+            s.create_tab(Some(url), space, foreground, Some(&tab_id));
+        });
+    }
 }
 
 /// Hidden tabs ask WebView2 to keep a low memory footprint (it trims caches

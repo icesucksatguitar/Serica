@@ -3,7 +3,9 @@ import {
   ArrowRightLeft,
   BookOpen,
   Briefcase,
+  Camera,
   ChevronRight,
+  Compass,
   Code,
   Coffee,
   Copy,
@@ -11,17 +13,23 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Flame,
+  Gamepad2,
   Globe,
+  GraduationCap,
   Heart,
   Home,
+  Leaf,
   MoreHorizontal,
   Music,
   PanelLeftClose,
   Pin,
   PinOff,
   Plus,
+  Rocket,
   Sparkles,
   Star,
+  Sun,
   StarOff,
   Trash2,
   X,
@@ -32,6 +40,7 @@ import { useSpaceSwipe } from '../hooks/useSpaceSwipe';
 import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
+import { SpaceMenu } from './SpaceMenu';
 import { addSettledBlurListener } from '../utils/settledBlur';
 import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 
@@ -78,6 +87,11 @@ export interface SidebarActions {
   updateFolder?: (folderId: string, patch: any) => unknown;
   deleteFolder?: (folderId: string) => unknown;
   moveTabToFolder?: (tabId: string, folderId: string | null) => unknown;
+  /** Space management from the sidebar (no trip to Settings). */
+  createSpace?: (name: string, color?: string) => Promise<Space | null | undefined> | unknown;
+  updateSpace?: (spaceId: string, patch: { name?: string; icon?: string; color?: string }) => unknown;
+  deleteSpace?: (spaceId: string) => unknown;
+  reorderSpace?: (spaceId: string, toIndex: number) => unknown;
   /** New tab control (R12.8): App opens the Command_Bar, which creates the tab in the active space. */
   openCommandBar: () => void;
 }
@@ -126,17 +140,26 @@ export interface SidebarProps {
 
 const SPACE_ICONS: Record<string, LucideIcon> = {
   Home,
-  Folder,
-  BookOpen,
   Briefcase,
-  Coffee,
-  Star,
-  Heart,
+  BookOpen,
+  GraduationCap,
   Code,
+  Coffee,
   Music,
-  Globe,
+  Gamepad2,
+  Camera,
+  Heart,
+  Star,
   Sparkles,
+  Rocket,
+  Compass,
+  Globe,
+  Leaf,
+  Sun,
+  Flame,
+  Folder,
 };
+const SPACE_ICON_NAMES = Object.keys(SPACE_ICONS);
 
 export const SpaceIcon: React.FC<{ space: Pick<Space, 'icon' | 'name' | 'color'>; size?: number }> = ({
   space,
@@ -227,6 +250,18 @@ interface FolderMenuState {
   y: number;
 }
 
+interface SpaceMenuState {
+  spaceId: string;
+  x: number;
+  y: number;
+}
+
+/** Keeps a menu of `width` x `height` inside the window. */
+const clampMenu = (x: number, y: number, width = MENU_WIDTH, height = 300) => ({
+  x: Math.max(4, Math.min(x, window.innerWidth - width - 4)),
+  y: Math.max(4, Math.min(y, window.innerHeight - height - 4)),
+});
+
 const MENU_WIDTH = 210;
 
 // ---------------------------------------------------------------------------
@@ -307,8 +342,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [spaceMenu, setSpaceMenu] = useState<SpaceMenuState | null>(null);
+  const [renamingSpaceId, setRenamingSpaceId] = useState<string | null>(null);
+  const [spaceNameDraft, setSpaceNameDraft] = useState('');
 
-  const isMenuOrDragOpen = menu !== null || folderMenu !== null || drag.dragging;
+  const isMenuOrDragOpen = menu !== null || folderMenu !== null || spaceMenu !== null || drag.dragging;
 
   const revealSidebar = useCallback(() => {
     if (autoHideTimerRef.current !== null) {
@@ -320,7 +358,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   const scheduleHideSidebar = useCallback((delay = HIDE_DELAY_MS) => {
-    if (menu !== null || folderMenu !== null || drag.dragging) return;
+    if (menu !== null || folderMenu !== null || spaceMenu !== null || drag.dragging) return;
     if (autoHideTimerRef.current !== null) {
       window.clearTimeout(autoHideTimerRef.current);
     }
@@ -338,7 +376,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         autoHideTimerRef.current = null;
       }
     }, delay);
-  }, [menu, folderMenu, drag.dragging, livePage]);
+  }, [menu, folderMenu, spaceMenu, drag.dragging, livePage]);
 
   const cancelHideSidebar = useCallback(() => {
     if (autoHideTimerRef.current !== null) {
@@ -376,6 +414,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
     };
   }, [autoHide, expanded, sidebarWidth, overSidebar, revealSidebar, scheduleHideSidebar, cancelHideSidebar]);
+
+  useEffect(() => {
+    if (!spaceMenu) return;
+    const close = () => setSpaceMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', close);
+    const removeBlur = addSettledBlurListener(close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      removeBlur();
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [spaceMenu]);
 
   useEffect(() => {
     if (!folderMenu) return;
@@ -488,12 +542,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // --- Hover previews (R18.1, R18.2) -------------------------------------------
   // Nothing shows while dragging, while a context menu is open or while the sidebar is hidden.
-  const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || !shown);
+  const preview = useHoverPreview(drag.dragging || menu !== null || folderMenu !== null || spaceMenu !== null || !shown);
   // Menus show through the live page too.
   const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
   const [folderMenuEl, setFolderMenuEl] = useState<HTMLDivElement | null>(null);
   const menuReady = useElementHole('sidebar-menu', menu ? menuEl : null);
   const folderMenuReady = useElementHole('sidebar-folder-menu', folderMenu ? folderMenuEl : null);
+  const [spaceMenuEl, setSpaceMenuEl] = useState<HTMLDivElement | null>(null);
+  const spaceMenuReady = useElementHole('sidebar-space-menu', spaceMenu ? spaceMenuEl : null);
 
   // Hides the sidebar now (a pick was made or it was dismissed).
   const dismiss = useCallback(() => {
@@ -534,7 +590,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // A sidebar opened from the keyboard with the pointer already on the page
   // waits until the pointer has visited it.
   const busyRef = useRef(false);
-  busyRef.current = isMenuOrDragOpen || creatingFolder || renamingFolderId !== null;
+  busyRef.current = isMenuOrDragOpen || creatingFolder || renamingFolderId !== null || renamingSpaceId !== null;
   useEffect(() => {
     if (!autoHide || !shown || !livePage || !window.serica?.uiCursor) return;
     let alive = true;
@@ -598,7 +654,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     trackRef,
     order: swipeOrder,
     activeId: activeSpaceId,
-    blocked: drag.dragging || menu !== null || folderMenu !== null,
+    blocked: drag.dragging || menu !== null || folderMenu !== null || spaceMenu !== null || renamingSpaceId !== null,
     onCommit: actions.selectSpace,
     onStart: hidePreview,
   });
@@ -683,6 +739,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return;
     }
     setMenu(null);
+  };
+
+  // --- Folders and spaces, managed in place ------------------------------------
+  /** New folder (optionally holding a tab), named in place right away. */
+  const createFolderAndRename = async (tabId?: string) => {
+    const res: any = await actions.createFolder?.(activeSpaceId, 'New Folder');
+    const folderId: string | undefined = res?.folder?.id ?? res?.id;
+    if (!folderId) return;
+    if (tabId) await actions.moveTabToFolder?.(tabId, folderId);
+    setRenamingFolderId(folderId);
+    setRenameValue('New Folder');
+  };
+
+  const openSpaceMenu = (spaceId: string, x: number, y: number) => {
+    setMenu(null);
+    setFolderMenu(null);
+    setSpaceMenu({ spaceId, ...clampMenu(x, y, MENU_WIDTH, 320) });
+  };
+
+  const startRenameSpace = (space: Space) => {
+    setSpaceNameDraft(space.name);
+    setRenamingSpaceId(space.id);
+  };
+
+  const commitRenameSpace = () => {
+    const id = renamingSpaceId;
+    setRenamingSpaceId(null);
+    if (!id) return;
+    const name = spaceNameDraft.trim();
+    const current = state.spaces.find((s) => s.id === id);
+    if (name && current && name !== current.name) actions.updateSpace?.(id, { name });
+  };
+
+  /** "+" in the switcher: a new space, active at once, named in place. */
+  const addSpace = async () => {
+    const taken = new Set(state.spaces.map((s) => s.name));
+    let n = state.spaces.length + 1;
+    while (taken.has(`Space ${n}`)) n += 1;
+    const created: any = await actions.createSpace?.(`Space ${n}`);
+    if (created?.id) {
+      setSpaceNameDraft(created.name);
+      setRenamingSpaceId(created.id);
+    }
   };
 
   // --- Activation -------------------------------------------------------------
@@ -859,8 +958,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const folderTabs = v.pinned.filter((t) => t.folderId === folder.id);
           return (
             <div
-              className={`nsb-folder ${folder.collapsed ? 'collapsed' : 'expanded'}`}
+              className={`nsb-folder ${folder.collapsed ? 'collapsed' : 'expanded'}${!inert && drag.dropFolderId === folder.id ? ' drop-target' : ''}`}
               key={folder.id}
+              data-folder-id={inert ? undefined : folder.id}
             >
               <div
                 className="nsb-folder-header"
@@ -1066,6 +1166,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       'aria-label': `Space ${space.name}, profile ${profile.name}`,
       style: { '--nsb-btn-color': space.color } as React.CSSProperties,
       onClick: () => actions.selectSpace(space.id),
+      onContextMenu: (e: React.MouseEvent) => {
+        e.preventDefault();
+        openSpaceMenu(space.id, e.clientX, e.clientY - 300);
+      },
     };
     return (
       <button key={space.id} {...mergeProps(mergeProps(base, drag.spaceProps(space.id)), spaceProps?.(space))}>
@@ -1124,10 +1228,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Active space: name, icon and color (R13.6) */}
         <div className="nsb-header">
           {activeSpace && (
-            <div className="nsb-space-title" title={activeSpace.name}>
+            <div
+              className="nsb-space-title"
+              title={renamingSpaceId === activeSpace.id ? undefined : `${activeSpace.name} (double-click to rename)`}
+              onDoubleClick={() => startRenameSpace(activeSpace)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openSpaceMenu(activeSpace.id, e.clientX, e.clientY);
+              }}
+            >
               <SpaceIcon space={activeSpace} size={15} />
-              <span className="nsb-space-name">{activeSpace.name}</span>
-              {activeProfile && profileCount > 1 && (
+              {renamingSpaceId === activeSpace.id ? (
+                <input
+                  autoFocus
+                  className="nsb-space-rename"
+                  aria-label="Space name"
+                  value={spaceNameDraft}
+                  maxLength={32}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => setSpaceNameDraft(e.target.value)}
+                  onBlur={commitRenameSpace}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRenameSpace();
+                    else if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      setRenamingSpaceId(null);
+                    }
+                  }}
+                />
+              ) : (
+                <span className="nsb-space-name">{activeSpace.name}</span>
+              )}
+              {activeProfile && profileCount > 1 && renamingSpaceId !== activeSpace.id && (
                 <span className="nsb-profile-chip" title={`Profile: ${activeProfile.name}`}>
                   {activeProfile.name}
                 </span>
@@ -1135,6 +1267,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
           <div className="nsb-header-actions">
+            {activeSpace && (
+              <button
+                type="button"
+                className={`nsb-icon-btn${spaceMenu?.spaceId === activeSpace.id ? ' active' : ''}`}
+                title="Space actions"
+                aria-label="Space actions"
+                aria-haspopup="menu"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  if (spaceMenu) {
+                    setSpaceMenu(null);
+                    return;
+                  }
+                  const r = e.currentTarget.getBoundingClientRect();
+                  openSpaceMenu(activeSpace.id, r.right - MENU_WIDTH, r.bottom + 4);
+                }}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            )}
             <button
               type="button"
               className="nsb-icon-btn"
@@ -1164,6 +1316,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {spaces.map((s) => spaceButton(s, profile))}
               </div>
             ),
+          )}
+          {actions.createSpace && (
+            <button type="button" className="nsb-space-add" title="New space" aria-label="New space" onClick={() => void addSpace()}>
+              <Plus size={14} />
+            </button>
           )}
         </nav>
         {children}
@@ -1245,21 +1402,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 role="menuitem"
                 className="nsb-menu-item"
                 onClick={() => {
-                  const name = prompt('New folder name:', 'New Folder');
-                  if (name && name.trim()) {
-                    const res: any = actions.createFolder?.(activeSpaceId, name.trim());
-                    Promise.resolve(res).then((r: any) => {
-                      const createdId = r?.folder?.id || r?.id;
-                      if (createdId) {
-                        actions.moveTabToFolder?.(menu.item.id, createdId);
-                      }
-                    });
-                  }
+                  const tabId = menu.item.id;
                   setMenu(null);
+                  void createFolderAndRename(tabId);
                 }}
               >
                 <FolderPlus size={13} />
-                <span>+ New Folder with Tab</span>
+                <span>New folder with this tab</span>
               </button>
             </>
           ) : !menu.showSpaces ? (
@@ -1368,6 +1517,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
       )}
+
+      {spaceMenu &&
+        (() => {
+          const group = view.groups.find((g) => g.spaces.some((s) => s.id === spaceMenu.spaceId));
+          const space = group?.spaces.find((s) => s.id === spaceMenu.spaceId);
+          if (!group || !space) return null;
+          const select = () => {
+            if (space.id !== activeSpaceId) actions.selectSpace(space.id);
+          };
+          return (
+            <div
+              ref={setSpaceMenuEl}
+              className="nsb-menu space-menu"
+              role="menu"
+              aria-label={`${space.name} actions`}
+              style={{ left: spaceMenu.x, top: spaceMenu.y, width: MENU_WIDTH, visibility: spaceMenuReady ? 'visible' : 'hidden' }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <SpaceMenu
+                key={space.id}
+                space={space}
+                index={group.spaces.indexOf(space)}
+                count={group.spaces.length}
+                tabCount={state.tabs.filter((t) => t.spaceId === space.id && !t.unloaded).length}
+                icons={SPACE_ICON_NAMES}
+                renderIcon={(icon, color) => <SpaceIcon space={{ icon, color, name: space.name }} size={15} />}
+                onRename={() => {
+                  select();
+                  startRenameSpace(space);
+                }}
+                onUpdate={(patch) => actions.updateSpace?.(space.id, patch)}
+                onMove={(to) => actions.reorderSpace?.(space.id, to)}
+                onNewTab={() => {
+                  select();
+                  dismiss();
+                  actions.openCommandBar();
+                }}
+                onNewFolder={() => {
+                  select();
+                  void (async () => {
+                    const res: any = await actions.createFolder?.(space.id, 'New Folder');
+                    const id = res?.folder?.id ?? res?.id;
+                    if (id) {
+                      setRenamingFolderId(id);
+                      setRenameValue('New Folder');
+                    }
+                  })();
+                }}
+                onDelete={() => actions.deleteSpace?.(space.id)}
+                onClose={() => setSpaceMenu(null)}
+              />
+            </div>
+          );
+        })()}
     </>
   );
 };

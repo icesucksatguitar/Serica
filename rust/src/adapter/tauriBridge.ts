@@ -3,7 +3,7 @@
 // backend emits to the main webview. No browser logic lives here.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { PageDialogRequest } from '../types';
+import type { GeoPlace, GithubContributions, PageContextMenuRequest, PageDialogRequest, WeatherNow } from '../types';
 
 type Unsubscribe = () => void;
 
@@ -219,6 +219,20 @@ export const tauriBridge = {
   onZoomUpdated: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => on('serica:zoom-updated', cb),
   onFindResult: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => on('serica:find-result', cb),
   onPageColor: (cb: (r: { tabId: string; themeColor: string | null }) => void) => on('serica:page-color', cb),
+  widgetGithub: (user: string) => invoke<GithubContributions>('widget_github', { user }),
+  widgetGeocode: (query: string) => invoke<GeoPlace>('widget_geocode', { query }),
+  widgetWeather: (lat: number, lon: number, fahrenheit: boolean) =>
+    invoke<WeatherNow>('widget_weather', { lat, lon, fahrenheit }),
+  getPdfDarkTab: (tabId: string) => invoke<{ available: boolean; dark: boolean }>('get_pdf_dark_tab', { tabId }),
+  setPdfDarkTab: (tabId: string, dark: boolean) => invoke<void>('set_pdf_dark_tab', { tabId, dark }),
+  onPageContextMenu: (cb: (m: PageContextMenuRequest) => void) => on('serica:page-context-menu', cb),
+  pageMenuSelect: (id: number, pick: { command?: number; custom?: number; refocus?: boolean }) =>
+    invoke<void>('page_menu_select', {
+      id,
+      command: pick.command ?? null,
+      custom: pick.custom ?? null,
+      refocus: pick.refocus ?? false,
+    }),
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => on('serica:update-status', cb),
   onHtmlFullscreen: (cb: (isFullscreen: boolean) => void) => on('serica:html-fullscreen', cb),
   onPageDialog: (cb: (d: PageDialogRequest) => void) => on('serica:page-dialog', cb),

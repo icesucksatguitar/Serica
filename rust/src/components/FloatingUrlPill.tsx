@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, Globe, Copy, Check, Search } from 'lucide-react';
+import { Lock, Globe, Copy, Check, Search, Moon, Sun } from 'lucide-react';
 import { prewarmViewport } from '../hooks/useViewportOverlay';
 
 export interface FloatingUrlPillProps {
@@ -11,7 +11,13 @@ export interface FloatingUrlPillProps {
   onClick: () => void;
   onResetZoom?: () => void;
   onOpenFind?: () => void;
+  /** Active tab, for the dark-PDF toggle shown on PDF tabs. */
+  tabId?: string;
+  /** Re-reads the dark-PDF state when the app theme or settings change. */
+  pdfDarkKey?: string;
 }
+
+const isPdfUrl = (url?: string) => !!url && /\.pdf($|[?#])/i.test(url);
 
   export const FloatingUrlPill: React.FC<FloatingUrlPillProps> = ({
     url,
@@ -21,8 +27,32 @@ export interface FloatingUrlPillProps {
     onClick,
     onResetZoom,
     onOpenFind,
+    tabId,
+    pdfDarkKey,
   }) => {
     const [copied, setCopied] = useState(false);
+    // Dark PDFs: shown when the setting is on and the app is dark; a PDF tab
+    // can switch back to the document's own colors (scans, photos).
+    const [pdfDark, setPdfDark] = useState<{ available: boolean; dark: boolean } | null>(null);
+    const isPdf = isPdfUrl(url);
+    useEffect(() => {
+      setPdfDark(null);
+      if (!isPdf || !tabId) return;
+      let alive = true;
+      void window.serica?.getPdfDarkTab?.(tabId).then((st) => {
+        if (alive && st) setPdfDark(st);
+      });
+      return () => {
+        alive = false;
+      };
+    }, [isPdf, tabId, url, pdfDarkKey]);
+    const togglePdfDark = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!tabId || !pdfDark) return;
+      const next = !pdfDark.dark;
+      setPdfDark({ ...pdfDark, dark: next });
+      void window.serica?.setPdfDarkTab?.(tabId, next);
+    };
     const copyTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -93,7 +123,7 @@ export interface FloatingUrlPillProps {
           <span className="url-domain-text">{displayDomain}</span>
         </span>
 
-        {(isWebUrl || showZoomBadge) && (
+        {(isWebUrl || showZoomBadge || pdfDark?.available) && (
           <span className="url-pill-actions">
             {showZoomBadge && (
               <button
@@ -104,6 +134,18 @@ export interface FloatingUrlPillProps {
                 title="Reset zoom to 100% (Ctrl+0)"
               >
                 {Math.round(zoomFactor * 100)}%
+              </button>
+            )}
+            {pdfDark?.available && (
+              <button
+                type="button"
+                className={`url-pill-action-btn${pdfDark.dark ? ' active' : ''}`}
+                onClick={togglePdfDark}
+                aria-pressed={pdfDark.dark}
+                aria-label={pdfDark.dark ? 'Show the PDF in its own colors' : 'Show the PDF with dark pages'}
+                title={pdfDark.dark ? 'Original colors (for scans and photos)' : 'Dark pages'}
+              >
+                {pdfDark.dark ? <Sun size={11} /> : <Moon size={11} />}
               </button>
             )}
             {isWebUrl && onOpenFind && (
