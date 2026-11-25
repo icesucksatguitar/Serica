@@ -97,6 +97,7 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
             0x45 | 0x53 => Some(Shortcut::ToggleSidebar),   // E, S
             0x46 if !shift => Some(Shortcut::Find),         // F
             0x48 => Some(Shortcut::History),                // H
+            0x4F if !shift => Some(Shortcut::OpenFile),     // O
             0x4A => Some(Shortcut::Downloads),              // J
             VK_OEM_COMMA => Some(Shortcut::Settings),
             VK_TAB => Some(Shortcut::CycleTab(if shift { -1 } else { 1 })),
@@ -215,7 +216,7 @@ unsafe fn install(
         )?;
     }
     {
-        let ctx = ctx.clone();
+        let (ctx, app) = (ctx.clone(), app.clone());
         core.add_ContentLoading(
             &ContentLoadingEventHandler::create(Box::new(move |sender, args| {
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
@@ -223,6 +224,10 @@ unsafe fn install(
                 args.IsErrorPage(&mut error_page)?;
                 if !error_page.as_bool() {
                     verify_scriptlets(&sender, &ctx);
+                    if app.settings().pdf_dark_mode {
+                        let js = crate::tabhost::pdf_dark_js(true);
+                        let _ = sender.ExecuteScript(&HSTRING::from(js), None);
+                    }
                 }
                 Ok(())
             })),
@@ -1260,6 +1265,7 @@ mod tests {
         assert!(matches!(shortcut_for(0x33, true, false, false), Some(Shortcut::SpaceIndex(3))));
         assert!(matches!(shortcut_for(0x09, true, true, false), Some(Shortcut::CycleTab(-1))));
         assert!(shortcut_for(0x41, true, false, false).is_none()); // Ctrl+A stays with the page
+        assert!(matches!(shortcut_for(0x4F, true, false, false), Some(Shortcut::OpenFile)));
         assert!(shortcut_for(0x54, false, false, false).is_none());
     }
 }

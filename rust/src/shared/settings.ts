@@ -93,6 +93,8 @@ export interface BrowserSettings {
   tabSleepMinutes: TabSleepMinutes;
   /** Pop a playing video into picture-in-picture when switching away from its tab. */
   autoPictureInPicture: boolean;
+  /** Show PDFs with black pages and white text. */
+  pdfDarkMode: boolean;
   /** Vertical sidebar with hover previews, or a horizontal strip of tabs under the top bar. */
   tabLayout: TabLayout;
   searchEngine: SearchEngineId;
@@ -124,6 +126,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   zenSleepEnabled: true,
   tabSleepMinutes: 60 as TabSleepMinutes,
   autoPictureInPicture: true,
+  pdfDarkMode: true,
   tabLayout: 'sidebar' as TabLayout,
   searchEngine: 'google' as SearchEngineId,
   reducedEffectsMode: 'auto' as ReducedEffectsMode,
@@ -244,6 +247,8 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
       typeof source.autoPictureInPicture === 'boolean'
         ? source.autoPictureInPicture
         : DEFAULT_SETTINGS.autoPictureInPicture,
+    pdfDarkMode:
+      typeof source.pdfDarkMode === 'boolean' ? source.pdfDarkMode : DEFAULT_SETTINGS.pdfDarkMode,
     tabLayout: source.tabLayout === 'top' ? 'top' : 'sidebar',
     searchEngine: normalizeSearchEngine(source.searchEngine),
     reducedEffectsMode: normalizeReducedEffectsMode(source.reducedEffectsMode),

@@ -661,6 +661,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="settings-divider" />
 
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">Dark PDFs</span>
+                      <span className="settings-hint">
+                        Show PDFs with black pages and white text. Only affects PDFs, not websites
+                      </span>
+                    </div>
+                    <SettingsSwitch
+                      checked={settings.pdfDarkMode}
+                      label="Dark PDFs"
+                      onChange={(next) => onUpdateSettings({ pdfDarkMode: next })}
+                    />
+                  </div>
+
+                  <div className="settings-divider" />
+
                   <div className="settings-row-text" style={{ marginTop: 4 }}>
                     <span className="settings-row-label">Archive tabs after</span>
                     <span className="settings-hint">{ARCHIVE_INTERVAL_HINT}</span>

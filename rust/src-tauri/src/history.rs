@@ -4,7 +4,9 @@
 //! `visitCount` and `timestamp` instead of flooding the list.
 
 use crate::model::{now_ms, new_id};
-use crate::store::{read_json, write_atomic};
+use crate::store::read_json;
+#[cfg(test)]
+use crate::store::write_atomic;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -58,6 +60,18 @@ impl History {
         Self { entries, path, dirty: false }
     }
 
+    /// The entries as bytes if they changed since the last save, for writing
+    /// outside the history lock.
+    pub fn take_serialized(&mut self) -> Option<(PathBuf, Vec<u8>)> {
+        if !self.dirty {
+            return None;
+        }
+        let bytes = serde_json::to_vec(&self.entries).ok()?;
+        self.dirty = false;
+        Some((self.path.clone(), bytes))
+    }
+
+    #[cfg(test)]
     pub fn save(&mut self) {
         if !self.dirty {
             return;

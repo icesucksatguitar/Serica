@@ -4,6 +4,7 @@ mod app;
 mod commands;
 mod downloads;
 mod extensions;
+mod files;
 #[cfg(windows)]
 mod touchpad;
 mod history;
@@ -52,6 +53,17 @@ pub fn run() {
     migrate_legacy_data();
 
     let app = tauri::Builder::default()
+        // Must be first: a second launch (e.g. double-clicking a PDF while
+        // Serica is open) hands its arguments to this instance and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(shared) = app.try_state::<app::Shared>() {
+                files::open_args(&shared, argv.into_iter().skip(1));
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
@@ -71,6 +83,7 @@ pub fn run() {
             if let Some(hwnd) = app.get_webview_window("main").and_then(|w| w.hwnd().ok()) {
                 touchpad::attach(&shared, windows::Win32::Foundation::HWND(hwnd.0 as _));
             }
+            files::open_args(&shared, std::env::args().skip(1));
             app.manage(shared);
             updater::start(app.handle().clone());
             Ok(())
@@ -138,6 +151,7 @@ pub fn run() {
             commands::zen_optimize,
             commands::window_control,
             commands::get_history,
+            commands::open_file,
             commands::history_suggest,
             commands::delete_history_entry,
             commands::clear_history,

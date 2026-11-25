@@ -225,6 +225,43 @@ pub const PAGE_SCRIPT: &str = r#"(() => {
   else start();
 })();"#;
 
+/// Dark mode for PDFs. WebView2's PDF viewer is a sealed frame that page
+/// scripts and Dark Reader can't reach, so a click-through overlay below the
+/// viewer's toolbar recolors what is behind it: colors are inverted (white
+/// pages turn black, black text white), hues are kept, and the light grey the
+/// viewer's backdrop inverts to is pulled back to dark grey. Only acts on a
+/// top-level PDF document. `pdf_dark_js(on)` switches it.
+pub const PDF_DARK_SCRIPT: &str = r#"(() => {
+  if (window.top !== window || window.__sericaPdfDark) return;
+  let on = false;
+  const TOOLBAR = 41;
+  const apply = () => {
+    if (document.contentType !== 'application/pdf') return;
+    const root = document.body || document.documentElement;
+    if (!root) { document.addEventListener('DOMContentLoaded', apply, { once: true }); return; }
+    let el = document.getElementById('serica-pdf-dark');
+    if (!on) { if (el) el.remove(); return; }
+    if (el) return;
+    const t = [];
+    for (let i = 0; i <= 20; i++) { const x = i / 20; t.push(x > 0.72 && x < 0.88 ? 0.13 : x); }
+    const f = '<feFunc_ type="table" tableValues="' + t.join(' ') + '"/>';
+    el = document.createElement('serica-pdf-dark');
+    el.id = 'serica-pdf-dark';
+    el.innerHTML = '<svg width="0" height="0" style="position:absolute"><filter id="serica-pdf-dark-f" color-interpolation-filters="sRGB">'
+      + '<feColorMatrix type="matrix" values="-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0"/><feColorMatrix type="hueRotate" values="180"/>'
+      + '<feComponentTransfer>' + ['R', 'G', 'B'].map((c) => f.replace('_', c)).join('') + '</feComponentTransfer></filter></svg>';
+    const veil = document.createElement('div');
+    veil.style.cssText = 'position:fixed;left:0;right:0;top:' + TOOLBAR + 'px;bottom:0;pointer-events:none;z-index:2147483647;backdrop-filter:url(#serica-pdf-dark-f);';
+    el.appendChild(veil);
+    root.appendChild(el);
+  };
+  Object.defineProperty(window, '__sericaPdfDark', { value: (v) => { on = !!v; apply(); } });
+})();"#;
+
+pub fn pdf_dark_js(on: bool) -> String {
+    format!("window.__sericaPdfDark && window.__sericaPdfDark({on})")
+}
+
 /// A tab webview ready to be built (see `TabHost::prepare`).
 struct PendingView {
     window: tauri::Window,
@@ -281,7 +318,8 @@ impl TabHost {
             .browser_extensions_enabled(true)
             .initialization_script(PAGE_SCRIPT)
             .initialization_script(crate::extensions::WEBSTORE_SCRIPT)
-            .initialization_script(SWIPE_SCRIPT);
+            .initialization_script(SWIPE_SCRIPT)
+            .initialization_script(PDF_DARK_SCRIPT);
         if self.net.1 {
             b = b.initialization_script_for_all_frames(crate::vpn::WEBRTC_GUARD_JS);
         }
@@ -734,6 +772,14 @@ impl TabHost {
                 }
             });
         });
+    }
+
+    /// Applies the dark-PDF setting to every open page (no-op on non-PDFs).
+    pub fn apply_pdf_dark(app: &Shared, on: bool) {
+        let js = pdf_dark_js(on);
+        for v in app.host.lock().views.values() {
+            let _ = v.webview.eval(&js);
+        }
     }
 
     pub fn set_visible(app: &Shared, visible: bool) {

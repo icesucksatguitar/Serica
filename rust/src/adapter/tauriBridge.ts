@@ -171,6 +171,7 @@ export const tauriBridge = {
   downloadAction: (id: string, action: string) => invoke<boolean>('download_action', { id, action }),
   clearDownloads: () => invoke<any[]>('clear_downloads'),
   openDownloadsFolder: () => invoke<void>('open_downloads_folder'),
+  openFile: () => invoke<void>('open_file'),
 
   // Extensions (Chrome Web Store)
   listExtensions: () => invoke<any[]>('list_extensions'),

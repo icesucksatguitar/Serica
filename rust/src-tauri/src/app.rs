@@ -32,6 +32,8 @@ pub enum Notice {
     /// Settings changed: broadcast and reconfigure services.
     Settings,
     History,
+    /// Requests were blocked: refresh counters only (no reconcile, no save).
+    Blocked,
     Quit,
 }
 
@@ -66,6 +68,7 @@ pub enum Shortcut {
     SpaceStep(i32),
     Escape,
     Home,
+    OpenFile,
 }
 
 pub struct App {
@@ -81,6 +84,12 @@ pub struct App {
     pub mcp_logs: Mutex<VecDeque<Value>>,
     blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
     tx: Mutex<mpsc::Sender<Notice>>,
+    /// Serializes saves (the sync loop and the updater may save at once).
+    save_lock: Mutex<()>,
+    /// Hash of what each saved file last held, to skip rewriting it unchanged.
+    written: Mutex<std::collections::HashMap<std::path::PathBuf, u64>>,
+    /// Dark-PDF setting the open pages were last told about.
+    pdf_dark: std::sync::atomic::AtomicBool,
 }
 
 /// Emits to the app UI only, never to web pages in tab webviews.
@@ -132,6 +141,15 @@ pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
             return Some(t.to_string());
         }
     }
+    // A local path typed or pasted: drive paths, quoted paths, UNC shares.
+    let unquoted = t.trim_matches('"');
+    let b = unquoted.as_bytes();
+    let drive = b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/');
+    if drive || unquoted.starts_with("\\\\") {
+        if let Ok(u) = url::Url::from_file_path(unquoted) {
+            return Some(u.to_string());
+        }
+    }
     let host_part = t.split(['/', '?', '#']).next().unwrap_or("");
     let looks_like_host = !t.contains(char::is_whitespace)
         && (host_part.starts_with("localhost")
@@ -160,6 +178,7 @@ impl App {
         let net = (vpn.needs_proxy(), vpn.webrtc_guard_active());
         let port = vpn.start_proxy();
         let (tx, rx) = mpsc::channel();
+        let pdf_dark = std::sync::atomic::AtomicBool::new(store.settings.pdf_dark_mode);
         let app = Arc::new(App {
             handle,
             store: Mutex::new(store),
@@ -173,6 +192,9 @@ impl App {
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
             tx: Mutex::new(tx),
+            pdf_dark,
+            save_lock: Mutex::new(()),
+            written: Mutex::new(Default::default()),
         });
         let worker = app.clone();
         std::thread::Builder::new()
@@ -192,6 +214,12 @@ impl App {
     /// saves with a short debounce.
     fn sync_loop(self: Arc<Self>, rx: mpsc::Receiver<Notice>) {
         let mut dirty_since: Option<Instant> = None;
+        // Blocked-request counters reach the UI at most this often. Ad-heavy
+        // pages block hundreds of requests while loading; each used to cost a
+        // full state broadcast, a webview reconcile and a save to disk.
+        const BLOCKED_REFRESH: Duration = Duration::from_millis(1000);
+        let mut blocked_pending = false;
+        let mut last_state_emit = Instant::now() - BLOCKED_REFRESH;
         loop {
             let first = match rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(n) => Some(n),
@@ -203,6 +231,7 @@ impl App {
                 Notice::State => state = true,
                 Notice::Settings => settings = true,
                 Notice::History => history = true,
+                Notice::Blocked => blocked_pending = true,
                 Notice::Quit => quit = true,
             };
             if let Some(n) = first {
@@ -215,13 +244,23 @@ impl App {
             if settings {
                 let s = self.store.lock().settings.clone();
                 self.shields.configure(s.adblock_enabled, &s.shield_whitelist);
+                if self.pdf_dark.swap(s.pdf_dark_mode, std::sync::atomic::Ordering::Relaxed) != s.pdf_dark_mode {
+                    TabHost::apply_pdf_dark(&self, s.pdf_dark_mode);
+                }
                 ui_emit(&self.handle, "serica:settings-updated", s);
                 crate::mcp_http::sync(&self);
             }
             if state || settings {
                 let snap = self.snapshot();
                 ui_emit(&self.handle, "serica:state-update", snap);
+                last_state_emit = Instant::now();
+                blocked_pending = false;
                 TabHost::reconcile(&self);
+            } else if blocked_pending && last_state_emit.elapsed() >= BLOCKED_REFRESH {
+                // Per-tab blocked counts and totals live in the snapshot.
+                ui_emit(&self.handle, "serica:state-update", self.snapshot());
+                last_state_emit = Instant::now();
+                blocked_pending = false;
             }
             let blocked: Vec<BlockedTrackerItem> = std::mem::take(&mut *self.blocked_queue.lock());
             if !blocked.is_empty() {
@@ -247,14 +286,23 @@ impl App {
         }
     }
 
+    /// Saves state, settings and history. Only serializing happens under the
+    /// locks: the page event handlers on the UI thread take the same locks, so
+    /// holding them through disk writes (and antivirus scans of those writes)
+    /// stalled page events and input. Unchanged files are not rewritten.
     pub fn save_now(&self) {
         let stats = self.shields.stats();
-        {
+        let files = {
             let mut s = self.store.lock();
             s.shield_stats = stats;
-            s.save();
+            s.serialized()
+        };
+        let history = self.history.lock().take_serialized();
+        let _guard = self.save_lock.lock();
+        crate::store::write_files(&self.written, files, true);
+        if let Some((path, bytes)) = history {
+            crate::store::write_files(&self.written, vec![(path, bytes)], false);
         }
-        self.history.lock().save();
     }
 
     pub fn snapshot(&self) -> BrowserAppState {
@@ -404,7 +452,7 @@ impl App {
             q.drain(0..100);
         }
         drop(q);
-        self.notify(Notice::State);
+        self.notify(Notice::Blocked);
     }
 
     /// Handles a browser shortcut pressed inside a web page.
@@ -412,6 +460,7 @@ impl App {
         let h = &self.handle;
         match sc {
             Shortcut::NewTab => ui_emit(h, "serica:open-command-bar", serde_json::json!({ "newTab": true })),
+            Shortcut::OpenFile => crate::files::pick_and_open(self),
             Shortcut::OpenCommandBar => ui_emit(h, "serica:open-command-bar", serde_json::json!({})),
             Shortcut::ToggleSidebar => ui_emit(h, "serica:toggle-tabs", ()),
             Shortcut::Find => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "open-find", "source": "shortcut" })),
@@ -491,6 +540,9 @@ mod tests {
         assert_eq!(normalize_input("example.com", G).unwrap(), "https://example.com");
         assert_eq!(normalize_input("localhost:3000/x", G).unwrap(), "http://localhost:3000/x");
         assert_eq!(normalize_input("https://a.b/c", G).unwrap(), "https://a.b/c");
+        assert_eq!(normalize_input(r"C:\Docs\My File.pdf", G).unwrap(), "file:///C:/Docs/My%20File.pdf");
+        assert_eq!(normalize_input(r#""D:\a\b.pdf""#, G).unwrap(), "file:///D:/a/b.pdf");
+        assert_eq!(normalize_input(r"\\server\share\x.pdf", G).unwrap(), "file://server/share/x.pdf");
         assert_eq!(normalize_input("rust lang", G).unwrap(), format!("{G}rust+lang"));
         assert_eq!(normalize_input("what is 3.5", G).unwrap(), format!("{G}what+is+3.5"));
         assert_eq!(normalize_input("node.js", G).unwrap(), "https://node.js");

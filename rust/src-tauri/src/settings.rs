@@ -64,6 +64,9 @@ pub struct BrowserSettings {
     /// Pop a playing video into picture-in-picture when switching away from its tab.
     #[serde(default = "yes")]
     pub auto_picture_in_picture: bool,
+    /// Show PDFs with black pages and white text.
+    #[serde(default = "yes")]
+    pub pdf_dark_mode: bool,
     /// Local MCP endpoint for external agents (off by default).
     #[serde(default)]
     pub mcp_server_enabled: bool,
@@ -145,6 +148,7 @@ impl BrowserSettings {
             ("textScale", Value::is_number),
             ("mcpServerEnabled", Value::is_boolean),
             ("autoPictureInPicture", Value::is_boolean),
+            ("pdfDarkMode", Value::is_boolean),
             ("mcpServerPort", Value::is_u64),
         ];
         for (key, ok) in typed {

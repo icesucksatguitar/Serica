@@ -11,6 +11,7 @@ import { TopTabStrip } from './components/TopTabStrip';
 import { ToolsMenu } from './components/ToolsMenu';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { UpdateNotice } from './components/UpdateNotice';
+import { WhatsNew } from './components/WhatsNew';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
@@ -826,6 +827,12 @@ useEffect(() => {
         e.stopImmediatePropagation();
         setIsCommandBarOpen(false);
         setIsSettingsOpen(true);
+      } else if (key === 'o' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        void window.serica?.openFile?.().catch(() => {});
       } else if (key === 'j') {
         e.preventDefault();
         e.stopPropagation();
@@ -1239,6 +1246,7 @@ return (
           vpnOn={vpnStatus?.state === 'connected'}
           onHistory={() => setIsHistoryModalOpen(true)}
           onDownloads={() => setIsDownloadsOpen(true)}
+          onOpenFile={() => void window.serica?.openFile?.().catch(() => {})}
           onAssistants={() => {
             setMcpInitialTab('assistants');
             setIsMcpModalOpen(true);
@@ -1313,6 +1321,7 @@ return (
 
     {/* A downloaded update is ready: offer to restart into it */}
     <UpdateNotice />
+    <WhatsNew onboarded={!isWelcomeOpen} />
 
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
     <PasswordPrompt />

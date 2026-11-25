@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Download, History, Lock, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
+import { ChevronLeft, Download, FileText, History, Lock, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
 
 export interface ToolsMenuProps {
   isDarkMode: boolean;
   vpnOn: boolean;
   onHistory: () => void;
   onDownloads: () => void;
+  onOpenFile: () => void;
   onAssistants: () => void;
   onVpn: () => void;
   onThemeStudio: () => void;
@@ -55,6 +56,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = (p) => {
   const tools: Tool[] = [
     { key: 'history', label: 'History (Ctrl+H)', icon: <History size={15} />, run: p.onHistory },
     { key: 'downloads', label: 'Downloads (Ctrl+J)', icon: <Download size={15} />, run: p.onDownloads },
+    { key: 'open-file', label: 'Open file, e.g. a PDF (Ctrl+O)', icon: <FileText size={15} />, run: p.onOpenFile },
     { key: 'ai', label: 'AI assistants & tools', icon: <Sparkles size={15} />, run: p.onAssistants },
     {
       key: 'vpn',

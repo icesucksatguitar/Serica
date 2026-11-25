@@ -118,6 +118,30 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     }
 }
 
+/// Writes JSON files, with `backup` keeping the previous copy as `.json.bak`
+/// for `read_json`'s fallback. Skips a file whose bytes match what this process
+/// last wrote there (`written` remembers a hash per path).
+pub fn write_files(written: &parking_lot::Mutex<HashMap<PathBuf, u64>>, files: Vec<(PathBuf, Vec<u8>)>, backup: bool) {
+    use std::hash::{Hash, Hasher};
+    for (path, bytes) in files {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut h);
+        let hash = h.finish();
+        if written.lock().get(&path) == Some(&hash) {
+            continue;
+        }
+        if backup && path.exists() {
+            let _ = std::fs::copy(&path, path.with_extension("json.bak"));
+        }
+        match write_atomic(&path, &bytes) {
+            Ok(()) => {
+                written.lock().insert(path, hash);
+            }
+            Err(e) => tracing::error!("failed to save {}: {e}", path.display()),
+        }
+    }
+}
+
 /// Reads a JSON file, falling back to its `.bak` copy if the main file is corrupt.
 pub fn read_json(path: &Path) -> Option<Value> {
     let parse = |p: &Path| std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok());
@@ -227,7 +251,13 @@ impl Store {
         }
     }
 
+    #[cfg(test)]
     pub fn save(&self) {
+        write_files(&Default::default(), self.serialized(), true);
+    }
+
+    /// state.json and settings.json as bytes, ready for `write_files`.
+    pub fn serialized(&self) -> Vec<(PathBuf, Vec<u8>)> {
         let state = serde_json::json!({
             "schemaVersion": 2,
             "profiles": self.profiles,
@@ -241,18 +271,10 @@ impl Store {
             "closedTabs": self.closed,
             "shieldStats": self.shield_stats,
         });
-        for (name, value) in [("state.json", state), ("settings.json", serde_json::to_value(&self.settings).unwrap_or_default())] {
-            let path = self.data_dir.join(name);
-            if let Ok(text) = serde_json::to_vec_pretty(&value) {
-                // Keep the last good copy for `read_json`'s fallback.
-                if path.exists() {
-                    let _ = std::fs::copy(&path, path.with_extension("json.bak"));
-                }
-                if let Err(e) = write_atomic(&path, &text) {
-                    tracing::error!("failed to save {name}: {e}");
-                }
-            }
-        }
+        [("state.json", state), ("settings.json", serde_json::to_value(&self.settings).unwrap_or_default())]
+            .into_iter()
+            .filter_map(|(name, value)| serde_json::to_vec_pretty(&value).ok().map(|t| (self.data_dir.join(name), t)))
+            .collect()
     }
 
     pub fn snapshot(&self) -> BrowserAppState {

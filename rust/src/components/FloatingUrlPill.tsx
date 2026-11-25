@@ -38,7 +38,10 @@ export interface FloatingUrlPillProps {
     if (url && url !== 'serica://newtab' && url !== 'neutrino://newtab' && url !== 'about:blank') {
       try {
         const parsed = new URL(url);
-        displayDomain = parsed.hostname.replace(/^www\./, '');
+        displayDomain =
+          parsed.protocol === 'file:'
+            ? decodeURIComponent(parsed.pathname.split('/').pop() || '') || 'local file'
+            : parsed.hostname.replace(/^www\./, '');
       } catch {
         displayDomain = url;
       }

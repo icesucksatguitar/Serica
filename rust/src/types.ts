@@ -270,6 +270,8 @@ export interface SericaAPI {
   downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
   clearDownloads?: () => Promise<DownloadItem[]>;
   openDownloadsFolder?: () => Promise<void>;
+  /** Native "Open file" picker; chosen files (PDFs…) open in new tabs. */
+  openFile?: () => Promise<void>;
   onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
   onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
   onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;

@@ -1147,8 +1147,15 @@ pub async fn download_action(id: String, action: String, app: State<'_, Shared>)
             Ok(false)
         }
         "open" => {
-            if !std::path::Path::new(&item.path).exists() {
+            let path = std::path::Path::new(&item.path);
+            if !path.exists() {
                 return Err("The file was moved or deleted".into());
+            }
+            // PDFs open in a Serica tab; everything else in its own app.
+            let is_pdf = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) || item.mime == "application/pdf";
+            if let Some(url) = crate::files::file_url(path).filter(|_| is_pdf) {
+                app.mutate(|s| s.create_tab(Some(url), None, true, None));
+                return Ok(true);
             }
             open::that_detached(&item.path).map_err(|e| e.to_string())?;
             Ok(true)
@@ -1192,6 +1199,13 @@ pub async fn clear_downloads(app: State<'_, Shared>) -> R<Vec<crate::downloads::
     let list = app.downloads.list();
     ui_emit(&app.handle, "serica:downloads-changed", list.clone());
     Ok(list)
+}
+
+/// "Open file…" (Ctrl+O): picks local files and opens them in new tabs.
+#[tauri::command]
+pub async fn open_file(app: State<'_, Shared>) -> R<()> {
+    crate::files::pick_and_open(&app);
+    Ok(())
 }
 
 #[tauri::command]
