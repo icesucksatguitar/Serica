@@ -10272,7 +10272,7 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 
 /* Under a web page's solid top bar the strip is part of the same chrome. */
 .top-tab-strip.on-webpage {
-  top: var(--topbar-h, 40px);
+  top: var(--topbar-h, 30px);
   background: var(--theme-bg-canvas);
   border-bottom: 1px solid var(--border);
 }
@@ -10909,40 +10909,40 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 }
 
 /* ==========================================================================
-   TOP BAR ON WEB PAGES: 40px (28px controls, 6px clear above and below), optionally auto-hidden, pill or flat controls
+   TOP BAR ON WEB PAGES: 30px (24px controls), optionally auto-hidden, pill or flat controls
    ========================================================================== */
 .floating-top-chrome-capsule.on-webpage {
-  height: var(--topbar-h, 40px);
-  padding: 0 10px;
-  gap: 10px;
+  height: var(--topbar-h, 30px);
+  padding: 0 8px;
+  gap: 8px;
 }
 
 .macos-window-drag-bar.on-webpage {
-  height: var(--topbar-h, 40px);
+  height: var(--topbar-h, 30px);
 }
 
 .floating-top-chrome-capsule.on-webpage .macos-window-controls-cluster {
-  height: 28px;
+  height: 24px;
   gap: 6px;
 }
 
 .floating-top-chrome-capsule.on-webpage .site-nav-controls {
-  height: 28px;
+  height: 24px;
   padding: 0 2px;
 }
 
 .floating-top-chrome-capsule.on-webpage .site-nav-btn {
-  width: 28px;
-  height: 26px;
+  width: 24px;
+  height: 20px;
 }
 
 .floating-top-chrome-capsule.on-webpage .macos-tabs-toggle-pill {
-  height: 28px;
+  height: 24px;
   padding: 0 9px;
 }
 
 .floating-top-chrome-capsule.on-webpage .top-floating-url-pill {
-  height: 28px;
+  height: 24px;
   padding: 0 12px;
   border-radius: 8px;
   font-size: 12px;
@@ -10957,27 +10957,27 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 }
 
 .floating-top-chrome-capsule.on-webpage .minimal-pill-btn {
-  height: 28px;
+  height: 24px;
   padding: 0 9px;
   font-size: 12px;
 }
 
 .floating-top-chrome-capsule.on-webpage .minimal-icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
 }
 
 /* Right-hand group (status pills, tools tray, window buttons) fits the bar. */
 .floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster {
-  height: 28px;
+  height: 24px;
   box-sizing: border-box;
   padding: 0 2px;
 }
 
 .floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-pill-btn,
 .floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-icon-btn {
-  height: 26px;
+  height: 20px;
 }
 
 .floating-top-chrome-capsule.on-webpage .minimal-top-right-cluster > .minimal-pill-btn {
@@ -11010,7 +11010,7 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 
 .floating-top-chrome-capsule.on-webpage .tools-tray-btn {
   width: var(--tools-btn);
-  height: 26px;
+  height: 20px;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -11035,7 +11035,7 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 /* Auto-hide: the bar waits above the window and slides down over the page
    (see hooks/useTopBarAutoHide). */
 .floating-top-chrome-capsule.on-webpage.topbar-autohide {
-  transform: translate3d(0, calc(-1 * var(--topbar-h, 40px) - 2px), 0) !important;
+  transform: translate3d(0, calc(-1 * var(--topbar-h, 30px) - 2px), 0) !important;
   transition:
     transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 200ms ease,

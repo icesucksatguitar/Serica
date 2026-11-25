@@ -27,6 +27,8 @@ interface RightPinsDockProps {
   onPersistPins?: (pins: PinnedSite[]) => void;
   /** Hides the dock (Settings → Appearance brings it back). */
   onHideDock?: () => void;
+  /** Size of the dock relative to its default (Settings → Appearance → Sizes). */
+  dockScale?: number;
 }
 
 export const RightPinsDock: React.FC<RightPinsDockProps> = ({
@@ -35,6 +37,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   persistedPins,
   onPersistPins,
   onHideDock,
+  dockScale = 1,
 }) => {
   // A saved list wins even when empty (the user removed every site);
   // the defaults are only for a profile that never saved one.
@@ -204,7 +207,30 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     onPersistPins?.(updated);
   };
 
-  const handleMouseLeave = () => setHoveredPinId(null);
+  // Magnification: icons near the pointer grow (cosine falloff), like the
+  // macOS dock. On sites the page is clipped to the dock's shape, so the
+  // growth is smaller there and stays inside it.
+  const [scales, setScales] = useState<{ [id: string]: number }>({});
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLElement>) => {
+      const maxRadius = 64 * dockScale;
+      const maxScale = isOnWebpage ? 1.18 : 1.4;
+      const next: { [id: string]: number } = {};
+      for (const id of [...pins.map((p) => p.id), 'add-btn']) {
+        const el = itemRefs.current[id];
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const dist = Math.abs(e.clientY - (r.top + r.height / 2));
+        next[id] = dist < maxRadius ? 1 + (maxScale - 1) * Math.pow(Math.cos((dist / maxRadius) * (Math.PI / 2)), 1.5) : 1;
+      }
+      setScales(next);
+    },
+    [pins, isOnWebpage, dockScale],
+  );
+  const handleMouseLeave = () => {
+    setScales({});
+    setHoveredPinId(null);
+  };
 
   const handleAddPin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,6 +294,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           isOnWebpage ? (dockShown ? 'revealed' : 'autohidden') : ''
         }`}
         ref={dockRef}
+        style={{ '--dock-scale': dockScale } as React.CSSProperties}
         onMouseEnter={() => {
           cancelHide();
           setIsHoveredDock(true);
@@ -275,6 +302,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
         onMouseMove={(e) => {
           cancelHide();
           setIsHoveredDock(true);
+          if (!menuPos) handleMouseMove(e);
         }}
         onMouseLeave={() => {
           scheduleHide();
@@ -284,6 +312,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           e.preventDefault();
           cancelHide();
           setHoveredPinId(null);
+          setScales({});
           // Open beside the dock, never over it.
           const left = dockRef.current?.querySelector('.vertical-pins-dock-track')?.getBoundingClientRect().left ?? e.clientX;
           setMenuPos({ x: Math.max(8, left - DOCK_MENU_WIDTH - 10), y: Math.max(8, Math.min(e.clientY - 16, window.innerHeight - 124)) });
@@ -300,6 +329,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                 key={pin.id}
                 ref={(el) => (itemRefs.current[pin.id] = el)}
                 className="pin-dock-item"
+                style={{ transform: `scale(${scales[pin.id] || 1})`, zIndex: Math.round((scales[pin.id] || 1) * 10) }}
                 onClick={() => onNavigate(pin.url)}
                 onMouseEnter={() => {
                   if (!menuPos) setHoveredPinId(pin.id);
@@ -350,6 +380,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           <div
             ref={(el) => (itemRefs.current['add-btn'] = el)}
             className="pin-dock-item pin-dock-add-item"
+            style={{ transform: `scale(${scales['add-btn'] || 1})` }}
             onClick={() => setIsAddModalOpen(true)}
             title="Add a website"
           >

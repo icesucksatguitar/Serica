@@ -1,3 +1,4 @@
+import { SericaLogo } from './SericaLogo';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Monitor, Moon, PanelLeft, PanelTop, Sun } from 'lucide-react';
 import { SPACE_THEME_PRESETS, type SpaceTheme, type SpaceThemeMode } from '../shared/spaceTheme';
@@ -70,15 +71,10 @@ const ONBOARDING_PRESETS = [
 ];
 type Step = (typeof STEPS)[number];
 
-const S_PATH =
-  'M 182 84 C 170 64, 146 56, 124 56 C 96 56, 74 72, 74 96 C 74 122, 100 128, 128 134 C 158 140, 184 148, 184 176 C 184 202, 158 214, 128 214 C 102 214, 82 204, 70 184';
-
-/** The Serica mark: a light-trail S on the app-icon tile. */
+/** The Serica mark on the app-icon tile. */
 const SericaMark: React.FC = () => (
   <div className="onb-mark" aria-hidden="true">
-    <svg viewBox="0 0 256 256" width="100%" height="100%">
-      <path className="onb-mark-s" d={S_PATH} pathLength={1} />
-    </svg>
+    <SericaLogo size="100%" />
   </div>
 );
 

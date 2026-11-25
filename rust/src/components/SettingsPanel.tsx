@@ -18,7 +18,11 @@ import type { LucideIcon } from 'lucide-react';
 import {
   ARCHIVE_INTERVAL_OPTIONS,
   DEFAULT_HOME_WIDGETS,
+  DEFAULT_UI_SCALE,
   SEARCH_ENGINES,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
+  type UiScale,
   TAB_SLEEP_OPTIONS,
   type ArchiveIntervalHours,
   type SearchEngineId,
@@ -28,7 +32,7 @@ import type { BrowserSettings, TabState } from '../types';
 import { ProfilesSettings } from './ProfilesSettings';
 import { AboutSettings } from './AboutSettings';
 import { CookieSettings } from './CookieSettings';
-import { WidgetSettings } from './HomeWidgets';
+import { startGuide } from './GuideTour';
 import { Switch } from './Switch';
 import { TOOLS, normalizePinnedTools, type ToolActions } from '../shared/tools';
 import { TEXT_SCALE_OPTIONS } from '../shared/settings';
@@ -168,6 +172,34 @@ function Segmented<T extends string | number | boolean>(props: {
   );
 }
 
+/** A size slider: 80% to 140% of the default, with a reset. */
+const ScaleSlider: React.FC<{ label: string; value: number; onChange: (v: number) => void }> = ({ label, value, onChange }) => (
+  <div className="scale-control">
+    <input
+      type="range"
+      className="scale-slider"
+      min={UI_SCALE_MIN}
+      max={UI_SCALE_MAX}
+      step={0.05}
+      value={value}
+      aria-label={label}
+      aria-valuetext={`${Math.round(value * 100)}%`}
+      onChange={(e) => onChange(Number(e.target.value))}
+    />
+    <span className="scale-value">{Math.round(value * 100)}%</span>
+    <button
+      type="button"
+      className="btn btn-quiet scale-reset"
+      disabled={value === 1}
+      onClick={() => onChange(1)}
+      aria-label={`Reset ${label}`}
+      title="Reset"
+    >
+      Reset
+    </button>
+  </div>
+);
+
 /**
  * A miniature of the browser drawn with the live theme variables, so it shows
  * exactly what the current mode, space colors and layout choices look like.
@@ -306,6 +338,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const pinnedTools = normalizePinnedTools(settings.pinnedTools);
   const topTabs = (settings.tabLayout ?? 'sidebar') === 'top';
   const widgets = settings.homeWidgets ?? DEFAULT_HOME_WIDGETS;
+  const uiScale: UiScale = settings.uiScale ?? DEFAULT_UI_SCALE;
 
   return (
     <div
@@ -447,11 +480,69 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       }}
                     />
                   </Row>
-                  <WidgetSettings
-                    widgets={widgets}
-                    onChange={(homeWidgets) => onUpdateSettings({ homeWidgets })}
-                    renderSwitch={(checked, label, onChange) => <Switch checked={checked} label={label} onChange={onChange} />}
+                  <Row label="Greeting and clock">
+                    <Switch
+                      checked={widgets.clock}
+                      label="Greeting and clock"
+                      onChange={(clock) => onUpdateSettings({ homeWidgets: { ...widgets, clock } })}
+                    />
+                  </Row>
+                  <Row label="Search bar" hint="With it hidden, start typing on a new tab to search">
+                    <Switch
+                      checked={widgets.search}
+                      label="Search bar"
+                      onChange={(search) => onUpdateSettings({ homeWidgets: { ...widgets, search } })}
+                    />
+                  </Row>
+                  <Row
+                    label="Widgets"
+                    hint={`${widgets.items.length === 0 ? 'None yet' : `${widgets.items.length} on the new tab`}. Add, move and resize them with Customize, at the bottom right of a new tab`}
                   />
+                </Group>
+
+                <Group title="Sizes">
+                  {(
+                    [
+                      ['sidebar', 'Sidebar'],
+                      ['dock', 'Website dock'],
+                      ['hero', 'Greeting and clock'],
+                      ['search', 'Search bar'],
+                      ['widgets', 'Widgets'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Row key={key} label={label}>
+                      <ScaleSlider
+                        label={`${label} size`}
+                        value={uiScale[key]}
+                        onChange={(v) => onUpdateSettings({ uiScale: { ...uiScale, [key]: v } })}
+                      />
+                    </Row>
+                  ))}
+                </Group>
+
+                <Group title="Guides">
+                  <Row label="Show me around" hint="Short tours of the sidebar and of new-tab widgets">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        onClose();
+                        startGuide('sidebar');
+                      }}
+                    >
+                      Sidebar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        onClose();
+                        startGuide('widgets');
+                      }}
+                    >
+                      Widgets
+                    </button>
+                  </Row>
                 </Group>
 
                 <Group title="Top bar menu">

@@ -4,6 +4,7 @@
 // space icon, Ctrl+N) play the same slide. Gesture math lives in utils/spaceSwipe.
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import {
+  FLICK_VELOCITY,
   GESTURE_END_MS,
   SNAP_MS,
   decideTarget,
@@ -74,6 +75,8 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     endTimer: 0,
     pendingTimer: 0,
     pendingId: null as string | null,
+    /** Offset the commit animation heads for (one pane either way). */
+    settle: 0,
     prevActive: opts.activeId,
   }).current;
 
@@ -143,7 +146,8 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     s.raw = 0;
     s.accX = 0;
     s.accY = 0;
-    s.axis = null;
+    // A committed swipe's momentum stays ignored until the wheel pauses.
+    if (s.axis !== 'spent') s.axis = null;
     s.samples = [];
     s.vHist = [];
     s.otherColor = null;
@@ -159,9 +163,45 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     animate(0, rest);
   };
 
+  /**
+   * Switches to `targetId` now and lets the track glide the rest of the way.
+   * The space changes the moment the swipe is decided (not after the glide),
+   * so the sidebar, top bar and page never lag behind the gesture.
+   */
+  const commitTo = (target: number, targetId: string) => {
+    window.clearTimeout(s.endTimer);
+    if (s.reduced) {
+      rest();
+      optsRef.current.onCommit(targetId);
+      return;
+    }
+    s.phase = 'anim';
+    s.pendingId = targetId;
+    s.settle = settleOffset(target, s.index, s.width);
+    // The rest of this gesture's momentum must not start another swipe.
+    s.axis = 'spent';
+    animate(s.settle, rest);
+    optsRef.current.onCommit(targetId);
+  };
+
+  /** Mid-gesture: a swipe past half a pane, or a clear flick, is decided at once. */
+  const maybeCommitEarly = (now: number) => {
+    const { order } = optsRef.current;
+    const offset = resolveOffset(s.raw, s.index, order.length, s.width);
+    const velocity = estimateVelocity(s.samples, now);
+    const far = Math.abs(offset) >= 0.5 * s.width;
+    const flick = Math.abs(velocity) >= FLICK_VELOCITY * 1.3 && Math.sign(velocity) === Math.sign(offset) && Math.abs(offset) >= 32;
+    if (!far && !flick) return false;
+    const target = Math.max(0, Math.min(order.length - 1, s.index + (offset < 0 ? 1 : -1)));
+    const targetId = order[target]?.id;
+    if (target === s.index || !targetId) return false;
+    commitTo(target, targetId);
+    return true;
+  };
+
   const finishGesture = () => {
     if (s.phase !== 'drag') return;
-    const { order, onCommit, activeId } = optsRef.current;
+    const { order, activeId } = optsRef.current;
     const now = performance.now();
     const last = s.samples[s.samples.length - 1];
     // Evaluate velocity over the most recent active window before release
@@ -174,26 +214,7 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
       else springBack();
       return;
     }
-    if (s.reduced) {
-      rest();
-      onCommit(targetId);
-      return;
-    }
-    s.phase = 'anim';
-    s.pendingId = targetId;
-    animate(settleOffset(target, s.index, s.width), () => {
-      // Hold the slid position until the state change lands (see the layout effect).
-      s.phase = 'pending';
-      plainTint(targetId);
-      s.pendingTimer = window.setTimeout(() => {
-        if (s.phase === 'pending') springBack();
-      }, 400);
-      onCommit(targetId);
-      // If state updated synchronously during onCommit:
-      if (optsRef.current.activeId === targetId) {
-        rest();
-      }
-    });
+    commitTo(target, targetId);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -208,8 +229,9 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     if (s.axis === 'spent') {
       // Momentum of a finished gesture: prevent page back/forward navigation
       if (horizontalish) e.preventDefault();
-      // Allow a new swipe if there was a pause OR user made a clear swipe movement
-      if (dt > GESTURE_END_MS || Math.abs(e.deltaX) >= 4) {
+      // A new swipe starts after a pause; the decaying momentum of the one
+      // just committed never does (it would skip a second space).
+      if (dt > GESTURE_END_MS) {
         s.axis = null;
         s.accX = 0;
         s.accY = 0;
@@ -276,6 +298,7 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     s.vHist.push({ t: now, v: estimateVelocity(s.samples, now) });
     if (s.samples.length > 40) s.samples.shift();
     if (s.vHist.length > 40) s.vHist.shift();
+    if (s.phase === 'drag' && maybeCommitEarly(now)) return;
     if (!s.reduced && !s.frame) {
       s.frame = requestAnimationFrame(() => {
         s.frame = 0;
@@ -310,8 +333,18 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     s.prevActive = activeId;
     if (prev === activeId) return;
     if ((s.phase === 'pending' || s.phase === 'anim') && s.pendingId === activeId) {
-      rest();
+      // Our own commit: the panes now centre on the new space, so the same
+      // on-screen position is one pane closer. Keep gliding from there.
       setOutgoing(null);
+      if (s.phase === 'anim' && s.settle !== 0) {
+        stopAnim();
+        apply(s.offset - s.settle);
+        s.settle = 0;
+        s.pendingId = null;
+        animate(0, rest);
+      } else {
+        rest();
+      }
       return;
     }
     stopAnim();

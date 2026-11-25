@@ -3,7 +3,7 @@ import { Space, TabState, ActiveMediaState, SiteAction } from '../types';
 import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
 import type { PageColorReport } from '../utils/topBarTint';
-import type { HomeWidgets } from '../shared/settings';
+import type { HomeWidgets, UiScale } from '../shared/settings';
 import { acquireViewportOverlay, setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
 
 interface BrowserViewportProps {
@@ -33,6 +33,7 @@ interface BrowserViewportProps {
   insetRight?: number;
   homeWidgets?: HomeWidgets;
   onUpdateHomeWidgets?: (next: HomeWidgets) => void;
+  uiScale?: UiScale;
 }
 
 /** Height reserved above the page while the find bar is open (bar + margins). */
@@ -84,6 +85,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   contentTop = 44,
   homeWidgets,
   onUpdateHomeWidgets,
+  uiScale,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
@@ -520,6 +522,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           userName={userName}
           widgets={homeWidgets}
           onUpdateWidgets={onUpdateHomeWidgets}
+          uiScale={uiScale}
         />
       )}
     </div>

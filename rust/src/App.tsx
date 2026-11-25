@@ -41,6 +41,7 @@ import './styles/theme.css';
 import './styles/system.css';
 import './styles/settings.css';
 import './styles/panels.css';
+import './styles/sidebar-v2.css';
 
 const ArchiveList = lazy(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
@@ -575,6 +576,11 @@ export function App() {
     const handleOpenExtensionsEvent = () => setIsExtensionsOpen(true);
     window.addEventListener('serica:open-extensions', handleOpenExtensionsEvent);
     const handleOpenDownloadsEvent = () => setIsDownloadsOpen(true);
+    // The sidebar guide needs the sidebar on screen.
+    const handleGuideEvent = (e: Event) => {
+      if ((e as CustomEvent).detail === 'sidebar') setSidebarExpanded(true);
+    };
+    window.addEventListener('serica:guide', handleGuideEvent);
     window.addEventListener('serica:open-downloads', handleOpenDownloadsEvent);
     const unsubIpcDownloads = window.serica?.onOpenDownloads?.(() => setIsDownloadsOpen(true));
 
@@ -612,6 +618,7 @@ export function App() {
       window.removeEventListener('serica:open-vpn', handleOpenVpnEvent);
       window.removeEventListener('serica:open-extensions', handleOpenExtensionsEvent);
       window.removeEventListener('serica:open-downloads', handleOpenDownloadsEvent);
+      window.removeEventListener('serica:guide', handleGuideEvent);
       unsubIpcDownloads?.();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('serica:open-command-bar', handleOpenCommandBar);
@@ -1000,6 +1007,7 @@ return (
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}
+        scale={settings.uiScale?.sidebar ?? 1}
       />
     )}
 
@@ -1255,6 +1263,7 @@ return (
           insetLeft={showSidebar ? 8 : 0}
           insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
           homeWidgets={settings.homeWidgets}
+          uiScale={settings.uiScale}
           onUpdateHomeWidgets={(homeWidgets) => void updateSettings({ homeWidgets })}
         />
       </div>
@@ -1284,6 +1293,7 @@ return (
         persistedPins={Array.isArray(settings.pinnedSites) ? (settings.pinnedSites as PinnedSite[]) : undefined}
         onPersistPins={(pins) => void updateSettings({ pinnedSites: pins })}
         onHideDock={() => void updateSettings({ rightPinsDockVisible: false })}
+        dockScale={settings.uiScale?.dock ?? 1}
       />
     )}
 

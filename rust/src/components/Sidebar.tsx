@@ -41,6 +41,7 @@ import { useSidebarDrag } from '../hooks/useSidebarDrag';
 import { useHoverPreview } from '../hooks/useHoverPreview';
 import { TabPreviewCard } from './TabPreviewCard';
 import { SpaceMenu } from './SpaceMenu';
+import { GuideTour, type GuideStep } from './GuideTour';
 import { addSettledBlurListener } from '../utils/settledBlur';
 import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 
@@ -133,6 +134,8 @@ export interface SidebarProps {
   onRequestClose?: () => void;
   /** A live web page is on screen (a native view the sidebar is cut out of). */
   livePage?: boolean;
+  /** Size of the sidebar's contents relative to the default (Settings → Sizes). */
+  scale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +267,35 @@ const clampMenu = (x: number, y: number, width = MENU_WIDTH, height = 300) => ({
 
 const MENU_WIDTH = 210;
 
+const SIDEBAR_GUIDE: GuideStep[] = [
+  {
+    target: '.nsb-switcher',
+    title: 'Your spaces',
+    body: 'Each space keeps its own tabs. Click one to switch, or swipe sideways with two fingers anywhere on the sidebar.',
+  },
+  {
+    target: '.nsb-space-add',
+    title: 'Add a space',
+    body: 'Creates a space and lets you name it straight away.',
+  },
+  {
+    target: '.nsb-header',
+    title: 'Space actions',
+    body: 'Double-click the name to rename. The ⋯ button (or a right-click on a space) changes its icon and color, moves it, adds a folder or deletes it.',
+  },
+  {
+    target: '.nsb-pinned-section-header',
+    title: 'Pinned and folders',
+    body: 'Drag a tab up here to keep it. Drop it onto a folder to file it; the folder lights up when it will land there.',
+  },
+  {
+    target: '.nsb-new-tab',
+    title: 'Today',
+    body: 'Tabs you open land here (Ctrl+T). Old ones are archived after a while, which you can change in Settings.',
+  },
+];
+const SIDEBAR_GUIDE_KEY = 'serica_sidebar_guide_v1';
+
 // ---------------------------------------------------------------------------
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -283,6 +315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pinnedOpen = false,
   onRequestClose,
   livePage = false,
+  scale = 1,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -345,6 +378,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [spaceMenu, setSpaceMenu] = useState<SpaceMenuState | null>(null);
   const [renamingSpaceId, setRenamingSpaceId] = useState<string | null>(null);
   const [spaceNameDraft, setSpaceNameDraft] = useState('');
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const isMenuOrDragOpen = menu !== null || folderMenu !== null || spaceMenu !== null || drag.dragging;
 
@@ -449,7 +483,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // An open context menu keeps an auto-hidden sidebar visible.
   // An active drag keeps it visible too.
-  const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed || pinnedOpen;
+  const isOverOrActive = overSidebar || isMenuOrDragOpen || autoHideRevealed || pinnedOpen || guideOpen;
   const visible = sidebarVisibility(autoHide, pointerX, isOverOrActive);
   // The sidebar shows only once the page under it is clipped (the backend
   // confirms the hole is applied), so it never appears beneath the page.
@@ -568,7 +602,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!pinnedOpen) return;
     const onDown = (e: PointerEvent) => {
       const t = e.target as Element | null;
-      if (t?.closest('.nsb, .nsb-menu, .nsb-preview, [data-sidebar-toggle]')) return;
+      if (t?.closest('.nsb, .nsb-menu, .nsb-preview, .guide-card, [data-sidebar-toggle]')) return;
       onRequestClose?.();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -590,7 +624,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // A sidebar opened from the keyboard with the pointer already on the page
   // waits until the pointer has visited it.
   const busyRef = useRef(false);
-  busyRef.current = isMenuOrDragOpen || creatingFolder || renamingFolderId !== null || renamingSpaceId !== null;
+  busyRef.current = isMenuOrDragOpen || creatingFolder || renamingFolderId !== null || renamingSpaceId !== null || guideOpen;
+
+  // The guide plays the first time the sidebar opens, and on request (Settings).
+  useEffect(() => {
+    const onGuide = (e: Event) => {
+      if ((e as CustomEvent).detail === 'sidebar') setGuideOpen(true);
+    };
+    window.addEventListener('serica:guide', onGuide);
+    return () => window.removeEventListener('serica:guide', onGuide);
+  }, []);
+  useEffect(() => {
+    if (!shown) return;
+    try {
+      if (localStorage.getItem(SIDEBAR_GUIDE_KEY)) return;
+      localStorage.setItem(SIDEBAR_GUIDE_KEY, '1');
+    } catch {
+      return;
+    }
+    setGuideOpen(true);
+  }, [shown]);
   useEffect(() => {
     if (!autoHide || !shown || !livePage || !window.serica?.uiCursor) return;
     let alive = true;
@@ -1206,6 +1259,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         style={{
           '--nsb-width-expanded': `${sidebarWidth ?? 240}px`,
           '--nsb-space-color': activeSpace?.color ?? 'var(--theme-accent)',
+          '--sb-scale': scale,
         } as React.CSSProperties}
         onMouseEnter={() => {
           cancelHideSidebar();
@@ -1517,6 +1571,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
       )}
+
+      {guideOpen && shown && <GuideTour id="sidebar" steps={SIDEBAR_GUIDE} onClose={() => setGuideOpen(false)} />}
 
       {spaceMenu &&
         (() => {

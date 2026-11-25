@@ -125,43 +125,112 @@ export interface BrowserSettings {
   textScale: number;
   /** Widgets on the new-tab page. */
   homeWidgets: HomeWidgets;
+  /** Separate sizes for the sidebar, dock and new-tab parts. */
+  uiScale: UiScale;
   [unknownKey: string]: unknown; // kept as saved, e.g. the legacy `theme` key
 }
 
-/** New-tab widgets; each can be turned on and set up from the page or Settings. */
+/** Widget kinds: built-in ones, and app widgets (`app:<id>`, see home/apps.ts). */
+export type WidgetKind = 'github' | 'weather' | 'notes' | 'calendar' | 'topsites' | `app:${string}`;
+/** Grid sizes: s 2x2, m 4x2, l 4x4, w 8x2 cells. */
+export type WidgetSize = 's' | 'm' | 'l' | 'w';
+
+export interface WidgetItem {
+  id: string;
+  kind: WidgetKind;
+  size: WidgetSize;
+}
+
+/** The new-tab page: what shows, in which order and size, and widget settings. */
 export interface HomeWidgets {
-  /** Greeting, date and clock above the search field. */
+  /** Greeting, date and clock. */
   clock: boolean;
-  github: { enabled: boolean; user: string };
-  weather: { enabled: boolean; place: string; lat: number | null; lon: number | null; fahrenheit: boolean };
-  notes: { enabled: boolean; text: string };
+  /** The search field under the clock. */
+  search: boolean;
+  /** Placed widgets, in grid order. */
+  items: WidgetItem[];
+  github: { user: string };
+  weather: { place: string; lat: number | null; lon: number | null; fahrenheit: boolean };
+  /** Text of each notes widget, by widget id. */
+  notes: Record<string, string>;
+  /** The widget guide was shown (it can be replayed from the edit bar). */
+  guideSeen: boolean;
 }
 
 export const DEFAULT_HOME_WIDGETS: Readonly<HomeWidgets> = Object.freeze({
   clock: true,
-  github: { enabled: false, user: '' },
-  weather: { enabled: false, place: '', lat: null, lon: null, fahrenheit: false },
-  notes: { enabled: false, text: '' },
+  search: true,
+  items: [],
+  github: { user: '' },
+  weather: { place: '', lat: null, lon: null, fahrenheit: false },
+  notes: {},
+  guideSeen: false,
 });
+
+const WIDGET_SIZES: readonly WidgetSize[] = ['s', 'm', 'l', 'w'];
 
 function normalizeHomeWidgets(raw: unknown): HomeWidgets {
   const o = raw !== null && typeof raw === 'object' ? (raw as Record<string, any>) : {};
   const g = o.github && typeof o.github === 'object' ? o.github : {};
   const w = o.weather && typeof o.weather === 'object' ? o.weather : {};
-  const n = o.notes && typeof o.notes === 'object' ? o.notes : {};
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  let items: WidgetItem[] = [];
+  const notes: Record<string, string> = {};
+  if (Array.isArray(o.items)) {
+    const seen = new Set<string>();
+    for (const it of o.items) {
+      if (!it || typeof it.id !== 'string' || typeof it.kind !== 'string' || seen.has(it.id)) continue;
+      seen.add(it.id);
+      items.push({ id: it.id, kind: it.kind as WidgetKind, size: WIDGET_SIZES.includes(it.size) ? it.size : 'm' });
+    }
+    if (o.notes && typeof o.notes === 'object' && !('text' in o.notes)) {
+      for (const [k, v] of Object.entries(o.notes)) if (typeof v === 'string') notes[k] = v.slice(0, 4000);
+    }
+  } else {
+    // 0.4.6 kept one flag per widget; turn the enabled ones into placed widgets.
+    if (w.enabled === true) items.push({ id: 'weather-1', kind: 'weather', size: 'm' });
+    if (o.notes?.enabled === true) {
+      items.push({ id: 'notes-1', kind: 'notes', size: 'm' });
+      if (typeof o.notes.text === 'string') notes['notes-1'] = o.notes.text.slice(0, 4000);
+    }
+    if (g.enabled === true) items.push({ id: 'github-1', kind: 'github', size: 'w' });
+  }
+  items = items.slice(0, 24);
   return {
-    clock: typeof o.clock === 'boolean' ? o.clock : DEFAULT_HOME_WIDGETS.clock,
-    github: { enabled: g.enabled === true, user: typeof g.user === 'string' ? g.user.slice(0, 39) : '' },
+    clock: typeof o.clock === 'boolean' ? o.clock : true,
+    search: typeof o.search === 'boolean' ? o.search : true,
+    items,
+    github: { user: typeof g.user === 'string' ? g.user.slice(0, 39) : '' },
     weather: {
-      enabled: w.enabled === true,
       place: typeof w.place === 'string' ? w.place.slice(0, 80) : '',
       lat: num(w.lat),
       lon: num(w.lon),
       fahrenheit: w.fahrenheit === true,
     },
-    notes: { enabled: n.enabled === true, text: typeof n.text === 'string' ? n.text.slice(0, 4000) : '' },
+    notes,
+    guideSeen: o.guideSeen === true,
   };
+}
+
+/** Sizes of separate parts of the interface, relative to their default (1). */
+export interface UiScale {
+  sidebar: number;
+  dock: number;
+  /** Greeting and clock on the new tab. */
+  hero: number;
+  search: number;
+  widgets: number;
+}
+
+export const DEFAULT_UI_SCALE: Readonly<UiScale> = Object.freeze({ sidebar: 1, dock: 1, hero: 1, search: 1, widgets: 1 });
+export const UI_SCALE_MIN = 0.8;
+export const UI_SCALE_MAX = 1.4;
+
+function normalizeUiScale(raw: unknown): UiScale {
+  const o = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const v = (x: unknown) =>
+    typeof x === 'number' && Number.isFinite(x) ? Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, x)) * 100) / 100 : 1;
+  return { sidebar: v(o.sidebar), dock: v(o.dock), hero: v(o.hero), search: v(o.search), widgets: v(o.widgets) };
 }
 
 /** How long an unused Today tab lives before it is archived. */
@@ -196,6 +265,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   sidebarWidth: 240,
   textScale: 1,
   homeWidgets: DEFAULT_HOME_WIDGETS,
+  uiScale: DEFAULT_UI_SCALE,
 });
 
 function isArchiveIntervalHours(value: unknown): value is ArchiveIntervalHours {
@@ -332,5 +402,6 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     sidebarAutoHide: boolOr(source.sidebarAutoHide, DEFAULT_SETTINGS.sidebarAutoHide),
     textScale: normalizeTextScale(source.textScale),
     homeWidgets: normalizeHomeWidgets(source.homeWidgets),
+    uiScale: normalizeUiScale(source.uiScale),
   };
 }
