@@ -5,6 +5,16 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.5.2': [
+    {
+      title: 'Smoother sidebar and swipes',
+      text: 'Swiping between spaces in the sidebar is smoother, swiping past the ends bounces gently, and consecutive swipes keep working without clicking first. Opening the sidebar no longer pulls down an auto-hidden top bar.',
+    },
+    {
+      title: 'Guides and window controls',
+      text: 'Tour guide cards stay clear of web pages as they move, the sidebar guide waits for the product tour to finish, and the window controls are clickable all the way to the top edge.',
+    },
+  ],
   '0.5.1': [
     {
       title: 'Smoother with many tabs',
