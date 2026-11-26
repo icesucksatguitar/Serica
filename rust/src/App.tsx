@@ -18,6 +18,7 @@ import { PermissionPrompt } from './components/PermissionPrompt';
 import { DropZones } from './components/DropZones';
 import type { UserProfile } from './types';
 import { ProductTour } from './components/ProductTour';
+import { SafeBoundary } from './components/SafeBoundary';
 import { FocusButton } from './components/FocusButton';
 import { useSettings } from './hooks/useSettings';
 import { prewarmPageUnderlay, useLingering, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
@@ -1588,6 +1589,7 @@ return (
     </Presence>
 
     {/* The first-run tour (after setup; replayed from Settings › About) */}
+    <SafeBoundary>
     <ProductTour
       topTabs={topTabs}
       onNewTab={!isWebpage}
@@ -1596,6 +1598,7 @@ return (
         if (!settings.tourDone) void updateSettings({ tourDone: true });
       }}
     />
+    </SafeBoundary>
   </div>
 );
 }

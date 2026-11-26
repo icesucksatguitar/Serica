@@ -35,8 +35,10 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
   // The card shows through a live page like the app's menus.
   useElementHole(`guide-${id}`, card);
   useEffect(() => {
-    step?.onEnter?.();
-  }, [step]);
+    steps[i]?.onEnter?.();
+    // Once per step shown, not again if the parent hands over a new array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i]);
 
   // Follow the target while layout settles (panels sliding in) and on resize.
   useLayoutEffect(() => {
@@ -67,18 +69,27 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
     };
-  }, [step]);
+  }, [step?.target]);
 
   // Beside the target: below it if there is room, else above, else centered.
+  const rl = rect?.left;
+  const rt = rect?.top;
+  const rw = rect?.width;
+  const rh = rect?.height;
   useLayoutEffect(() => {
     if (!card) return;
+    // Only a real move re-renders: a fresh object with the same numbers
+    // would set this effect off again, frame after frame.
+    const place = (pos: { left: number; top: number }) =>
+      setCardPos((prev) => (prev && Math.abs(prev.left - pos.left) < 0.5 && Math.abs(prev.top - pos.top) < 0.5 ? prev : pos));
     const h = card.offsetHeight;
     const W = window.innerWidth;
     const H = window.innerHeight;
-    if (!rect) {
-      setCardPos({ left: (W - CARD_W) / 2, top: (H - h) / 2 });
+    if (rl === undefined || rt === undefined || rw === undefined || rh === undefined) {
+      place({ left: (W - CARD_W) / 2, top: (H - h) / 2 });
       return;
     }
+    const rect = { left: rl, top: rt, width: rw, height: rh };
     const clampX = (x: number) => Math.max(12, Math.min(W - CARD_W - 12, x));
     const below = rect.top + rect.height + PAD + 10;
     const above = rect.top - PAD - 10 - h;
@@ -88,8 +99,8 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
     else if (above >= 12) pos = { left: clampX(rect.left), top: above };
     else if (right + CARD_W <= W - 12) pos = { left: right, top: Math.max(12, Math.min(H - h - 12, rect.top)) };
     else pos = { left: (W - CARD_W) / 2, top: (H - h) / 2 };
-    setCardPos(pos);
-  }, [card, rect, i]);
+    place(pos);
+  }, [card, rl, rt, rw, rh, i]);
 
   const next = useCallback(() => (i < steps.length - 1 ? setI(i + 1) : onClose()), [i, steps.length, onClose]);
   const back = useCallback(() => setI((v) => Math.max(0, v - 1)), []);
