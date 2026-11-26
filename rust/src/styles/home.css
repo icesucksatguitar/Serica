@@ -1,0 +1,736 @@
+/* ==========================================================================
+   New-tab page (Homescreen.tsx, home/WidgetBoard.tsx, home/WidgetEditor.tsx)
+
+   Only widgets and the clock. The clock sits in the bottom-left corner; the
+   widget grid fills the space above it, so the two never meet. Backgrounds
+   (Settings › Home) are drawn by one layer behind everything.
+   ========================================================================== */
+
+.home2 {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--ink);
+  --home-pad: 40px;
+  --clock-band: 132px;
+}
+
+.home2[data-ink='light'] {
+  --ink: #f6f5f2;
+  --ink-2: rgba(246, 245, 242, 0.74);
+  --ink-3: rgba(246, 245, 242, 0.5);
+}
+
+.home2[data-ink='dark'][data-bg='solid'],
+.home2[data-ink='dark'][data-bg='gradient'] {
+  --ink: #17171a;
+  --ink-2: rgba(23, 23, 26, 0.72);
+  --ink-3: rgba(23, 23, 26, 0.5);
+}
+
+/* ---- Backgrounds ------------------------------------------------------- */
+
+.home-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.home-bg-fill,
+.home-bg-image,
+.home-bg-dim,
+.home-bg-scrim,
+.home-art {
+  position: absolute;
+  inset: 0;
+}
+
+.home-bg-image {
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.home-bg-image.fit-cover {
+  background-size: cover;
+}
+
+.home-bg-image.fit-contain {
+  background-size: contain;
+}
+
+.home-bg-image.fit-center {
+  background-size: auto;
+}
+
+.home-bg-dim {
+  background: #000;
+}
+
+/* Keeps the clock and the controls legible on pictures. */
+.home-bg-scrim {
+  background:
+    radial-gradient(120% 70% at 0% 100%, rgba(0, 0, 0, 0.42), transparent 55%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.22), transparent 30%);
+}
+
+.home-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 2200ms var(--ease-in-out);
+  will-change: opacity;
+  user-select: none;
+}
+
+.home-art.on {
+  opacity: 1;
+}
+
+.home-art-credit {
+  position: absolute;
+  right: calc(var(--home-pad) + 132px);
+  bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: var(--fs-12);
+  letter-spacing: var(--tr-12);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+  animation: home-credit-in 900ms var(--ease-out) both;
+}
+
+.home2.with-dock .home-art-credit {
+  right: calc(var(--home-pad) + 196px);
+}
+
+.home-art-after {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--fs-11);
+}
+
+@keyframes home-credit-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---- Clock (bottom-left) ------------------------------------------------ */
+
+.home-clock {
+  position: absolute;
+  left: var(--home-pad);
+  bottom: 28px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ink);
+  pointer-events: none;
+  user-select: none;
+}
+
+.home2[data-ink='light'] .home-clock {
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.28);
+}
+
+.home-clock-time {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: calc(var(--fs-56) * var(--hero-scale, 1));
+  font-weight: 300;
+  letter-spacing: var(--tr-56);
+  line-height: 1;
+}
+
+.home-clock-sec,
+.home-clock-suffix {
+  font-size: var(--fs-20);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--ink-3);
+}
+
+.home-clock-date {
+  padding-left: 2px;
+  font-size: var(--fs-14);
+  letter-spacing: var(--tr-14);
+  color: var(--ink-2);
+}
+
+/* ---- Customize (bottom-right) -------------------------------------------- */
+
+.home-customize2 {
+  position: absolute;
+  right: var(--home-pad);
+  bottom: 30px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.home2.with-dock .home-customize2 {
+  right: calc(var(--home-pad) + 64px);
+}
+
+.home-customize-btn2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ui-surface) 64%, transparent);
+  color: var(--ink-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.home2[data-ink='light'] .home-customize-btn2 {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(20, 20, 24, 0.38);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.home-customize-btn2:hover,
+.home-customize-btn2.active {
+  color: var(--ink);
+}
+
+.home-customize-panel2.nsb-menu {
+  position: static;
+  width: 236px;
+  transform-origin: bottom right;
+}
+
+.home-customize2 .presence[data-state='closed'] .home-customize-panel2 {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+
+.home-customize-panel2 {
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+.home-customize-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px;
+  font-size: var(--fs-13);
+}
+
+.home2-empty {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  translate: -50% -50%;
+  border: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.home2-empty:hover {
+  color: var(--ink);
+  border-style: solid;
+}
+
+/* ---- The widget board ---------------------------------------------------- */
+
+.home2-board {
+  position: absolute;
+  z-index: 3;
+  left: var(--home-pad);
+  right: var(--home-pad);
+  top: calc(var(--topbar-h, 35px) + 28px);
+  bottom: var(--clock-band);
+}
+
+.home2.with-dock .home2-board {
+  right: calc(var(--home-pad) + 64px);
+}
+
+.wboard2 {
+  position: absolute;
+  inset: 0;
+}
+
+.wgrid2 {
+  position: absolute;
+  top: 0;
+}
+
+.wgrid2-cells span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--cell);
+  height: var(--cell);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  animation: wcell-in var(--dur-slow) var(--ease-out) both;
+}
+
+@keyframes wcell-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.wghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 18px;
+  border: 1.5px dashed color-mix(in srgb, var(--ink) 36%, transparent);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  transition: transform var(--dur-base) var(--spring-snap);
+}
+
+.wtile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: calc(18px * var(--wscale, 1));
+  color: var(--ink);
+  outline: none;
+  touch-action: none;
+  /* Reflow: widgets glide to their new cells on a damped spring. */
+  transition: transform var(--dur-glide) var(--spring-glide), opacity var(--dur-base) var(--ease-out);
+  will-change: transform;
+}
+
+.wtile-face {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ui-surface) 84%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--ui-fg);
+}
+
+.home2[data-bg='image'] .wtile-face,
+.home2[data-bg='special'] .wtile-face {
+  background: color-mix(in srgb, var(--ui-surface) 90%, transparent);
+}
+
+.wboard2.editing .wtile {
+  cursor: grab;
+}
+
+.wboard2.editing .wtile:not(.dragging) .wtile-face {
+  animation: wiggle 0.36s ease-in-out infinite alternate;
+}
+
+.wboard2.editing .wtile:nth-child(2n):not(.dragging) .wtile-face {
+  animation-delay: -0.18s;
+}
+
+@keyframes wiggle {
+  from {
+    rotate: -0.45deg;
+  }
+  to {
+    rotate: 0.45deg;
+  }
+}
+
+.wboard2.editing .wtile-face * {
+  pointer-events: none;
+}
+
+.wboard2.editing .wtile-face {
+  user-select: none;
+}
+
+.wtile.selected .wtile-face,
+.wtile:focus-visible .wtile-face {
+  box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 2px color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.wtile.dragging {
+  z-index: 20;
+  cursor: grabbing;
+  transition: none;
+}
+
+.wtile.dragging .wtile-face {
+  box-shadow: inset 0 0 0 1px var(--hairline), 0 18px 40px rgba(0, 0, 0, 0.32);
+}
+
+.wtile-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: wchrome-in var(--dur-base) var(--spring-snap) both;
+}
+
+@keyframes wchrome-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.wtile-remove,
+.wtile-edit {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  background: var(--ui-surface);
+  color: var(--ui-fg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.wtile-remove {
+  top: -7px;
+  left: -7px;
+}
+
+.wtile-edit {
+  top: -7px;
+  right: -7px;
+}
+
+.wtile-remove:hover {
+  background: var(--ui-danger);
+  border-color: var(--ui-danger);
+  color: #fff;
+}
+
+.wtile-edit:hover {
+  background: var(--ui-fg);
+  color: var(--ui-bg);
+}
+
+.wboard-bar2 {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  translate: -50% 0;
+  border-radius: 12px;
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-sheet);
+  animation: wbar-in var(--dur-slow) var(--spring-snap) both;
+}
+
+@keyframes wbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.wboard-note {
+  padding: 0 8px;
+  font-size: var(--fs-12);
+  color: var(--ui-fg-muted);
+  white-space: nowrap;
+}
+
+/* ---- Widget content: things the new widgets add -------------------------- */
+
+.w-setup-prompt {
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.w-setup-prompt:hover .w-muted {
+  color: var(--ui-fg);
+}
+
+.w-body.notes {
+  background: color-mix(in srgb, var(--note-tint, transparent) 22%, transparent);
+}
+
+.worldclock .w-big,
+.focusw .w-big {
+  margin-top: auto;
+}
+
+.focusw-start {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.focusw-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+.focusw-bar span {
+  display: block;
+  height: 100%;
+  background: var(--ui-fg);
+  transform-origin: left;
+  transition: transform 1s linear;
+}
+
+/* ---- Sheets: widget gallery and widget settings -------------------------- */
+
+.sheet {
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(640px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sheet);
+  background: var(--ui-surface);
+  color: var(--ui-fg);
+  box-shadow: var(--shadow-sheet);
+  overflow: hidden;
+}
+
+.wgallery.sheet {
+  width: min(640px, calc(100vw - 48px));
+}
+
+.wed-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.wed-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.wed-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.wed-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  letter-spacing: var(--tr-16);
+}
+
+.wed-sub {
+  margin: 2px 0 0;
+  color: var(--ui-fg-muted);
+  font-size: var(--fs-13);
+}
+
+.wed-body,
+.wgallery-body {
+  padding: 8px 18px 18px;
+  overflow: auto;
+}
+
+.wed-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.wed-field:last-child {
+  border-bottom: 0;
+}
+
+.wed-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.wed-hint {
+  color: var(--ui-fg-faint);
+  font-size: var(--fs-12);
+  font-weight: 400;
+}
+
+.wed-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wed-row .input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.wed-error {
+  width: 100%;
+  color: var(--ui-danger);
+  font-size: var(--fs-12);
+}
+
+.wed-swatches {
+  display: flex;
+  gap: 8px;
+}
+
+.wed-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  background: var(--sw);
+  cursor: pointer;
+  transition: transform var(--dur-base) var(--spring-snap);
+}
+
+.wed-swatch[style*='transparent'] {
+  background: repeating-linear-gradient(135deg, transparent 0 4px, var(--hairline) 4px 5px);
+}
+
+.wed-swatch.on {
+  box-shadow: 0 0 0 2px var(--ui-surface), 0 0 0 4px var(--ui-fg);
+  transform: scale(1.06);
+}
+
+.wed-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.wed-spacer {
+  flex: 1;
+}
+
+.btn-danger-text {
+  color: var(--ui-danger);
+}
+
+.wgallery-section + .wgallery-section {
+  margin-top: 8px;
+}
+
+.wed-overlay,
+.wgallery-overlay {
+  z-index: 12000;
+}
+
+/* ---- Shared controls: segmented, inputs ---------------------------------- */
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  align-self: flex-start;
+}
+
+.seg button {
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ui-fg-muted);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.seg button:hover:not(:disabled) {
+  color: var(--ui-fg);
+}
+
+.seg button.on {
+  background: var(--ui-surface);
+  color: var(--ui-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--hairline);
+}
+
+.seg button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font-size: var(--fs-13);
+  outline: none;
+}
+
+.input:focus {
+  border-color: color-mix(in srgb, var(--ui-fg) 45%, transparent);
+}
+
+.select {
+  padding-right: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wboard2.editing .wtile-face {
+    animation: none !important;
+  }
+}

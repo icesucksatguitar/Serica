@@ -1,0 +1,143 @@
+/* ==========================================================================
+   Opening and closing every in-browser window: Settings, Theme Studio,
+   History, Downloads, Extensions, the AI panel, Shields, VPN, the archive,
+   the command bar, widget sheets. Loads last.
+
+   - Entrances: @starting-style, so a panel animates in even when its code
+     arrives a moment after it was asked for (lazy-loaded panels).
+   - Exits: the Presence wrapper (hooks/usePresence.ts) keeps the panel on
+     screen with data-state="closed" for a beat before removing it.
+   - Backdrops fade; cards rise and settle on a spring; drawers slide in
+     from their edge. Only opacity and transform animate.
+   - The panels' older keyframe entrances are switched off here so nothing
+     plays twice.
+   ========================================================================== */
+
+:root {
+  --panel-enter: var(--dur-slow) var(--spring-snap);
+  --panel-exit: var(--dur-exit) var(--ease-in);
+}
+
+/* Older one-shot entrances off: Presence and @starting-style own the motion. */
+.presence :is(.modal-overlay, .modal-content-card, .settings-panel-card, .settings-overlay, .command-bar-modal-backdrop,
+    .command-bar-card-wrapper, .mcp-drawer, .mcp-drawer-overlay, .panel, .sheet, .studio, .settings2, .theme-popover-backdrop,
+    .shield-modal-backdrop) {
+  animation: none !important;
+}
+
+/* ---- Backdrops --------------------------------------------------------- */
+
+.presence :is(.modal-overlay, .command-bar-modal-backdrop, .mcp-drawer-overlay) {
+  opacity: 1;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+@starting-style {
+  .presence :is(.modal-overlay, .command-bar-modal-backdrop, .mcp-drawer-overlay) {
+    opacity: 0;
+  }
+}
+
+.presence[data-state='closed'] :is(.modal-overlay, .command-bar-modal-backdrop, .mcp-drawer-overlay) {
+  opacity: 0;
+  transition: opacity var(--panel-exit);
+}
+
+/* The wrapper's own fade (foundation.css) would double the backdrop's. */
+.presence > :is(.modal-overlay, .command-bar-modal-backdrop, .mcp-drawer-overlay) {
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+/* ---- Cards: rise and settle -------------------------------------------- */
+
+.presence :is(.modal-content-card, .settings-panel-card, .settings2, .panel, .sheet, .command-bar-card-wrapper) {
+  opacity: 1;
+  transform: none;
+  transform-origin: 50% 40%;
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--panel-enter);
+}
+
+@starting-style {
+  .presence :is(.modal-content-card, .settings-panel-card, .settings2, .panel, .sheet, .command-bar-card-wrapper) {
+    opacity: 0;
+    transform: translateY(10px) scale(0.975);
+  }
+}
+
+.presence[data-state='closed'] :is(.modal-content-card, .settings-panel-card, .settings2, .panel, .sheet, .command-bar-card-wrapper) {
+  opacity: 0;
+  transform: translateY(6px) scale(0.985);
+  transition: opacity var(--panel-exit), transform var(--panel-exit);
+}
+
+/* The command bar drops from the address bar rather than rising. */
+@starting-style {
+  .presence .command-bar-card-wrapper {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+.presence[data-state='closed'] .command-bar-card-wrapper {
+  transform: translateY(-6px) scale(0.985);
+}
+
+/* ---- Drawers: the AI panel slides in from the right --------------------- */
+
+.presence .mcp-drawer {
+  opacity: 1;
+  translate: 0 0;
+  transition: opacity var(--dur-base) var(--ease-out), translate var(--panel-enter);
+}
+
+@starting-style {
+  .presence .mcp-drawer {
+    opacity: 0;
+    translate: 28px 0;
+  }
+}
+
+.presence[data-state='closed'] .mcp-drawer {
+  opacity: 0;
+  translate: 20px 0;
+  transition: opacity var(--panel-exit), translate var(--panel-exit);
+}
+
+/* Dragging or resizing the AI panel must follow the pointer exactly. */
+.presence .mcp-drawer:is(.is-dragging, .is-resizing) {
+  transition: none;
+}
+
+/* ---- Menus and popovers that open in place ------------------------------ */
+
+.nsb-menu,
+.app-context-menu,
+.tools-menu-panel,
+.page-context-menu {
+  transform-origin: top left;
+}
+
+@starting-style {
+  .nsb-menu,
+  .app-context-menu,
+  .tools-menu-panel,
+  .page-context-menu {
+    opacity: 0;
+    transform: scale(0.97) translateY(-3px);
+  }
+}
+
+.nsb-menu,
+.app-context-menu,
+.tools-menu-panel,
+.page-context-menu {
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presence *,
+  .nsb-menu,
+  .app-context-menu {
+    transition-duration: 0.01ms !important;
+  }
+}

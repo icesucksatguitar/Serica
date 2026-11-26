@@ -1,128 +1,236 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { HelpCircle, LayoutGrid, SlidersHorizontal } from 'lucide-react';
-import { DEFAULT_HOME_WIDGETS, DEFAULT_UI_SCALE, type HomeWidgets, type UiScale } from '../shared/settings';
+import React, { useEffect, useRef, useState } from 'react';
+import { HelpCircle, Image as ImageIcon, LayoutGrid, Plus, SlidersHorizontal } from 'lucide-react';
+import {
+  DEFAULT_HOME_BACKGROUND,
+  DEFAULT_HOME_WIDGETS,
+  DEFAULT_UI_SCALE,
+  homeBackgroundCss,
+  type HomeBackground,
+  type HomeWidgets,
+  type UiScale,
+} from '../shared/settings';
 import { WidgetBoard } from './home/WidgetBoard';
 import { Switch } from './Switch';
 import { startGuide } from './GuideTour';
+import { hexLuminance } from '../shared/spaceTheme';
+import { usePresence } from '../hooks/usePresence';
 
 interface HomescreenProps {
-  isDarkMode?: boolean;
   onNavigate: (url: string) => void;
   onOpenCommandBar?: () => void;
-  userName?: string;
   widgets?: HomeWidgets;
   onUpdateWidgets?: (next: HomeWidgets) => void;
+  background?: HomeBackground;
   uiScale?: UiScale;
+  /** The website dock is on the right edge: keep widgets clear of it. */
+  dockVisible?: boolean;
 }
 
-function formatClockParts(now: Date) {
-  return {
-    hm: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
-    seconds: String(now.getSeconds()).padStart(2, '0'),
-    dateStr: now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
-  };
+/** The bundled Serica Special artworks (oil-pastel re-paintings of 1789-1794 scenes). */
+export const SPECIAL_ART = [
+  { src: '/artworks/serica-special-1.avif', thumb: '/artworks/serica-special-1-thumb.webp', title: 'Prise de la Bastille', after: 'after Jean-Pierre Houël, 1789' },
+  { src: '/artworks/serica-special-2.avif', thumb: '/artworks/serica-special-2-thumb.webp', title: 'La Bastille, premiers jours de sa démolition', after: 'after Hubert Robert, 1789' },
+  { src: '/artworks/serica-special-3.avif', thumb: '/artworks/serica-special-3-thumb.webp', title: 'Fête de l’Être suprême', after: 'after Pierre-Antoine Demachy, 1794' },
+];
+
+const BG_URL = (file: string) => `http://sericabg.localhost/${encodeURIComponent(file)}`;
+
+/** Whether text on this background should be light. */
+function wantsLightInk(bg: HomeBackground, themeDark: boolean): boolean {
+  if (bg.mode === 'image' || bg.mode === 'special') return true;
+  if (bg.mode === 'solid') return hexLuminance(bg.solid) < 0.42;
+  if (bg.mode === 'gradient') {
+    const avg = bg.gradient.stops.reduce((a, s) => a + hexLuminance(s.color), 0) / bg.gradient.stops.length;
+    return avg < 0.5;
+  }
+  return themeDark;
 }
 
 /**
- * The new tab page. The greeting, clock and search field sit in one place
- * whatever else is on the page; widgets go below them and the page scrolls
- * when they need the room. Customize (bottom right) shows or hides each part
- * and edits the widgets.
+ * Serica Special: the three artworks, each held for `seconds`, cross-fading
+ * into the next. The next image is decoded before the fade starts; nothing
+ * runs while the window is hidden.
+ */
+const SpecialSlideshow: React.FC<{ seconds: number }> = ({ seconds }) => {
+  const [index, setIndex] = useState(() => {
+    try {
+      const n = (Number(localStorage.getItem('serica_special_index')) + 1) % SPECIAL_ART.length;
+      localStorage.setItem('serica_special_index', String(n));
+      return Number.isFinite(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  });
+  // Two layers: the one shown, and the next fading in over it.
+  const [layers, setLayers] = useState<{ a: number; b: number; top: 'a' | 'b' }>({ a: index, b: (index + 1) % SPECIAL_ART.length, top: 'a' });
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    const next = () => {
+      if (!alive) return;
+      if (document.hidden) {
+        timer = window.setTimeout(next, 2000);
+        return;
+      }
+      const n = (index + 1) % SPECIAL_ART.length;
+      const img = new Image();
+      img.src = SPECIAL_ART[n].src;
+      void img
+        .decode()
+        .catch(() => undefined)
+        .then(() => {
+          if (!alive) return;
+          setLayers((l) => (l.top === 'a' ? { ...l, b: n, top: 'b' } : { ...l, a: n, top: 'a' }));
+          setIndex(n);
+        });
+    };
+    timer = window.setTimeout(next, seconds * 1000);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [index, seconds]);
+  const art = SPECIAL_ART[index];
+  return (
+    <>
+      <img className={`home-art${layers.top === 'a' ? ' on' : ''}`} src={SPECIAL_ART[layers.a].src} alt="" draggable={false} decoding="async" />
+      <img className={`home-art${layers.top === 'b' ? ' on' : ''}`} src={SPECIAL_ART[layers.b].src} alt="" draggable={false} decoding="async" />
+      <div className="home-art-credit" key={index}>
+        <span>{art.title}</span>
+        <span className="home-art-after">{art.after} · oil pastel</span>
+      </div>
+    </>
+  );
+};
+
+/** What fills the page behind the widgets (Settings › Home). */
+export const HomeBackdrop: React.FC<{ bg: HomeBackground }> = ({ bg }) => {
+  const css = homeBackgroundCss(bg);
+  if (bg.mode === 'theme') return null;
+  return (
+    <div className={`home-bg mode-${bg.mode}`} aria-hidden="true">
+      {css && <div className="home-bg-fill" style={{ background: css }} />}
+      {bg.mode === 'image' && bg.image.file && (
+        <>
+          <div className={`home-bg-image fit-${bg.image.fit}`} style={{ backgroundImage: `url("${BG_URL(bg.image.file)}")` }} />
+          <div className="home-bg-dim" style={{ opacity: bg.image.dim }} />
+        </>
+      )}
+      {bg.mode === 'special' && <SpecialSlideshow seconds={bg.special.seconds} />}
+      {(bg.mode === 'image' || bg.mode === 'special') && <div className="home-bg-scrim" />}
+    </div>
+  );
+};
+
+function clockParts(now: Date, hour12: boolean) {
+  let h = now.getHours();
+  let suffix = '';
+  if (hour12) {
+    suffix = h < 12 ? 'AM' : 'PM';
+    h = h % 12 || 12;
+  }
+  return {
+    hm: `${hour12 ? h : String(h).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    seconds: String(now.getSeconds()).padStart(2, '0'),
+    suffix,
+    date: now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
+  };
+}
+
+/** The clock, fixed in the bottom-left corner. Updates text in place once a second. */
+const HomeClock: React.FC<{ hour12: boolean; seconds: boolean }> = ({ hour12, seconds }) => {
+  const initial = useRef(clockParts(new Date(), hour12)).current;
+  const hmRef = useRef<HTMLSpanElement>(null);
+  const secRef = useRef<HTMLSpanElement>(null);
+  const sufRef = useRef<HTMLSpanElement>(null);
+  const dateRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let last = '';
+    const tick = () => {
+      if (document.hidden) return;
+      const p = clockParts(new Date(), hour12);
+      if (hmRef.current && hmRef.current.textContent !== p.hm) hmRef.current.textContent = p.hm;
+      if (secRef.current) secRef.current.textContent = p.seconds;
+      if (sufRef.current) sufRef.current.textContent = p.suffix;
+      if (dateRef.current && p.date !== last) {
+        dateRef.current.textContent = p.date;
+        last = p.date;
+      }
+    };
+    tick();
+    // Aligned to the second so the digits change with the system clock.
+    let t = 0;
+    const loop = () => {
+      tick();
+      t = window.setTimeout(loop, 1000 - (Date.now() % 1000) + 5);
+    };
+    t = window.setTimeout(loop, 1000 - (Date.now() % 1000) + 5);
+    const onVis = () => !document.hidden && tick();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [hour12]);
+  return (
+    <div className="home-clock" aria-live="off">
+      <div className="home-clock-time tnum">
+        <span ref={hmRef}>{initial.hm}</span>
+        {seconds && (
+          <span className="home-clock-sec" ref={secRef}>
+            {initial.seconds}
+          </span>
+        )}
+        {hour12 && (
+          <span className="home-clock-suffix" ref={sufRef}>
+            {initial.suffix}
+          </span>
+        )}
+      </div>
+      <div className="home-clock-date" ref={dateRef}>
+        {initial.date}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * The new-tab page: only the widgets and the clock, on the background chosen
+ * in Settings › Home. Typing anywhere goes to the address bar.
  */
 export const Homescreen: React.FC<HomescreenProps> = ({
   onNavigate,
   onOpenCommandBar,
-  userName,
   widgets = DEFAULT_HOME_WIDGETS,
   onUpdateWidgets,
+  background = DEFAULT_HOME_BACKGROUND,
   uiScale = DEFAULT_UI_SCALE,
+  dockVisible = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const menu = usePresence(menuOpen, 130);
+  const themeDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') !== 'light';
+  const lightInk = wantsLightInk(background, themeDark);
 
-  const [displayName, setDisplayName] = useState<string>(() => {
-    if (userName) return userName;
-    try {
-      const saved = localStorage.getItem('serica_user_profile') || localStorage.getItem('neutrino_user_profile');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.name) return parsed.name;
-      }
-    } catch {}
-    return '';
-  });
-  useEffect(() => {
-    if (userName) setDisplayName(userName);
-  }, [userName]);
-
-  const initialClock = useRef(formatClockParts(new Date())).current;
-  const dateRef = useRef<HTMLDivElement>(null);
-  const hmRef = useRef<HTMLSpanElement>(null);
-  const secRef = useRef<HTMLSpanElement>(null);
-  const greetRef = useRef<HTMLDivElement>(null);
-
-  const getGreeting = useCallback((): string => {
-    const hour = new Date().getHours();
-    const who = displayName ? `, ${displayName}` : '';
-    if (hour < 12) return `Good morning${who}`;
-    if (hour < 17) return `Good afternoon${who}`;
-    return `Good evening${who}`;
-  }, [displayName]);
-
-  useEffect(() => {
-    if (!widgets.clock) return;
-    let lastDate = '';
-    let lastHm = '';
-    let lastGreet = '';
-    const tick = () => {
-      if (document.hidden) return;
-      const parts = formatClockParts(new Date());
-      if (hmRef.current && parts.hm !== lastHm) {
-        hmRef.current.textContent = parts.hm;
-        lastHm = parts.hm;
-      }
-      if (secRef.current) secRef.current.textContent = parts.seconds;
-      if (dateRef.current && parts.dateStr !== lastDate) {
-        dateRef.current.textContent = parts.dateStr;
-        lastDate = parts.dateStr;
-      }
-      if (greetRef.current) {
-        const g = getGreeting();
-        if (g !== lastGreet) {
-          greetRef.current.textContent = g;
-          lastGreet = g;
-        }
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 1000);
-    const onVis = () => {
-      if (!document.hidden) tick();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [getGreeting, widgets.clock]);
-
-  // Typing anywhere on an empty new tab starts a search, also with the field hidden.
+  // Typing anywhere on the page goes to the address bar.
   useEffect(() => {
     if (editing) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && !widgets.search) onOpenCommandBar?.();
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && e.key !== ' ') onOpenCommandBar?.();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editing, widgets.search, onOpenCommandBar]);
+  }, [editing, onOpenCommandBar]);
 
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
-      if (e instanceof MouseEvent && (e.target as HTMLElement)?.closest?.('.home-customize')) return;
+      if (e instanceof MouseEvent && (e.target as HTMLElement)?.closest?.('.home-customize2')) return;
       setMenuOpen(false);
     };
     window.addEventListener('keydown', close);
@@ -133,144 +241,79 @@ export const Homescreen: React.FC<HomescreenProps> = ({
     };
   }, [menuOpen]);
 
-  const update = (patch: Partial<HomeWidgets>) => onUpdateWidgets?.({ ...widgets, ...patch });
-  const hasWidgets = widgets.items.length > 0 || editing;
+  const setClock = (patch: Partial<HomeWidgets['clock']>) => onUpdateWidgets?.({ ...widgets, clock: { ...widgets.clock, ...patch } });
 
   return (
-    <div
-      className={`serica-minimal-newtab neutrino-minimal-newtab${hasWidgets ? ' with-widgets' : ''}${editing ? ' editing-widgets' : ''}`}
-      style={
-        {
-          '--hero-scale': uiScale.hero,
-          '--search-scale': uiScale.search,
-        } as React.CSSProperties
-      }
-    >
-      <div className="ambient-glow-layer" aria-hidden="true">
-        <div className="ambient-glow-color-cycle">
-          <div className="ambient-glow-container">
-            <div className="ambient-glow-blob blob-1" />
-            <div className="ambient-glow-blob blob-2" />
-            <div className="ambient-glow-blob blob-3" />
-            <div className="ambient-glow-blob blob-4" />
-          </div>
-        </div>
-      </div>
-      <div className="newtab-grain-veil" />
+    <div className={`home2${editing ? ' editing' : ''}${dockVisible ? ' with-dock' : ''}`} data-ink={lightInk ? 'light' : 'dark'} data-bg={background.mode}>
+      <HomeBackdrop bg={background} />
 
-      <div className="home-scroll">
-        <div className="homescreen-hero-center">
-          {widgets.clock && (
-            <div className="home-hero">
-              <div className="yc-italic-greeting" ref={greetRef}>
-                {getGreeting()}
-              </div>
-              <div className="digital-clock-container compact-clock">
-                <div className="digital-clock-date" ref={dateRef}>
-                  {initialClock.dateStr}
-                </div>
-                <div className="digital-clock-time">
-                  <span className="digital-clock-digits" ref={hmRef}>
-                    {initialClock.hm}
-                  </span>
-                  <span className="digital-clock-seconds" ref={secRef}>
-                    {initialClock.seconds}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {widgets.search && (
-            <div className="newtab-search-reveal-wrapper revealed home-search">
-              <div
-                className="newtab-prompt-trigger monochromatic-pill"
-                tabIndex={0}
-                role="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenCommandBar?.();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onOpenCommandBar?.();
-                  }
-                }}
-                title="Search or enter URL (Ctrl+K or Ctrl+T)"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <span className="prompt-text">Search or enter URL</span>
-                <div className="prompt-kbd-badge">
-                  <kbd className="prompt-kbd">Ctrl K</kbd>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {onUpdateWidgets && (
+      {onUpdateWidgets && (
+        <div className="home2-board">
           <WidgetBoard
             widgets={widgets}
             onUpdate={onUpdateWidgets}
             onOpen={onNavigate}
             editing={editing}
             onEditingChange={setEditing}
+            galleryOpen={galleryOpen}
+            onGalleryOpenChange={setGalleryOpen}
             scale={uiScale.widgets}
           />
-        )}
-      </div>
+        </div>
+      )}
+
+      {widgets.items.length === 0 && !editing && onUpdateWidgets && (
+        <button type="button" className="home2-empty" onClick={() => { setEditing(true); setGalleryOpen(true); }}>
+          <Plus size={14} aria-hidden="true" />
+          Add a widget
+        </button>
+      )}
+
+      <HomeClock hour12={widgets.clock.hour12} seconds={widgets.clock.seconds} />
 
       {onUpdateWidgets && !editing && (
-        <div className="home-customize">
-          {menuOpen && (
-            <div className="home-customize-panel nsb-menu" role="menu" aria-label="Customize new tab">
-              <div className="home-customize-row">
-                <span>Greeting and clock</span>
-                <Switch checked={widgets.clock} label="Greeting and clock" onChange={(clock) => update({ clock })} />
+        <div className="home-customize2">
+          {menu.mounted && (
+            <div className="presence" data-state={menu.state}>
+              <div className="home-customize-panel2 nsb-menu" role="menu" aria-label="Customize new tab">
+                <button type="button" role="menuitem" className="nsb-menu-item" onClick={() => { setMenuOpen(false); setEditing(true); }}>
+                  <LayoutGrid size={13} />
+                  <span>Edit widgets</span>
+                </button>
+                <button type="button" role="menuitem" className="nsb-menu-item" onClick={() => { setMenuOpen(false); setEditing(true); setGalleryOpen(true); }}>
+                  <Plus size={13} />
+                  <span>Add a widget</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="nsb-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    window.dispatchEvent(new CustomEvent('serica:open-settings', { detail: 'home' }));
+                  }}
+                >
+                  <ImageIcon size={13} />
+                  <span>Background…</span>
+                </button>
+                <div className="app-context-menu-sep" role="separator" />
+                <div className="home-customize-row">
+                  <span>24-hour clock</span>
+                  <Switch checked={!widgets.clock.hour12} label="24-hour clock" onChange={(on) => setClock({ hour12: !on })} />
+                </div>
+                <div className="home-customize-row">
+                  <span>Seconds</span>
+                  <Switch checked={widgets.clock.seconds} label="Seconds" onChange={(seconds) => setClock({ seconds })} />
+                </div>
+                <div className="app-context-menu-sep" role="separator" />
+                <button type="button" role="menuitem" className="nsb-menu-item" onClick={() => { setMenuOpen(false); startGuide('widgets'); }}>
+                  <HelpCircle size={13} />
+                  <span>How widgets work</span>
+                </button>
               </div>
-              <div className="home-customize-row">
-                <span>Search bar</span>
-                <Switch checked={widgets.search} label="Search bar" onChange={(search) => update({ search })} />
-              </div>
-              <div className="app-context-menu-sep" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                className="nsb-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setEditing(true);
-                }}
-              >
-                <LayoutGrid size={13} />
-                <span>Edit widgets</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="nsb-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  startGuide('widgets');
-                }}
-              >
-                <HelpCircle size={13} />
-                <span>How widgets work</span>
-              </button>
             </div>
           )}
-          <button
-            type="button"
-            className={`home-customize-btn${menuOpen ? ' active' : ''}`}
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            onClick={() => setMenuOpen((c) => !c)}
-          >
+          <button type="button" className={`home-customize-btn2${menuOpen ? ' active' : ''}`} aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((c) => !c)}>
             <SlidersHorizontal size={13} aria-hidden="true" />
             <span>Customize</span>
           </button>

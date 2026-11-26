@@ -245,7 +245,88 @@ export const tauriBridge = {
   // Drag and drop onto Serica's own interface
   onDrag: (cb: (e: DragEventPayload) => void) => on('serica:drag', cb),
   openDroppedPaths: (paths: string[]) => invoke<number>('open_dropped_paths', { paths }),
+
+  // Focus Mode
+  focusGet: () => invoke<FocusView>('focus_get'),
+  focusSaveBlock: (block: FocusBlock) => invoke<FocusView>('focus_save_block', { block }),
+  focusDeleteBlock: (id: string) => invoke<FocusView>('focus_delete_block', { id }),
+  focusStart: (id: string, minutes: number | null, lock: boolean) => invoke<FocusView>('focus_start', { id, minutes, lock }),
+  focusStop: (id: string, text?: string) => invoke<FocusView>('focus_stop', { id, text: text ?? null }),
+  focusChallenge: (id: string) => invoke<string>('focus_challenge', { id }),
+  focusCheck: (url: string) => invoke<boolean>('focus_check', { url }),
+  onFocusUpdated: (cb: (v: FocusView) => void) => on('serica:focus-updated', cb),
+
+  // New-tab background picture, default browser, importing
+  pickBackgroundImage: () => invoke<{ file: string; url: string } | null>('pick_background_image'),
+  defaultBrowserStatus: () => invoke<{ isDefault: boolean; supported: boolean }>('default_browser_status'),
+  makeDefaultBrowser: () => invoke<{ isDefault: boolean; supported: boolean }>('make_default_browser'),
+  importSources: () => invoke<ImportSource[]>('import_sources'),
+  importFromBrowser: (request: ImportRequest) => invoke<ImportReport>('import_from_browser', { request }),
+  importPasswordsFile: () => invoke<ImportReport | null>('import_passwords_file'),
 };
+
+export interface FocusSlot {
+  /** Bit mask, bit 0 = Sunday. */
+  days: number;
+  /** Minutes after midnight. */
+  start: number;
+  end: number;
+}
+
+export interface FocusBlock {
+  id: string;
+  name: string;
+  sites: string[];
+  allow: string[];
+  categories: string[];
+  schedule: FocusSlot[];
+  scheduleOn: boolean;
+  scheduleLocked: boolean;
+  unlock: 'strict' | 'randomText';
+}
+
+export interface FocusActive {
+  blockId: string;
+  source: 'session' | 'schedule';
+  remainingMs: number | null;
+  totalMs: number | null;
+  locked: boolean;
+}
+
+export interface FocusView {
+  blocks: FocusBlock[];
+  active: FocusActive[];
+  categories: { id: string; label: string; sites: string[] }[];
+  clockVerified: boolean;
+}
+
+export interface ImportSource {
+  id: string;
+  name: string;
+  engine: 'chromium' | 'gecko';
+  profiles: { id: string; name: string }[];
+}
+
+export interface ImportRequest {
+  source: string;
+  profile: string;
+  bookmarks: boolean;
+  history: boolean;
+  passwords: boolean;
+  asNewProfile: boolean;
+}
+
+export interface ImportReport {
+  bookmarks: number;
+  pinned: number;
+  history: number;
+  passwords: number;
+  passwordsLocked: number;
+  primaryPassword: boolean;
+  profileId: string | null;
+  profileName: string | null;
+  errors: string[];
+}
 
 export interface PermissionRequest {
   id: number;

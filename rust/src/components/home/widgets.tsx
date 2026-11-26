@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   CalendarDays,
+  Clock3,
   Cloud,
   CloudDrizzle,
   CloudFog,
@@ -14,21 +15,26 @@ import {
   Moon,
   StickyNote,
   Sun,
+  Target,
 } from 'lucide-react';
-import type { HomeWidgets, WidgetItem, WidgetKind, WidgetSize } from '../../shared/settings';
+import type { WidgetItem, WidgetKind, WidgetSize } from '../../shared/settings';
 import type { GithubContributions, HistoryEntry, WeatherNow } from '../../types';
 import { APP_WIDGETS, appIcon, appQueryUrl, appWidget } from './apps';
+import { focusError, formatRemaining, remainingNow, useFocusView, useTicker } from '../../hooks/useFocus';
 
 // ---------------------------------------------------------------------------
-// Catalog: what can be added, at which sizes.
+// Catalog
 
 export interface WidgetMeta {
   name: string;
   description: string;
   sizes: readonly WidgetSize[];
   defaultSize: WidgetSize;
-  /** Small mark shown in the gallery. */
+  defaultConfig: () => Record<string, unknown>;
+  /** Mark shown in the gallery and the editor. */
   icon: React.ReactNode;
+  /** Has settings of its own (besides size). */
+  configurable: boolean;
 }
 
 export const SIZE_LABEL: Record<WidgetSize, string> = { s: 'Small', m: 'Medium', l: 'Large', w: 'Wide' };
@@ -41,40 +47,68 @@ export const GithubMark: React.FC<{ size?: number }> = ({ size = 14 }) => (
 );
 
 const BUILTIN: Record<string, WidgetMeta> = {
-  github: {
-    name: 'GitHub contributions',
-    description: 'Your contribution calendar and totals',
-    sizes: ['s', 'm', 'w'],
-    defaultSize: 'w',
-    icon: <GithubMark size={18} />,
+  focus: {
+    name: 'Focus',
+    description: 'Start Focus Mode, or see how long it has left',
+    sizes: ['s', 'm'],
+    defaultSize: 's',
+    defaultConfig: () => ({ minutes: 25, listId: '' }),
+    icon: <Target size={18} />,
+    configurable: true,
   },
   weather: {
     name: 'Weather',
-    description: 'Current conditions where you are',
+    description: 'Conditions in a city you choose',
     sizes: ['s', 'm'],
     defaultSize: 's',
+    defaultConfig: () => ({ place: '', lat: null, lon: null, fahrenheit: false }),
     icon: <CloudSun size={18} />,
+    configurable: true,
   },
-  notes: {
-    name: 'Notes',
-    description: 'A scratchpad kept on this device',
-    sizes: ['s', 'm', 'l'],
-    defaultSize: 'm',
-    icon: <StickyNote size={18} />,
+  worldclock: {
+    name: 'World clock',
+    description: 'The time in another city',
+    sizes: ['s', 'm'],
+    defaultSize: 's',
+    defaultConfig: () => ({ zone: 'Europe/London', label: 'London' }),
+    icon: <Clock3 size={18} />,
+    configurable: true,
   },
   calendar: {
     name: 'Calendar',
     description: 'Today’s date, or the whole month',
     sizes: ['s', 'l'],
     defaultSize: 's',
+    defaultConfig: () => ({ weekStart: 1 }),
     icon: <CalendarDays size={18} />,
+    configurable: true,
+  },
+  notes: {
+    name: 'Notes',
+    description: 'A scratchpad kept on this device',
+    sizes: ['s', 'm', 'l'],
+    defaultSize: 'm',
+    defaultConfig: () => ({ tint: 'plain' }),
+    icon: <StickyNote size={18} />,
+    configurable: true,
   },
   topsites: {
     name: 'Top sites',
     description: 'The sites you visit most, from your history',
     sizes: ['m', 'l'],
     defaultSize: 'm',
+    defaultConfig: () => ({ count: 8 }),
     icon: <LayoutGrid size={18} />,
+    configurable: true,
+  },
+  github: {
+    name: 'GitHub contributions',
+    description: 'A contribution calendar and totals',
+    sizes: ['s', 'm', 'w'],
+    defaultSize: 'w',
+    defaultConfig: () => ({ user: '' }),
+    icon: <GithubMark size={18} />,
+    configurable: true,
   },
 };
 
@@ -86,18 +120,19 @@ export function widgetMeta(kind: WidgetKind): WidgetMeta | undefined {
       description: app.description,
       sizes: ['s', 'm'],
       defaultSize: app.queryUrl ? 'm' : 's',
+      defaultConfig: () => ({}),
       icon: <img src={appIcon(app.domain)} alt="" width={18} height={18} />,
+      configurable: false,
     };
   }
   return BUILTIN[kind];
 }
 
-export const BUILTIN_KINDS: WidgetKind[] = ['github', 'weather', 'notes', 'calendar', 'topsites'];
+export const BUILTIN_KINDS: WidgetKind[] = ['focus', 'weather', 'worldclock', 'calendar', 'notes', 'topsites', 'github'];
 export const APP_KINDS: WidgetKind[] = APP_WIDGETS.map((a) => `app:${a.id}` as WidgetKind);
 
 // ---------------------------------------------------------------------------
-// Data: fetched by the backend, cached for the session so opening new tabs
-// does not refetch (GitHub's calendar changes slowly, weather every ~15 min).
+// Data: fetched by the backend, cached for the session.
 
 type Loaded<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; error: string };
 
@@ -110,7 +145,6 @@ function cached<T>(key: string, maxAgeMs: number, load: () => Promise<T> | undef
     if (v === undefined) throw new Error('unavailable');
     return v;
   });
-  // A failure is not kept: the next new tab tries again.
   value.catch(() => cache.delete(key));
   cache.set(key, { at: Date.now(), value });
   return value;
@@ -136,52 +170,33 @@ function useLoaded<T>(key: string | null, maxAgeMs: number, load: () => Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Shared pieces
-
-/** In-widget setup (username, place): the widget asks for what it needs. */
-const InlineSetup: React.FC<{
-  label: string;
-  placeholder: string;
-  initial?: string;
-  error?: string | null;
-  busy?: boolean;
-  onSubmit: (value: string) => void;
-}> = ({ label, placeholder, initial = '', error, busy, onSubmit }) => {
-  const [value, setValue] = useState(initial);
-  return (
-    <form
-      className="w-setup"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (value.trim()) onSubmit(value.trim());
-      }}
-    >
-      <label className="w-setup-label">{label}</label>
-      <div className="w-setup-row">
-        <input
-          className="w-input"
-          value={value}
-          placeholder={placeholder}
-          disabled={busy}
-          spellCheck={false}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
-        />
-        <button type="submit" className="btn btn-primary" disabled={busy || !value.trim()}>
-          Set
-        </button>
-      </div>
-      {error && <span className="w-error">{error}</span>}
-    </form>
-  );
-};
+// Context handed to every widget
 
 export interface WidgetContext {
-  widgets: HomeWidgets;
-  update: (next: HomeWidgets) => void;
+  item: WidgetItem;
+  /** Merges into this widget's own settings. */
+  setConfig: (patch: Record<string, unknown>) => void;
+  note: string;
+  setNote: (text: string) => void;
   open: (url: string) => void;
   editing: boolean;
+  /** Opens this widget's settings (from an empty widget's prompt). */
+  edit: () => void;
 }
+
+const str = (v: unknown, d = '') => (typeof v === 'string' ? v : d);
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** An empty widget that needs setting up. */
+const SetupPrompt: React.FC<{ icon: React.ReactNode; title: string; text: string; ctx: WidgetContext }> = ({ icon, title, text, ctx }) => (
+  <button type="button" className="w-body w-setup-prompt" onClick={ctx.edit} disabled={ctx.editing}>
+    <div className="w-head">
+      {icon}
+      <span className="w-title">{title}</span>
+    </div>
+    <span className="w-muted">{text}</span>
+  </button>
+);
 
 // ---------------------------------------------------------------------------
 // GitHub
@@ -197,18 +212,18 @@ function streak(days: GithubContributions['days']): number {
   let n = 0;
   for (let i = days.length - 1; i >= 0; i--) {
     if (days[i].count > 0) n++;
-    else if (i === days.length - 1) continue; // today may still be empty
+    else if (i === days.length - 1) continue;
     else break;
   }
   return n;
 }
 
-const GithubWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ size, ctx }) => {
-  const user = ctx.widgets.github.user;
+const GithubWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
+  const size = ctx.item.size;
+  const user = str(ctx.item.config.user);
   const key = user ? `github:${user.toLowerCase()}` : null;
   const res = useLoaded<GithubContributions>(key, 30 * 60_000, () => window.serica?.widgetGithub?.(user));
   const weeksShown = size === 'w' ? 53 : size === 'm' ? 26 : 0;
-
   const weeks = useMemo(() => {
     if (res.state !== 'ok') return [];
     const out: (GithubContributions['days'][number] | null)[][] = [];
@@ -226,51 +241,25 @@ const GithubWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ size
     return out.slice(-weeksShown);
   }, [res, weeksShown]);
 
-  if (!user) {
-    return (
-      <div className="w-body">
-        <div className="w-head">
-          <GithubMark size={14} />
-          <span className="w-title">GitHub</span>
-        </div>
-        <InlineSetup
-          label="Your GitHub username"
-          placeholder="octocat"
-          onSubmit={(u) => ctx.update({ ...ctx.widgets, github: { user: u.replace(/^@/, '') } })}
-        />
-      </div>
-    );
-  }
-
-  const headInner = (
-    <>
+  if (!user) return <SetupPrompt icon={<GithubMark size={14} />} title="GitHub" text="Choose whose contributions to show" ctx={ctx} />;
+  const head = (
+    <div className="w-head">
       <GithubMark size={14} />
-      <button type="button" className="w-title link" onClick={() => ctx.open(`https://github.com/${user}`)}>
+      <button type="button" className="w-title link" onClick={() => ctx.open(`https://github.com/${user}`)} disabled={ctx.editing}>
         {user}
       </button>
-    </>
+      {res.state === 'ok' && size !== 's' && <span className="w-meta tnum">{res.data.total.toLocaleString()} this year</span>}
+    </div>
   );
-  const head = <div className="w-head">{headInner}</div>;
   if (res.state === 'loading') return <div className="w-body">{head}<div className="w-skeleton" /></div>;
-  if (res.state === 'error')
-    return (
-      <div className="w-body">
-        {head}
-        <p className="w-muted">{GH_ERRORS[res.error] ?? 'Could not load contributions.'}</p>
-        <button type="button" className="btn btn-quiet w-inline-btn" onClick={() => ctx.update({ ...ctx.widgets, github: { user: '' } })}>
-          Change user
-        </button>
-      </div>
-    );
-
-  const total = res.data.total;
+  if (res.state === 'error') return <div className="w-body">{head}<p className="w-muted">{GH_ERRORS[res.error] ?? 'Could not load contributions.'}</p></div>;
   if (size === 's') {
     return (
       <div className="w-body">
         {head}
-        <div className="w-big">{total.toLocaleString()}</div>
+        <div className="w-big tnum">{res.data.total.toLocaleString()}</div>
         <div className="w-muted">contributions this year</div>
-        <div className="w-foot">{streak(res.data.days)} day streak</div>
+        <div className="w-foot tnum">{streak(res.data.days)} day streak</div>
       </div>
     );
   }
@@ -278,17 +267,8 @@ const GithubWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ size
   const GAP = 3;
   return (
     <div className="w-body">
-      <div className="w-head">
-        {headInner}
-        <span className="w-meta">{total.toLocaleString()} this year</span>
-      </div>
-      <svg
-        className="gh-grid"
-        viewBox={`0 0 ${weeks.length * (CELL + GAP) - GAP} ${7 * (CELL + GAP) - GAP}`}
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-        aria-label={`${total} contributions in the last year`}
-      >
+      {head}
+      <svg className="gh-grid" viewBox={`0 0 ${weeks.length * (CELL + GAP) - GAP} ${7 * (CELL + GAP) - GAP}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${res.data.total} contributions in the last year`}>
         {weeks.map((week, w) =>
           week.map((d, i) =>
             d ? (
@@ -318,43 +298,16 @@ function describeWeather(code: number, isDay: boolean): { label: string; Icon: t
   return { label: 'Cloudy', Icon: Cloud };
 }
 
-const WeatherWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ size, ctx }) => {
-  const { lat, lon, fahrenheit, place } = ctx.widgets.weather;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const WeatherWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
+  const c = ctx.item.config;
+  const lat = num(c.lat);
+  const lon = num(c.lon);
+  const fahrenheit = c.fahrenheit === true;
+  const place = str(c.place);
+  const size = ctx.item.size;
   const key = lat !== null && lon !== null ? `weather:${lat.toFixed(2)},${lon.toFixed(2)},${fahrenheit}` : null;
-  const res = useLoaded<WeatherNow>(key, 15 * 60_000, () =>
-    lat !== null && lon !== null ? window.serica?.widgetWeather?.(lat, lon, fahrenheit) : undefined,
-  );
-  if (!key) {
-    return (
-      <div className="w-body">
-        <div className="w-head">
-          <CloudSun size={14} />
-          <span className="w-title">Weather</span>
-        </div>
-        <InlineSetup
-          label="City"
-          placeholder="London"
-          busy={busy}
-          error={error}
-          onSubmit={async (q) => {
-            setBusy(true);
-            setError(null);
-            try {
-              const found = await window.serica?.widgetGeocode?.(q);
-              if (!found) throw new Error();
-              ctx.update({ ...ctx.widgets, weather: { ...ctx.widgets.weather, place: found.name, lat: found.lat, lon: found.lon } });
-            } catch {
-              setError('No place found by that name.');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-      </div>
-    );
-  }
+  const res = useLoaded<WeatherNow>(key, 15 * 60_000, () => (lat !== null && lon !== null ? window.serica?.widgetWeather?.(lat, lon, fahrenheit) : undefined));
+  if (!key) return <SetupPrompt icon={<CloudSun size={14} />} title="Weather" text="Choose a city" ctx={ctx} />;
   if (res.state !== 'ok') {
     return (
       <div className="w-body">
@@ -372,22 +325,14 @@ const WeatherWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ siz
     <div className={`w-body weather ${size}`}>
       <div className="w-head">
         <span className="w-title">{place}</span>
-        <button
-          type="button"
-          className="w-unit"
-          title="Switch units"
-          onClick={() => ctx.update({ ...ctx.widgets, weather: { ...ctx.widgets.weather, fahrenheit: !fahrenheit } })}
-        >
-          °{fahrenheit ? 'F' : 'C'}
-        </button>
       </div>
       <div className="weather-main">
-        <span className="w-big">{Math.round(res.data.temperature)}°</span>
+        <span className="w-big tnum">{Math.round(res.data.temperature)}°</span>
         <Icon size={size === 's' ? 22 : 30} strokeWidth={1.5} aria-hidden="true" />
       </div>
       <div className="w-foot">
         <span>{label}</span>
-        {size !== 's' && range && <span className="w-muted">{range}</span>}
+        {size !== 's' && range && <span className="w-muted tnum">{range}</span>}
       </div>
     </div>
   );
@@ -396,28 +341,30 @@ const WeatherWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ siz
 // ---------------------------------------------------------------------------
 // Notes
 
-const NotesWidget: React.FC<{ id: string; ctx: WidgetContext }> = ({ id, ctx }) => {
-  const text = ctx.widgets.notes[id] ?? '';
+export const NOTE_TINTS: { id: string; label: string; color: string }[] = [
+  { id: 'plain', label: 'Plain', color: 'transparent' },
+  { id: 'butter', label: 'Butter', color: '#F2D675' },
+  { id: 'rose', label: 'Rose', color: '#EBA3B0' },
+  { id: 'sage', label: 'Sage', color: '#A8C7A0' },
+  { id: 'sky', label: 'Sky', color: '#9EC3E6' },
+];
+
+const NotesWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
+  const text = ctx.note;
   const [draft, setDraft] = useState(text);
   const timer = useRef<number | null>(null);
-  const editing = useRef(false);
+  const focused = useRef(false);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
   useEffect(() => {
-    if (!editing.current) setDraft(text);
+    if (!focused.current) setDraft(text);
   }, [text]);
-  const save = (next: string) => {
-    const c = ctxRef.current;
-    c.update({ ...c.widgets, notes: { ...c.widgets.notes, [id]: next } });
-  };
-  useEffect(
-    () => () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    },
-    [],
-  );
+  useEffect(() => () => {
+    if (timer.current) window.clearTimeout(timer.current);
+  }, []);
+  const tint = NOTE_TINTS.find((t) => t.id === ctx.item.config.tint) ?? NOTE_TINTS[0];
   return (
-    <div className="w-body">
+    <div className={`w-body notes tint-${tint.id}`} style={{ '--note-tint': tint.color } as React.CSSProperties}>
       <div className="w-head">
         <StickyNote size={14} />
         <span className="w-title">Notes</span>
@@ -429,17 +376,17 @@ const NotesWidget: React.FC<{ id: string; ctx: WidgetContext }> = ({ id, ctx }) 
         maxLength={4000}
         spellCheck
         disabled={ctx.editing}
-        onFocus={() => (editing.current = true)}
+        onFocus={() => (focused.current = true)}
         onBlur={() => {
-          editing.current = false;
+          focused.current = false;
           if (timer.current) window.clearTimeout(timer.current);
-          if (draft !== text) save(draft);
+          if (draft !== text) ctxRef.current.setNote(draft);
         }}
         onChange={(e) => {
           setDraft(e.target.value);
           if (timer.current) window.clearTimeout(timer.current);
           const v = e.target.value;
-          timer.current = window.setTimeout(() => save(v), 500);
+          timer.current = window.setTimeout(() => ctxRef.current.setNote(v), 500);
         }}
         onKeyDown={(e) => e.stopPropagation()}
       />
@@ -448,7 +395,7 @@ const NotesWidget: React.FC<{ id: string; ctx: WidgetContext }> = ({ id, ctx }) 
 };
 
 // ---------------------------------------------------------------------------
-// Calendar (local)
+// Calendar
 
 function useToday(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -460,29 +407,31 @@ function useToday(): Date {
   return now;
 }
 
-const CalendarWidget: React.FC<{ size: WidgetSize }> = ({ size }) => {
+const CalendarWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
   const today = useToday();
-  if (size === 's') {
+  const weekStart = ctx.item.config.weekStart === 0 ? 0 : 1;
+  if (ctx.item.size === 's') {
     return (
       <div className="w-body cal-small">
         <span className="cal-weekday">{today.toLocaleDateString(undefined, { weekday: 'long' })}</span>
-        <span className="w-big cal-day">{today.getDate()}</span>
+        <span className="w-big cal-day tnum">{today.getDate()}</span>
         <span className="w-muted">{today.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
       </div>
     );
   }
   const first = new Date(today.getFullYear(), today.getMonth(), 1);
   const daysIn = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const lead = (first.getDay() - weekStart + 7) % 7;
   const cells: (number | null)[] = [];
-  for (let i = 0; i < first.getDay(); i++) cells.push(null);
+  for (let i = 0; i < lead; i++) cells.push(null);
   for (let d = 1; d <= daysIn; d++) cells.push(d);
-  const names = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'narrow' }));
+  const names = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + ((i + weekStart) % 7)).toLocaleDateString(undefined, { weekday: 'narrow' }));
   return (
     <div className="w-body">
       <div className="w-head">
         <span className="w-title">{today.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
       </div>
-      <div className="cal-grid" role="grid">
+      <div className="cal-grid tnum" role="grid">
         {names.map((n, i) => (
           <span key={`h${i}`} className="cal-name">
             {n}
@@ -513,13 +462,13 @@ function topSites(entries: HistoryEntry[], n: number): { host: string; url: stri
       continue;
     }
     const cur = by.get(host);
-    if (cur) cur.count++;
-    else by.set(host, { host, url: `https://${host}`, title: e.title || host, count: 1 });
+    if (cur) cur.count += e.visitCount ?? 1;
+    else by.set(host, { host, url: `https://${host}`, title: e.title || host, count: e.visitCount ?? 1 });
   }
   return [...by.values()].sort((a, b) => b.count - a.count).slice(0, n);
 }
 
-const TopSitesWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ size, ctx }) => {
+const TopSitesWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
   const [sites, setSites] = useState<ReturnType<typeof topSites> | null>(null);
   useEffect(() => {
     let alive = true;
@@ -530,7 +479,8 @@ const TopSitesWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ si
       alive = false;
     };
   }, []);
-  const shown = (sites ?? []).slice(0, size === 'l' ? 12 : 4);
+  const count = ctx.item.size === 'l' ? Math.max(4, Math.min(12, num(ctx.item.config.count) ?? 8)) : 4;
+  const shown = (sites ?? []).slice(0, count);
   return (
     <div className="w-body">
       <div className="w-head">
@@ -540,7 +490,7 @@ const TopSitesWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ si
       {sites && sites.length === 0 ? (
         <p className="w-muted">Sites you visit often show up here.</p>
       ) : (
-        <div className={`topsites ${size}`}>
+        <div className={`topsites ${ctx.item.size}`}>
           {shown.map((s) => (
             <button key={s.host} type="button" className="topsite" onClick={() => ctx.open(s.url)} title={s.title} disabled={ctx.editing}>
               <span className="topsite-icon">
@@ -557,21 +507,174 @@ const TopSitesWidget: React.FC<{ size: WidgetSize; ctx: WidgetContext }> = ({ si
 };
 
 // ---------------------------------------------------------------------------
+// World clock
+
+export const WORLD_ZONES: { zone: string; label: string }[] = [
+  { zone: 'America/Los_Angeles', label: 'Los Angeles' },
+  { zone: 'America/Denver', label: 'Denver' },
+  { zone: 'America/Chicago', label: 'Chicago' },
+  { zone: 'America/New_York', label: 'New York' },
+  { zone: 'America/Toronto', label: 'Toronto' },
+  { zone: 'America/Mexico_City', label: 'Mexico City' },
+  { zone: 'America/Sao_Paulo', label: 'São Paulo' },
+  { zone: 'America/Buenos_Aires', label: 'Buenos Aires' },
+  { zone: 'Europe/London', label: 'London' },
+  { zone: 'Europe/Dublin', label: 'Dublin' },
+  { zone: 'Europe/Lisbon', label: 'Lisbon' },
+  { zone: 'Europe/Paris', label: 'Paris' },
+  { zone: 'Europe/Berlin', label: 'Berlin' },
+  { zone: 'Europe/Madrid', label: 'Madrid' },
+  { zone: 'Europe/Rome', label: 'Rome' },
+  { zone: 'Europe/Amsterdam', label: 'Amsterdam' },
+  { zone: 'Europe/Stockholm', label: 'Stockholm' },
+  { zone: 'Europe/Athens', label: 'Athens' },
+  { zone: 'Europe/Istanbul', label: 'Istanbul' },
+  { zone: 'Europe/Moscow', label: 'Moscow' },
+  { zone: 'Africa/Cairo', label: 'Cairo' },
+  { zone: 'Africa/Lagos', label: 'Lagos' },
+  { zone: 'Africa/Nairobi', label: 'Nairobi' },
+  { zone: 'Africa/Johannesburg', label: 'Johannesburg' },
+  { zone: 'Asia/Dubai', label: 'Dubai' },
+  { zone: 'Asia/Karachi', label: 'Karachi' },
+  { zone: 'Asia/Kolkata', label: 'Mumbai · Delhi' },
+  { zone: 'Asia/Dhaka', label: 'Dhaka' },
+  { zone: 'Asia/Bangkok', label: 'Bangkok' },
+  { zone: 'Asia/Jakarta', label: 'Jakarta' },
+  { zone: 'Asia/Singapore', label: 'Singapore' },
+  { zone: 'Asia/Hong_Kong', label: 'Hong Kong' },
+  { zone: 'Asia/Shanghai', label: 'Shanghai' },
+  { zone: 'Asia/Taipei', label: 'Taipei' },
+  { zone: 'Asia/Seoul', label: 'Seoul' },
+  { zone: 'Asia/Tokyo', label: 'Tokyo' },
+  { zone: 'Australia/Perth', label: 'Perth' },
+  { zone: 'Australia/Sydney', label: 'Sydney' },
+  { zone: 'Pacific/Auckland', label: 'Auckland' },
+  { zone: 'Pacific/Honolulu', label: 'Honolulu' },
+];
+
+function useMinuteTick(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    let t = 0;
+    const schedule = () => {
+      t = window.setTimeout(() => {
+        setNow(new Date());
+        schedule();
+      }, 60_000 - (Date.now() % 60_000) + 50);
+    };
+    schedule();
+    return () => window.clearTimeout(t);
+  }, []);
+  return now;
+}
+
+const WorldClockWidget: React.FC<{ ctx: WidgetContext; hour12: boolean }> = ({ ctx, hour12 }) => {
+  const now = useMinuteTick();
+  const zone = str(ctx.item.config.zone, 'Europe/London');
+  const label = str(ctx.item.config.label) || zone.split('/').pop()!.replace(/_/g, ' ');
+  let time = '';
+  let day = '';
+  let offset = '';
+  try {
+    time = new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12 }).format(now);
+    day = new Intl.DateTimeFormat(undefined, { timeZone: zone, weekday: 'short' }).format(now);
+    const there = new Date(now.toLocaleString('en-US', { timeZone: zone }));
+    const here = new Date(now.toLocaleString('en-US'));
+    const diff = Math.round((there.getTime() - here.getTime()) / 3_600_000 * 2) / 2;
+    offset = diff === 0 ? 'Same time' : `${diff > 0 ? '+' : '−'}${Math.abs(diff)}h`;
+  } catch {
+    time = '--:--';
+  }
+  return (
+    <div className={`w-body worldclock ${ctx.item.size}`}>
+      <div className="w-head">
+        <Clock3 size={14} />
+        <span className="w-title">{label}</span>
+      </div>
+      <span className="w-big tnum">{time}</span>
+      <div className="w-foot">
+        <span>{day}</span>
+        <span className="w-muted tnum">{offset}</span>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Focus
+
+const FocusWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
+  const view = useFocusView();
+  const [error, setError] = useState<string | null>(null);
+  const active = view?.active[0];
+  useTicker(!!active && active.remainingMs !== null);
+  const minutes = num(ctx.item.config.minutes) ?? 25;
+  const listId = str(ctx.item.config.listId);
+  const list = view?.blocks.find((b) => b.id === listId) ?? view?.blocks[0];
+  if (active) {
+    const name = view?.blocks.find((b) => b.id === active.blockId)?.name ?? 'Focus';
+    const left = remainingNow(active.remainingMs);
+    const total = active.totalMs ?? null;
+    const p = total && left !== null ? 1 - left / total : null;
+    return (
+      <div className={`w-body focusw on ${ctx.item.size}`}>
+        <div className="w-head">
+          <Target size={14} />
+          <span className="w-title">{name}</span>
+          {active.locked && <span className="w-meta">Locked</span>}
+        </div>
+        <span className="w-big tnum">{formatRemaining(left)}</span>
+        {p !== null && (
+          <div className="focusw-bar" aria-hidden="true">
+            <span style={{ transform: `scaleX(${Math.max(0, Math.min(1, p))})` }} />
+          </div>
+        )}
+        <div className="w-foot">
+          <span className="w-muted">{active.source === 'schedule' ? 'Scheduled' : 'left'}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`w-body focusw ${ctx.item.size}`}>
+      <div className="w-head">
+        <Target size={14} />
+        <span className="w-title">Focus</span>
+      </div>
+      {list ? (
+        <>
+          <span className="w-muted">{list.name}</span>
+          <button
+            type="button"
+            className="btn btn-primary focusw-start"
+            disabled={ctx.editing}
+            onClick={() => {
+              setError(null);
+              window.serica?.focusStart?.(list.id, minutes, false).catch((e: unknown) => setError(focusError(e)));
+            }}
+          >
+            Focus for {minutes} min
+          </button>
+          {error && <span className="w-error">{error}</span>}
+        </>
+      ) : (
+        <span className="w-muted">Make a Focus list in Settings › Focus first.</span>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // App widgets
 
-const AppWidget: React.FC<{ kind: WidgetKind; size: WidgetSize; ctx: WidgetContext }> = ({ kind, size, ctx }) => {
-  const def = appWidget(kind)!;
+const AppWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
+  const def = appWidget(ctx.item.kind)!;
+  const size = ctx.item.size;
   const [q, setQ] = useState('');
   const logo = <img className="app-logo" src={appIcon(def.domain)} alt="" width={size === 's' ? 28 : 18} height={size === 's' ? 28 : 18} />;
   if (size === 's') {
     return (
-      <button
-        type="button"
-        className="w-body app-small"
-        style={{ '--app-color': def.color } as React.CSSProperties}
-        onClick={() => ctx.open(def.actions[0]?.url ?? def.home)}
-        disabled={ctx.editing}
-      >
+      <button type="button" className="w-body app-small" style={{ '--app-color': def.color } as React.CSSProperties} onClick={() => ctx.open(def.actions[0]?.url ?? def.home)} disabled={ctx.editing}>
         {logo}
         <span className="w-title">{def.name}</span>
         <span className="w-muted">{def.actions[0]?.label ?? 'Open'}</span>
@@ -597,14 +700,7 @@ const AppWidget: React.FC<{ kind: WidgetKind; size: WidgetSize; ctx: WidgetConte
             setQ('');
           }}
         >
-          <input
-            className="w-input"
-            value={q}
-            placeholder={def.placeholder}
-            disabled={ctx.editing}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-          />
+          <input className="w-input" value={q} placeholder={def.placeholder} disabled={ctx.editing} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
         </form>
       ) : null}
       <div className="app-actions">
@@ -620,19 +716,23 @@ const AppWidget: React.FC<{ kind: WidgetKind; size: WidgetSize; ctx: WidgetConte
 
 // ---------------------------------------------------------------------------
 
-export const WidgetView: React.FC<{ item: WidgetItem; ctx: WidgetContext }> = ({ item, ctx }) => {
-  switch (item.kind) {
+export const WidgetView: React.FC<{ ctx: WidgetContext; hour12: boolean }> = ({ ctx, hour12 }) => {
+  switch (ctx.item.kind) {
     case 'github':
-      return <GithubWidget size={item.size} ctx={ctx} />;
+      return <GithubWidget ctx={ctx} />;
     case 'weather':
-      return <WeatherWidget size={item.size} ctx={ctx} />;
+      return <WeatherWidget ctx={ctx} />;
     case 'notes':
-      return <NotesWidget id={item.id} ctx={ctx} />;
+      return <NotesWidget ctx={ctx} />;
     case 'calendar':
-      return <CalendarWidget size={item.size} />;
+      return <CalendarWidget ctx={ctx} />;
     case 'topsites':
-      return <TopSitesWidget size={item.size} ctx={ctx} />;
+      return <TopSitesWidget ctx={ctx} />;
+    case 'worldclock':
+      return <WorldClockWidget ctx={ctx} hour12={hour12} />;
+    case 'focus':
+      return <FocusWidget ctx={ctx} />;
     default:
-      return appWidget(item.kind) ? <AppWidget kind={item.kind} size={item.size} ctx={ctx} /> : null;
+      return appWidget(ctx.item.kind) ? <AppWidget ctx={ctx} /> : null;
   }
 };

@@ -1,77 +1,55 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { HelpCircle, Minus, Plus, X } from 'lucide-react';
-import type { HomeWidgets, WidgetItem, WidgetKind, WidgetSize } from '../../shared/settings';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { HelpCircle, Minus, Plus, SlidersHorizontal, X } from 'lucide-react';
+import { WIDGET_COLS, WIDGET_SPAN, firstFreeCell, type HomeWidgets, type WidgetItem, type WidgetKind, type WidgetSize } from '../../shared/settings';
 import { APP_KINDS, BUILTIN_KINDS, SIZE_LABEL, WidgetView, widgetMeta, type WidgetContext } from './widgets';
+import { WidgetEditor } from './WidgetEditor';
 import { GuideTour, type GuideStep } from '../GuideTour';
+import { displayLayout, resolveMove, spanOf, withCells, type Placed } from './layout';
+import { usePresence } from '../../hooks/usePresence';
 
 const WIDGET_GUIDE: GuideStep[] = [
-  {
-    target: '.wboard-add',
-    title: 'Add widgets',
-    body: 'Pick from Serica’s widgets (GitHub, weather, notes, calendar, top sites) and app widgets for Claude, Notion, Gmail and more.',
-  },
-  {
-    target: '.wtile',
-    title: 'Move them around',
-    body: 'While editing, drag a widget onto another to change the order. The others make room as you go.',
-  },
-  {
-    target: '.wtile .wsize',
-    title: 'Change the size',
-    body: 'Small, Medium, Large or Wide: each widget shows more as it gets bigger. Remove one with the minus at its corner.',
-  },
-  {
-    target: '.wboard-done',
-    title: 'Done',
-    body: 'Click Done when you are finished. Edit again any time from Customize, at the bottom right of the new tab.',
-  },
+  { target: '.wboard-add-btn', title: 'Add widgets', body: 'Weather, a world clock, Focus, notes, your calendar, top sites, GitHub, and widgets for apps like Claude, Notion and Gmail.' },
+  { target: '.wtile', title: 'Drag to place', body: 'Drag a widget anywhere on the grid. Widgets in the way slide aside. Arrow keys move the selected one a cell at a time.' },
+  { target: '.wtile .wtile-edit', title: 'Make it yours', body: 'Open a widget’s settings to change its size and what it shows: the city, the time zone, the paper colour…' },
+  { target: '.wboard-done', title: 'Done', body: 'Click Done when you’re finished. Press and hold any widget to edit again.' },
 ];
 
-/** Cells each size takes: [columns, rows]. */
-const SPAN: Record<WidgetSize, [number, number]> = { s: [2, 2], m: [4, 2], l: [4, 4], w: [8, 2] };
-/** At most this many widgets, whatever the window size: more gets busy. */
-export const MAX_WIDGETS = 6;
+const GAP = 14;
+const LONG_PRESS_MS = 450;
 
-/**
- * Which items fit a grid of `cols` x `rows` cells, placed in order the way
- * the CSS grid places them (row by row, first free spot, filling gaps).
- */
-function fitting(items: { id: string; size: WidgetSize }[], cols: number, rows: number): Set<string> {
-  const used: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
-  const fits = new Set<string>();
-  for (const it of items) {
-    const w = Math.min(SPAN[it.size][0], cols);
-    const h = SPAN[it.size][1];
-    let placed = false;
-    for (let r = 0; r + h <= rows && !placed; r++) {
-      for (let c = 0; c + w <= cols && !placed; c++) {
-        let free = true;
-        for (let y = r; y < r + h && free; y++) for (let x = c; x < c + w && free; x++) if (used[y][x]) free = false;
-        if (!free) continue;
-        for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) used[y][x] = true;
-        placed = true;
-      }
-    }
-    if (placed) fits.add(it.id);
-  }
-  return fits;
+interface Geometry {
+  cell: number;
+  rows: number;
+  /** Left of the grid inside the board (it is centred). */
+  left: number;
+  width: number;
 }
 
 interface Drag {
   id: string;
   pointerId: number;
-  grabX: number;
-  grabY: number;
-  startX: number;
-  startY: number;
+  /** Pointer position at pointer-down (client px). */
+  originX: number;
+  originY: number;
+  /** The tile's grid position (board px) at pointer-down. */
+  startPx: number;
+  startPy: number;
+  w: number;
+  h: number;
   moved: boolean;
+  target: { x: number; y: number } | null;
 }
 
+const cellPx = (n: number, cell: number) => n * (cell + GAP);
+const spanPx = (n: number, cell: number) => n * cell + (n - 1) * GAP;
+
 /**
- * The new tab's widgets: a grid in which every widget takes a fixed number of
- * cells for its size, in the order the user arranged them. In edit mode the
- * tiles can be dragged to a new place (the others glide out of the way),
- * resized, removed, or added from the gallery.
+ * The new tab's widgets on an explicit grid of WIDGET_COLS columns. Every
+ * widget keeps the cell it was put in. In edit mode widgets are dragged with
+ * the pointer captured: the tile follows the pointer's offset from where it
+ * was grabbed and stays inside the grid; the cell under it is the target,
+ * and widgets in the way slide to the nearest free cells. Changes are saved
+ * when dropped.
  */
 export const WidgetBoard: React.FC<{
   widgets: HomeWidgets;
@@ -79,72 +57,104 @@ export const WidgetBoard: React.FC<{
   onOpen: (url: string) => void;
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
+  galleryOpen: boolean;
+  onGalleryOpenChange: (open: boolean) => void;
   scale: number;
-}> = ({ widgets, onUpdate, onOpen, editing, onEditingChange, scale }) => {
-  const [order, setOrder] = useState<string[]>(() => widgets.items.map((i) => i.id));
-  const [galleryOpen, setGalleryOpen] = useState(false);
+}> = ({ widgets, onUpdate, onOpen, editing, onEditingChange, galleryOpen, onGalleryOpenChange, scale }) => {
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [geo, setGeo] = useState<Geometry>({ cell: 72, rows: 0, left: 0, width: 0 });
   const [guide, setGuide] = useState(false);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<Drag | null>(null);
+  const [editorId, setEditorId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Placed[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
-  const rects = useRef(new Map<string, DOMRect>());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const drag = useRef<Drag | null>(null);
+  const press = useRef<{ timer: number; x: number; y: number; id: string; pointerId: number; el: HTMLElement } | null>(null);
+  const tileEls = useRef(new Map<string, HTMLElement>());
 
-  // Follow saved changes, except while a drag is rearranging the tiles.
-  useEffect(() => {
-    if (!drag.current) setOrder(widgets.items.map((i) => i.id));
-  }, [widgets.items]);
-
-  const byId = new Map(widgets.items.map((i) => [i.id, i]));
-  const allItems = order.map((id) => byId.get(id)).filter((i): i is WidgetItem => !!i);
-
-  // The new tab never scrolls: widgets get the rows that fit between the
-  // search bar and the bottom of the window, and no more.
-  const [room, setRoom] = useState<{ cols: number; rows: number }>({ cols: 8, rows: 2 });
+  // ---- Geometry, measured only when the board's size changes.
   useLayoutEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
     const measure = () => {
-      const grid = gridRef.current;
-      if (!grid) return;
-      const cs = getComputedStyle(grid);
-      const cell = parseFloat(cs.gridAutoRows) || 72;
-      const gap = parseFloat(cs.rowGap) || 14;
-      const top = grid.getBoundingClientRect().top;
-      const bottomReserve = 64; // Customize and the edit bar
-      const rows = Math.max(0, Math.floor((window.innerHeight - top - bottomReserve + gap) / (cell + gap)));
-      const cols = Math.max(2, Math.min(8, Math.floor((grid.clientWidth + gap) / (cell + gap))));
-      setRoom((r) => (r.rows === rows && r.cols === cols ? r : { cols, rows }));
+      const W = el.clientWidth;
+      const H = el.clientHeight;
+      const cell = Math.max(48, Math.min(Math.round(84 * scale), Math.floor((W - (WIDGET_COLS - 1) * GAP) / WIDGET_COLS)));
+      const width = spanPx(WIDGET_COLS, cell);
+      const rows = Math.max(0, Math.floor((H + GAP) / (cell + GAP)));
+      setGeo((g) => (g.cell === cell && g.rows === rows && g.width === width && g.left === Math.round((W - width) / 2) ? g : { cell, rows, width, left: Math.round((W - width) / 2) }));
     };
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [scale, widgets.clock, widgets.search]);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scale]);
 
-  const shownIds = fitting(allItems.slice(0, MAX_WIDGETS), room.cols, room.rows);
-  const items = allItems.filter((i) => shownIds.has(i.id));
-  const hiddenCount = allItems.length - items.length;
-  /** Whether everything in `list` (shown widgets plus a new or resized one) fits. */
-  const fitsWith = (list: { id: string; size: WidgetSize }[]) =>
-    list.length <= MAX_WIDGETS && fitting(list, room.cols, room.rows).size === list.length;
-  /** The size a new widget of `kind` is added at: its default, else the smallest that fits. */
+  const items = widgets.items;
+  const display = useMemo(() => displayLayout(items, WIDGET_COLS, geo.rows), [items, geo.rows]);
+  const cells: Placed[] = preview ?? display.placed;
+  const cellOf = useMemo(() => new Map(cells.map((c) => [c.id, c])), [cells]);
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+
+  // ---- Saving
+  const save = useCallback((nextItems: WidgetItem[], extra?: Partial<HomeWidgets>) => onUpdate({ ...widgets, ...extra, items: nextItems }), [onUpdate, widgets]);
+  const commitCells = useCallback((next: Placed[]) => save(withCells(items, next)), [items, save]);
+
+  const setConfig = useCallback(
+    (id: string, patch: Record<string, unknown>) => save(items.map((i) => (i.id === id ? { ...i, config: { ...i.config, ...patch } } : i))),
+    [items, save],
+  );
+
+  const tryPlace = (id: string, x: number, y: number, size: WidgetSize) => {
+    const { w, h } = spanOf(size);
+    return resolveMove(display.placed, id, { x, y, w, h }, WIDGET_COLS, geo.rows);
+  };
+
+  const resize = (id: string, size: WidgetSize) => {
+    const c = cellOf.get(id);
+    if (!c) return;
+    const next = tryPlace(id, c.x, c.y, size);
+    if (!next) return;
+    save(withCells(items, next).map((i) => (i.id === id ? { ...i, size } : i)));
+  };
+  const canResize = (id: string, size: WidgetSize) => {
+    const c = cellOf.get(id);
+    return !!c && !!tryPlace(id, c.x, c.y, size);
+  };
+  const remove = (id: string) => {
+    const notes = { ...widgets.notes };
+    delete notes[id];
+    setEditorId(null);
+    save(items.filter((i) => i.id !== id), { notes });
+  };
+  const freeCellFor = (size: WidgetSize) => {
+    const [w, h] = WIDGET_SPAN[size];
+    return firstFreeCell(display.placed, w, h, WIDGET_COLS, geo.rows);
+  };
   const addSizeFor = (kind: WidgetKind): WidgetSize | null => {
     const meta = widgetMeta(kind);
     if (!meta) return null;
-    const area = (x: WidgetSize) => SPAN[x][0] * SPAN[x][1];
-    const tries = [meta.defaultSize, ...meta.sizes.filter((x) => x !== meta.defaultSize).sort((a, b) => area(a) - area(b))];
-    return tries.find((size) => fitsWith([...items, { id: '__new', size }])) ?? null;
+    const area = (s: WidgetSize) => WIDGET_SPAN[s][0] * WIDGET_SPAN[s][1];
+    const tries = [meta.defaultSize, ...meta.sizes.filter((s) => s !== meta.defaultSize).sort((a, b) => area(a) - area(b))];
+    return tries.find((s) => freeCellFor(s) !== null) ?? null;
   };
-  const roomForAddTile = editing && fitsWith([...items, { id: '__add', size: 's' }]);
+  const add = (kind: WidgetKind) => {
+    const size = addSizeFor(kind);
+    const meta = widgetMeta(kind);
+    if (!size || !meta) return;
+    const pos = freeCellFor(size)!;
+    const id = `${kind.replace(':', '-')}-${Date.now().toString(36)}`;
+    save([...items, { id, kind, size, x: pos.x, y: pos.y, config: meta.defaultConfig() }]);
+    onGalleryOpenChange(false);
+    setSelectedId(id);
+    if (meta.configurable) setEditorId(id);
+  };
+  const canAddAny = items.length < 24 && [...BUILTIN_KINDS, ...APP_KINDS].some((k) => addSizeFor(k) !== null);
 
-  const ctx: WidgetContext = { widgets, update: onUpdate, open: onOpen, editing };
-
-  const save = useCallback(
-    (nextItems: WidgetItem[]) => onUpdate({ ...widgets, items: nextItems }),
-    [onUpdate, widgets],
-  );
-
-  // First time in edit mode, the guide explains it.
+  // ---- Guide
   useEffect(() => {
-    if (editing && !widgets.guideSeen) setGuide(true);
-  }, [editing, widgets.guideSeen]);
+    if (editing && !widgets.guideSeen && items.length > 0) setGuide(true);
+  }, [editing, widgets.guideSeen, items.length]);
   useEffect(() => {
     const onGuide = (e: Event) => {
       if ((e as CustomEvent).detail !== 'widgets') return;
@@ -159,206 +169,223 @@ export const WidgetBoard: React.FC<{
     if (!widgets.guideSeen) onUpdate({ ...widgets, guideSeen: true });
   };
 
-  // Escape leaves edit mode (the gallery and guide handle their own Escape).
+  // Escape leaves edit mode (sheets and the guide handle their own).
   useEffect(() => {
-    if (!editing || galleryOpen || guide) return;
+    if (!editing || galleryOpen || guide || editorId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onEditingChange(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editing, galleryOpen, guide, onEditingChange]);
+  }, [editing, galleryOpen, guide, editorId, onEditingChange]);
+  useEffect(() => {
+    if (!editing) setSelectedId(null);
+  }, [editing]);
 
-  // ---- Reflow animation (FLIP): tiles glide from where they were.
-  const captureRects = () => {
-    rects.current.clear();
-    gridRef.current?.querySelectorAll<HTMLElement>('[data-widget-id]').forEach((el) => {
-      rects.current.set(el.dataset.widgetId!, el.getBoundingClientRect());
-    });
-  };
-  useLayoutEffect(() => {
-    if (rects.current.size === 0) return;
-    const grid = gridRef.current;
-    if (!grid) return;
-    grid.querySelectorAll<HTMLElement>('[data-widget-id]').forEach((el) => {
-      const id = el.dataset.widgetId!;
-      const before = rects.current.get(id);
-      if (!before || id === drag.current?.id) return;
-      const after = el.getBoundingClientRect();
-      const dx = before.left - after.left;
-      const dy = before.top - after.top;
-      if (!dx && !dy) return;
-      el.style.transition = 'none';
-      el.style.transform = `translate(${dx}px, ${dy}px)`;
-      requestAnimationFrame(() => {
-        el.style.transition = '';
-        el.style.transform = '';
-      });
-    });
-    rects.current.clear();
-  }, [order, widgets.items]);
-
-  // ---- Drag to rearrange (edit mode)
-  const placeDragged = (el: HTMLElement, x: number, y: number) => {
-    const g = gridRef.current!.getBoundingClientRect();
-    const dx = x - g.left - drag.current!.grabX - el.offsetLeft;
-    const dy = y - g.top - drag.current!.grabY - el.offsetTop;
-    el.style.transform = `translate(${dx}px, ${dy}px) scale(1.03)`;
+  // ---- Dragging
+  const boardRect = useRef<DOMRect | null>(null);
+  const beginDrag = (id: string, pointerId: number, x: number, y: number, el: HTMLElement) => {
+    const c = cellOf.get(id);
+    if (!c) return;
+    boardRect.current = boardRef.current!.getBoundingClientRect();
+    drag.current = { id, pointerId, originX: x, originY: y, startPx: cellPx(c.x, geo.cell), startPy: cellPx(c.y, geo.cell), w: c.w, h: c.h, moved: false, target: { x: c.x, y: c.y } };
+    try {
+      el.setPointerCapture(pointerId);
+    } catch {
+      // The pointer is already gone.
+    }
   };
 
-  const onPointerDown = (e: React.PointerEvent<HTMLElement>, id: string) => {
-    if (!editing || e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('button, input, textarea, a, select')) return;
+  const onTilePointerDown = (e: React.PointerEvent<HTMLElement>, id: string) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button, input, textarea, a, select, .wtile-chrome')) return;
     const el = e.currentTarget;
-    const r = el.getBoundingClientRect();
-    drag.current = { id, pointerId: e.pointerId, grabX: e.clientX - r.left, grabY: e.clientY - r.top, startX: e.clientX, startY: e.clientY, moved: false };
-    el.setPointerCapture(e.pointerId);
+    if (editing) {
+      setSelectedId(id);
+      beginDrag(id, e.pointerId, e.clientX, e.clientY, el);
+      return;
+    }
+    // Press and hold a widget to start editing (and dragging) it.
+    const timer = window.setTimeout(() => {
+      const p = press.current;
+      press.current = null;
+      if (!p) return;
+      onEditingChange(true);
+      setSelectedId(p.id);
+      beginDrag(p.id, p.pointerId, p.x, p.y, p.el);
+    }, LONG_PRESS_MS);
+    press.current = { timer, x: e.clientX, y: e.clientY, id, pointerId: e.pointerId, el };
   };
 
-  const onPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+  const onTilePointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    const p = press.current;
+    if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6) {
+      window.clearTimeout(p.timer);
+      press.current = null;
+    }
     const d = drag.current;
     if (!d || e.pointerId !== d.pointerId) return;
-    const el = e.currentTarget;
+    const dx = e.clientX - d.originX;
+    const dy = e.clientY - d.originY;
     if (!d.moved) {
-      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 4) return;
+      if (Math.hypot(dx, dy) < 4) return;
       d.moved = true;
       setDragId(d.id);
     }
-    placeDragged(el, e.clientX, e.clientY);
-    // The tile under the pointer (the dragged one ignores the pointer).
-    const under = document
-      .elementsFromPoint(e.clientX, e.clientY)
-      .map((n) => (n as HTMLElement).closest<HTMLElement>('[data-widget-id]'))
-      .find((n) => n && n.dataset.widgetId !== d.id);
-    if (!under) return;
-    const targetId = under.dataset.widgetId!;
-    const r = under.getBoundingClientRect();
-    const after = e.clientX > r.left + r.width / 2 || e.clientY > r.top + r.height * 0.75;
-    setOrder((cur) => {
-      const without = cur.filter((x) => x !== d.id);
-      const at = without.indexOf(targetId) + (after ? 1 : 0);
-      const next = [...without.slice(0, at), d.id, ...without.slice(at)];
-      if (next.join() === cur.join()) return cur;
-      captureRects();
-      return next;
-    });
-    requestAnimationFrame(() => {
-      if (drag.current) placeDragged(el, e.clientX, e.clientY);
-    });
-  };
-
-  const endDrag = (e: React.PointerEvent<HTMLElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.pointerId) return;
-    drag.current = null;
-    setDragId(null);
-    const el = e.currentTarget;
-    // Glide into its slot.
-    el.style.transform = '';
-    if (d.moved) {
-      const next = order.map((id) => byId.get(id)).filter((i): i is WidgetItem => !!i);
-      if (next.map((i) => i.id).join() !== widgets.items.map((i) => i.id).join()) save(next);
+    // Relative to the pointer-down origin, inside the grid's bounds.
+    const maxX = spanPx(WIDGET_COLS, geo.cell) - spanPx(d.w, geo.cell);
+    const maxY = Math.max(0, cellPx(geo.rows, geo.cell) - GAP - spanPx(d.h, geo.cell));
+    const px = Math.max(0, Math.min(maxX, d.startPx + dx));
+    const py = Math.max(0, Math.min(maxY, d.startPy + dy));
+    const el = tileEls.current.get(d.id);
+    if (el) el.style.transform = `translate3d(${px}px, ${py}px, 0) scale(1.03)`;
+    const tx = Math.max(0, Math.min(WIDGET_COLS - d.w, Math.round(px / (geo.cell + GAP))));
+    const ty = Math.max(0, Math.min(geo.rows - d.h, Math.round(py / (geo.cell + GAP))));
+    if (d.target && d.target.x === tx && d.target.y === ty) return;
+    const next = resolveMove(display.placed, d.id, { x: tx, y: ty, w: d.w, h: d.h }, WIDGET_COLS, geo.rows);
+    if (next) {
+      d.target = { x: tx, y: ty };
+      setPreview(next);
     }
   };
 
-  const resize = (id: string, size: WidgetSize) => {
-    captureRects();
-    save(widgets.items.map((i) => (i.id === id ? { ...i, size } : i)));
+  const endDrag = (e: React.PointerEvent<HTMLElement>) => {
+    const p = press.current;
+    if (p) {
+      window.clearTimeout(p.timer);
+      press.current = null;
+    }
+    const d = drag.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    drag.current = null;
+    const el = tileEls.current.get(d.id);
+    // The tile glides from the pointer into its cell (transform set by render).
+    if (el) el.style.transform = '';
+    setDragId(null);
+    if (d.moved && preview) commitCells(preview);
+    setPreview(null);
   };
-  const remove = (id: string) => {
-    captureRects();
-    const notes = { ...widgets.notes };
-    delete notes[id];
-    onUpdate({ ...widgets, notes, items: widgets.items.filter((i) => i.id !== id) });
-  };
-  const add = (kind: WidgetKind) => {
-    const size = addSizeFor(kind);
-    if (!size) return;
-    captureRects();
-    save([...widgets.items, { id: `${kind.replace(':', '-')}-${Date.now().toString(36)}`, kind, size }]);
-    setGalleryOpen(false);
-  };
-  const canAddAny = items.length < MAX_WIDGETS && [...BUILTIN_KINDS, ...APP_KINDS].some((k) => addSizeFor(k) !== null);
 
-  if (!editing && items.length === 0) return null;
+  // Keyboard: arrows move the selected widget a cell; Enter opens its settings.
+  const onTileKeyDown = (e: React.KeyboardEvent, id: string) => {
+    if (!editing) return;
+    const c = cellOf.get(id);
+    if (!c) return;
+    const moves: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const mv = moves[e.key];
+    if (mv) {
+      e.preventDefault();
+      const next = resolveMove(display.placed, id, { x: c.x + mv[0], y: c.y + mv[1], w: c.w, h: c.h }, WIDGET_COLS, geo.rows);
+      if (next) commitCells(next);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setEditorId(id);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      remove(id);
+    }
+  };
+
+  const gallery = usePresence(galleryOpen, 160);
+  const editorItem = editorId ? byId.get(editorId) : undefined;
+  const editorPresence = usePresence(!!editorItem, 160);
+  const [lastEditor, setLastEditor] = useState<WidgetItem | undefined>(undefined);
+  useEffect(() => {
+    if (editorItem) setLastEditor(editorItem);
+  }, [editorItem]);
+
+  const gridHeight = geo.rows > 0 ? cellPx(geo.rows, geo.cell) - GAP : 0;
+  const ghost = dragId && preview ? preview.find((c) => c.id === dragId) : null;
 
   return (
-    <div className={`wboard${editing ? ' editing' : ''}`} style={{ '--wscale': scale } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
-      <div className="wgrid" ref={gridRef}>
+    <div
+      ref={boardRef}
+      className={`wboard2${editing ? ' editing' : ''}${dragId ? ' dragging' : ''}`}
+      style={{ '--cell': `${geo.cell}px`, '--gap': `${GAP}px`, '--wscale': scale } as React.CSSProperties}
+    >
+      <div className="wgrid2" style={{ left: geo.left, width: geo.width, height: gridHeight }}>
+        {editing && (
+          <div className="wgrid2-cells" aria-hidden="true">
+            {Array.from({ length: geo.rows * WIDGET_COLS }, (_, i) => (
+              <span key={i} style={{ transform: `translate3d(${cellPx(i % WIDGET_COLS, geo.cell)}px, ${cellPx(Math.floor(i / WIDGET_COLS), geo.cell)}px, 0)` }} />
+            ))}
+          </div>
+        )}
+        {ghost && (
+          <div
+            className="wghost"
+            aria-hidden="true"
+            style={{ width: spanPx(ghost.w, geo.cell), height: spanPx(ghost.h, geo.cell), transform: `translate3d(${cellPx(ghost.x, geo.cell)}px, ${cellPx(ghost.y, geo.cell)}px, 0)` }}
+          />
+        )}
         {items.map((item) => {
+          const c = cellOf.get(item.id);
           const meta = widgetMeta(item.kind);
-          if (!meta) return null;
+          if (!c || !meta) return null;
+          const ctx: WidgetContext = {
+            item,
+            setConfig: (patch) => setConfig(item.id, patch),
+            note: widgets.notes[item.id] ?? '',
+            setNote: (text) => onUpdate({ ...widgets, notes: { ...widgets.notes, [item.id]: text } }),
+            open: onOpen,
+            editing,
+            edit: () => {
+              onEditingChange(true);
+              setEditorId(item.id);
+            },
+          };
+          const dragging = dragId === item.id;
           return (
             <div
               key={item.id}
+              ref={(el) => {
+                if (el) tileEls.current.set(item.id, el);
+                else tileEls.current.delete(item.id);
+              }}
               data-widget-id={item.id}
-              className={`wtile size-${item.size}${dragId === item.id ? ' dragging' : ''}`}
-              onPointerDown={(e) => onPointerDown(e, item.id)}
-              onPointerMove={onPointerMove}
+              className={`wtile size-${item.size} kind-${item.kind.replace(':', '-')}${dragging ? ' dragging' : ''}${selectedId === item.id && editing ? ' selected' : ''}`}
+              style={{
+                width: spanPx(c.w, geo.cell),
+                height: spanPx(c.h, geo.cell),
+                transform: dragging ? undefined : `translate3d(${cellPx(c.x, geo.cell)}px, ${cellPx(c.y, geo.cell)}px, 0)`,
+              }}
+              tabIndex={editing ? 0 : -1}
+              aria-label={meta.name}
+              onPointerDown={(e) => onTilePointerDown(e, item.id)}
+              onPointerMove={onTilePointerMove}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
-              aria-label={meta.name}
+              onLostPointerCapture={endDrag}
+              onKeyDown={(e) => onTileKeyDown(e, item.id)}
+              onFocus={() => editing && setSelectedId(item.id)}
             >
-              <WidgetView item={item} ctx={ctx} />
+              <div className="wtile-face">
+                <WidgetView ctx={ctx} hour12={widgets.clock.hour12} />
+              </div>
               {editing && (
-                <>
-                  <button type="button" className="wremove" aria-label={`Remove ${meta.name}`} title="Remove" onClick={() => remove(item.id)}>
+                <div className="wtile-chrome">
+                  <button type="button" className="wtile-remove" aria-label={`Remove ${meta.name}`} title="Remove" onClick={() => remove(item.id)}>
                     <Minus size={12} strokeWidth={3} />
                   </button>
-                  {meta.sizes.length > 1 && (
-                    <div className="wsize" role="radiogroup" aria-label={`${meta.name} size`}>
-                      {meta.sizes.map((s) => {
-                        const fitsSize =
-                          item.size === s || fitsWith(items.map((i) => (i.id === item.id ? { id: i.id, size: s } : i)));
-                        return (
-                          <button
-                            key={s}
-                            type="button"
-                            role="radio"
-                            aria-checked={item.size === s}
-                            title={fitsSize ? SIZE_LABEL[s] : `${SIZE_LABEL[s]}: no room`}
-                            className={item.size === s ? 'on' : ''}
-                            disabled={!fitsSize}
-                            onClick={() => resize(item.id, s)}
-                          >
-                            {SIZE_LABEL[s][0]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
+                  <button type="button" className="wtile-edit" aria-label={`${meta.name} settings`} title={`Size${meta.configurable ? ' and settings' : ''}`} onClick={() => setEditorId(item.id)}>
+                    <SlidersHorizontal size={12} />
+                  </button>
+                </div>
               )}
             </div>
           );
         })}
-        {roomForAddTile && canAddAny && (
-          <button type="button" className="wtile size-s wboard-add" onClick={() => setGalleryOpen(true)}>
-            <Plus size={20} aria-hidden="true" />
-            <span>Add widget</span>
-          </button>
-        )}
       </div>
 
       {editing && (
-        <div className="wboard-bar" role="toolbar" aria-label="Editing widgets">
-          {(hiddenCount > 0 || !canAddAny) && (
+        <div className="wboard-bar2" role="toolbar" aria-label="Editing widgets">
+          {display.hidden.length > 0 && (
             <span className="wboard-note">
-              {hiddenCount > 0
-                ? `${hiddenCount} ${hiddenCount === 1 ? 'widget is' : 'widgets are'} hidden: not enough room in this window`
-                : items.length >= MAX_WIDGETS
-                  ? `Up to ${MAX_WIDGETS} widgets`
-                  : 'No room for more'}
+              {display.hidden.length} {display.hidden.length === 1 ? 'widget doesn’t' : 'widgets don’t'} fit this window
             </span>
           )}
-          <button
-            type="button"
-            className="btn"
-            disabled={!canAddAny}
-            title={canAddAny ? undefined : 'Remove or shrink a widget to make room'}
-            onClick={() => setGalleryOpen(true)}
-          >
-            <Plus size={13} aria-hidden="true" />
+          <button type="button" className="btn wboard-add-btn" disabled={!canAddAny} title={canAddAny ? undefined : 'No room: move, shrink or remove a widget'} onClick={() => onGalleryOpenChange(true)}>
+            <Plus size={14} aria-hidden="true" />
             Add widget
           </button>
           <button type="button" className="btn btn-quiet btn-icon" title="How editing works" aria-label="How editing works" onClick={() => setGuide(true)}>
@@ -370,62 +397,80 @@ export const WidgetBoard: React.FC<{
         </div>
       )}
 
-      {galleryOpen && (
-        <div
-          className="modal-overlay wgallery-overlay"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setGalleryOpen(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.stopPropagation();
-              setGalleryOpen(false);
-            }
-          }}
-        >
-          <div className="panel wgallery" role="dialog" aria-modal="true" aria-label="Add a widget">
-            <header className="panel-head">
-              <h2 className="panel-title">Add a widget</h2>
-              <button type="button" className="btn btn-quiet btn-icon" aria-label="Close" autoFocus onClick={() => setGalleryOpen(false)}>
-                <X size={16} />
-              </button>
-            </header>
-            <div className="panel-body">
-              {(
-                [
-                  ['Serica', BUILTIN_KINDS],
-                  ['Apps', APP_KINDS],
-                ] as const
-              ).map(([title, kinds]) => (
-                <section key={title} className="panel-section">
-                  <h3 className="panel-label">{title}</h3>
-                  <div className="wgallery-grid">
-                    {kinds.map((kind) => {
-                      const meta = widgetMeta(kind)!;
-                      const size = addSizeFor(kind);
-                      return (
-                        <button
-                          key={kind}
-                          type="button"
-                          className="wgallery-item"
-                          disabled={!size}
-                          title={size ? `Adds a ${SIZE_LABEL[size].toLowerCase()} widget` : 'No room left: remove or shrink a widget'}
-                          onClick={() => add(kind)}
-                        >
-                          <span className="wgallery-icon">{meta.icon}</span>
-                          <span className="wgallery-text">
-                            <span className="wgallery-name">{meta.name}</span>
-                            <span className="wgallery-desc">{meta.description}</span>
-                          </span>
-                          <Plus size={14} className="wgallery-plus" aria-hidden="true" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+      {gallery.mounted && (
+        <div className="presence" data-state={gallery.state}>
+          <div
+            className="modal-overlay wgallery-overlay"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) onGalleryOpenChange(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                onGalleryOpenChange(false);
+              }
+            }}
+          >
+            <div className="sheet wgallery" role="dialog" aria-modal="true" aria-label="Add a widget">
+              <header className="wed-head">
+                <div className="wed-titles">
+                  <h2 className="wed-title">Add a widget</h2>
+                  <p className="wed-sub">It goes in the first free place; drag it where you like.</p>
+                </div>
+                <button type="button" className="btn btn-quiet btn-icon" aria-label="Close" autoFocus onClick={() => onGalleryOpenChange(false)}>
+                  <X size={16} />
+                </button>
+              </header>
+              <div className="wgallery-body">
+                {(
+                  [
+                    ['Serica', BUILTIN_KINDS],
+                    ['Apps', APP_KINDS],
+                  ] as const
+                ).map(([title, kinds]) => (
+                  <section key={title} className="wgallery-section">
+                    <h3 className="settings2-group-title">{title}</h3>
+                    <div className="wgallery-grid">
+                      {kinds.map((kind) => {
+                        const meta = widgetMeta(kind)!;
+                        const size = addSizeFor(kind);
+                        return (
+                          <button
+                            key={kind}
+                            type="button"
+                            className="wgallery-item"
+                            disabled={!size}
+                            title={size ? `Adds a ${SIZE_LABEL[size].toLowerCase()} widget` : 'No room left: move, shrink or remove a widget'}
+                            onClick={() => add(kind)}
+                          >
+                            <span className="wgallery-icon">{meta.icon}</span>
+                            <span className="wgallery-text">
+                              <span className="wgallery-name">{meta.name}</span>
+                              <span className="wgallery-desc">{meta.description}</span>
+                            </span>
+                            <Plus size={14} className="wgallery-plus" aria-hidden="true" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {editorPresence.mounted && (editorItem ?? lastEditor) && (
+        <div className="presence" data-state={editorPresence.state}>
+          <WidgetEditor
+            item={(editorItem ?? lastEditor)!}
+            canResize={(s) => canResize((editorItem ?? lastEditor)!.id, s)}
+            onResize={(s) => resize((editorItem ?? lastEditor)!.id, s)}
+            setConfig={(patch) => setConfig((editorItem ?? lastEditor)!.id, patch)}
+            onRemove={() => remove((editorItem ?? lastEditor)!.id)}
+            onClose={() => setEditorId(null)}
+          />
         </div>
       )}
 

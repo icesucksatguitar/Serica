@@ -18,7 +18,9 @@ import { PermissionPrompt } from './components/PermissionPrompt';
 import { DropZones } from './components/DropZones';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
-import { prewarmPageUnderlay, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
+import { prewarmPageUnderlay, useLingering, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
+import { Presence } from './hooks/usePresence';
+import type { SettingsPage } from './components/settings/parts';
 import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
 import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
@@ -47,6 +49,9 @@ import './styles/sidebar-v2.css';
 import './styles/foundation.css';
 import './styles/features.css';
 import './styles/chrome.css';
+import './styles/home.css';
+import './styles/settings2.css';
+import './styles/motion.css';
 
 const ArchiveList = lazy(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
@@ -60,8 +65,8 @@ const ShieldModal = lazy(() =>
 const McpModal = lazy(() =>
   import('./components/McpModal').then((m) => ({ default: m.McpModal }))
 );
-const ThemeCustomizerModal = lazy(() =>
-  import('./components/ThemeCustomizerModal').then((m) => ({ default: m.ThemeCustomizerModal }))
+const ThemeStudio = lazy(() =>
+  import('./components/ThemeStudio').then((m) => ({ default: m.ThemeStudio }))
 );
 const MediaPlayer = lazy(() =>
   import('./components/MediaPlayer').then((m) => ({ default: m.MediaPlayer }))
@@ -69,8 +74,8 @@ const MediaPlayer = lazy(() =>
 const WelcomeModal = lazy(() =>
   import('./components/WelcomeModal').then((m) => ({ default: m.WelcomeModal }))
 );
-const SettingsPanel = lazy(() =>
-  import('./components/SettingsPanel').then((m) => ({ default: m.SettingsPanel }))
+const Settings2 = lazy(() =>
+  import('./components/settings/Settings2').then((m) => ({ default: m.Settings2 }))
 );
 const DownloadsPanel = lazy(() =>
   import('./components/DownloadsPanel').then((m) => ({ default: m.DownloadsPanel }))
@@ -84,6 +89,9 @@ const HistoryModal = lazy(() =>
 const VpnModal = lazy(() =>
   import('./components/VpnModal').then((m) => ({ default: m.VpnModal }))
 );
+
+/** How long a panel takes to leave (keep in step with --dur-exit in foundation.css). */
+const PANEL_EXIT_MS = 170;
 
 export function App() {
   const browser = useBrowser();
@@ -115,7 +123,11 @@ export function App() {
 
   const { settings, updateSettings, isLoaded: settingsLoaded } = useSettings();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const openSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('general');
+  const openSettings = useCallback((page?: SettingsPage) => {
+    setSettingsPage(page ?? 'general');
+    setIsSettingsOpen(true);
+  }, []);
 
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
@@ -414,6 +426,29 @@ export function App() {
     setDarkMode(!isDarkMode);
   };
 
+  const setSpaceMode = useCallback(
+    (mode: 'light' | 'dark' | 'auto') => {
+      if (mode !== 'auto') return setDarkMode(mode === 'dark');
+      triggerThemeCrossFade();
+      const updatedTheme: SpaceTheme = { ...activeSpaceTheme, mode: 'auto' };
+      const palette = applySpaceThemeToRoot(updatedTheme, osPrefersDark);
+      void window.serica?.setThemeMode?.('system');
+      void updateSettings({
+        theme: palette.effectiveMode,
+        spaceThemes: { ...(settings.spaceThemes || {}), [state.activeSpaceId]: updatedTheme },
+      });
+    },
+    [activeSpaceTheme, osPrefersDark, setDarkMode, settings.spaceThemes, state.activeSpaceId, triggerThemeCrossFade, updateSettings],
+  );
+
+  const applyThemeToAllSpaces = useCallback(
+    (theme: SpaceTheme) => {
+      const all = Object.fromEntries(state.spaces.map((sp) => [sp.id, { ...theme, points: theme.points.map((pt) => ({ ...pt })) }]));
+      void updateSettings({ spaceThemes: { ...(settings.spaceThemes || {}), ...all } });
+    },
+    [settings.spaceThemes, state.spaces, updateSettings],
+  );
+
   // Reconcile cached main-process settings (`browser-state.json`) once loaded on startup
   const hydratedFromMainRef = useRef(false);
   useEffect(() => {
@@ -578,7 +613,16 @@ export function App() {
       triggerThemeCrossFade();
     });
     // neutrino://settings, neutrino://history, neutrino://vpn from useBrowser.navigate
-    const handleOpenSettingsEvent = () => setIsSettingsOpen(true);
+    const handleOpenSettingsEvent = (e: Event) => {
+      const page = (e as CustomEvent).detail;
+      openSettings(typeof page === 'string' ? (page as SettingsPage) : undefined);
+    };
+    const handleOpenMcpEvent = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      setMcpInitialTab(tab === 'tools' || tab === 'local' ? tab : 'assistants');
+      setIsMcpModalOpen(true);
+    };
+    window.addEventListener('serica:open-mcp', handleOpenMcpEvent);
     const handleOpenHistoryEvent = () => setIsHistoryModalOpen(true);
     const handleOpenVpnEvent = () => setIsVpnModalOpen(true);
     const handleOpenExtensionsEvent = () => setIsExtensionsOpen(true);
@@ -622,6 +666,7 @@ export function App() {
       unsubIpcHistory?.();
       unsubIpcSpaceSwitched?.();
       window.removeEventListener('serica:open-settings', handleOpenSettingsEvent);
+      window.removeEventListener('serica:open-mcp', handleOpenMcpEvent);
       window.removeEventListener('serica:open-history', handleOpenHistoryEvent);
       window.removeEventListener('serica:open-vpn', handleOpenVpnEvent);
       window.removeEventListener('serica:open-extensions', handleOpenExtensionsEvent);
@@ -634,7 +679,7 @@ export function App() {
       window.removeEventListener('serica:toggle-tabs', handleToggleTabs);
       window.removeEventListener('serica:close-active-tab', handleCloseActiveTab);
     };
-}, [state.activeTabId, state.activeSpaceId, spaceSwitcherOrder, activeTab, closeTab, handleSelectSpace, setIsCommandBarOpen, triggerThemeCrossFade, toggleSidebar, setSidebarExpanded, openCommandBar, openNewTabCommandBar]);
+}, [state.activeTabId, state.activeSpaceId, spaceSwitcherOrder, activeTab, closeTab, handleSelectSpace, setIsCommandBarOpen, setIsMcpModalOpen, triggerThemeCrossFade, toggleSidebar, setSidebarExpanded, openCommandBar, openNewTabCommandBar, openSettings]);
 
 // Built-in VPN state hydration & lazy History hydration (only fetch 500 history entries when open)
 useEffect(() => {
@@ -650,11 +695,13 @@ useEffect(() => {
   };
 }, []);
 
+const historyShown = useLingering(isHistoryModalOpen, PANEL_EXIT_MS);
 useEffect(() => {
-  if (!isHistoryModalOpen) {
+  if (!historyShown) {
     setHistoryEntries((prev) => (prev.length > 0 ? [] : prev));
     return;
   }
+  if (!isHistoryModalOpen) return;
   void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
     if (Array.isArray(list)) setHistoryEntries(list);
   });
@@ -965,17 +1012,20 @@ useLayoutEffect(() => {
 
 // Native page views paint above HTML; freeze the page while any of these cover it.
 useViewportOverlay(
-  isCommandBarOpen ||
-    isShieldModalOpen ||
-    isMcpModalOpen ||
-    isThemeModalOpen ||
-    isSettingsOpen ||
-    isHistoryModalOpen ||
-    isExtensionsOpen ||
-    isDownloadsOpen ||
-    isVpnModalOpen ||
-    isArchiveOpen ||
-    isWelcomeOpen,
+  useLingering(
+    isCommandBarOpen ||
+      isShieldModalOpen ||
+      isMcpModalOpen ||
+      isThemeModalOpen ||
+      isSettingsOpen ||
+      isHistoryModalOpen ||
+      isExtensionsOpen ||
+      isDownloadsOpen ||
+      isVpnModalOpen ||
+      isArchiveOpen ||
+      isWelcomeOpen,
+    PANEL_EXIT_MS,
+  ),
 );
 
 // Browser tools, run from the top bar's menu (when pinned) or from Settings.
@@ -999,7 +1049,6 @@ const shellStyle = {
 
 return (
   <div className={`arc-app-shell radical-minimalism-shell${showTopTabs ? ' top-tabs-mode' : ''}`} style={shellStyle}>
-    <div className="space-grain-overlay" aria-hidden="true" />
     {/* Frameless Top Drag Bar (only where the top bar is on screen) */}
     {!isHtmlFullscreen && topBar.shown && (
       <div className={`macos-window-drag-bar ${isWebpage ? 'on-webpage' : ''}`} />
@@ -1234,7 +1283,7 @@ return (
           pinned={normalizePinnedTools(settings.pinnedTools)}
           actions={toolActions}
           onToggleDarkMode={toggleDarkMode}
-          onSettings={openSettings}
+          onSettings={() => openSettings()}
           onOpenChange={setToolsOpen}
         />
 
@@ -1293,6 +1342,8 @@ return (
           insetLeft={showSidebar ? 8 : 0}
           insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
           homeWidgets={settings.homeWidgets}
+          homeBackground={settings.homeBackground}
+          dockVisible={settings.rightPinsDockVisible}
           uiScale={settings.uiScale}
           onUpdateHomeWidgets={(homeWidgets) => void updateSettings({ homeWidgets })}
         />
@@ -1357,10 +1408,10 @@ return (
     )}
 
     {/* Centered Floating Command Bar (Ctrl+T / Ctrl+K / Ctrl+L) */}
-    {isCommandBarOpen && (
+    <Presence open={isCommandBarOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <CommandBar
-          isOpen={isCommandBarOpen}
+          isOpen
           tabs={state.tabs}
           spaces={state.spaces}
           onClose={() => setIsCommandBarOpen(false)}
@@ -1388,20 +1439,20 @@ return (
           onOpenArchive={() => setIsArchiveOpen(true)}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Archived Today tabs of the Active_Profile (R16.7, R16.8); opened from the Command_Bar */}
-    {isArchiveOpen && (
+    <Presence open={isArchiveOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
-        <ArchiveList isOpen={isArchiveOpen} onClose={() => setIsArchiveOpen(false)} />
+        <ArchiveList isOpen onClose={() => setIsArchiveOpen(false)} />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Built-in VPN / Privacy Tunnel Modal */}
-    {isVpnModalOpen && (
+    <Presence open={isVpnModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <VpnModal
-          isOpen={isVpnModalOpen}
+          isOpen
           onClose={() => setIsVpnModalOpen(false)}
           status={vpnStatus}
           onConnect={handleVpnConnect}
@@ -1412,13 +1463,13 @@ return (
           ipCheckError={vpnIpError}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Browsing History Modal */}
-    {isHistoryModalOpen && (
+    <Presence open={isHistoryModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <HistoryModal
-          isOpen={isHistoryModalOpen}
+          isOpen
           onClose={() => setIsHistoryModalOpen(false)}
           entries={historyEntries}
           onOpenUrl={handleOpenHistoryUrl}
@@ -1426,20 +1477,20 @@ return (
           onClearHistory={handleClearHistory}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Downloads (top bar / Ctrl+J / neutrino://downloads) */}
-    {isDownloadsOpen && (
+    <Presence open={isDownloadsOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
-        <DownloadsPanel isOpen={isDownloadsOpen} onClose={() => setIsDownloadsOpen(false)} downloads={downloads} />
+        <DownloadsPanel isOpen onClose={() => setIsDownloadsOpen(false)} downloads={downloads} />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Extensions (neutrino://extensions / Command Bar) */}
-    {isExtensionsOpen && (
+    <Presence open={isExtensionsOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <ExtensionsModal
-          isOpen={isExtensionsOpen}
+          isOpen
           onClose={() => setIsExtensionsOpen(false)}
           onOpenUrl={(url) => {
             setIsExtensionsOpen(false);
@@ -1447,13 +1498,13 @@ return (
           }}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Shield Modal Flyout */}
-    {isShieldModalOpen && (
+    <Presence open={isShieldModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <ShieldModal
-          isOpen={isShieldModalOpen}
+          isOpen
           onClose={() => setIsShieldModalOpen(false)}
           stats={state.shieldStats}
           blockedItems={blockedTrackers}
@@ -1467,32 +1518,32 @@ return (
           onResetStats={resetShieldStats}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Browser Settings Panel (gear / Ctrl+, / Command Bar / neutrino://settings) */}
-    {isSettingsOpen && (
+    <Presence open={isSettingsOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
-        <SettingsPanel
-          isOpen={isSettingsOpen}
+        <Settings2
           onClose={() => setIsSettingsOpen(false)}
           settings={settings}
           onUpdateSettings={updateSettings}
-          isDarkMode={isDarkMode}
-          onSetDarkMode={setDarkMode}
+          mode={activeSpaceTheme.mode}
+          onSetMode={setSpaceMode}
           onOpenThemeStudio={() => setIsThemeModalOpen(true)}
-          userName={userProfile?.name ?? ''}
-          onUserNameChange={handleUserNameChange}
           tabs={state.tabs}
+          initialPage={settingsPage}
           toolActions={toolActions}
+          onRunSetup={() => setIsWelcomeOpen(true)}
+          onStartTour={() => window.dispatchEvent(new CustomEvent('serica:start-tour'))}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* MCP Drawer (Right-Side) */}
-    {isMcpModalOpen && (
+    <Presence open={isMcpModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <McpModal
-          isOpen={isMcpModalOpen}
+          isOpen
           onClose={() => setIsMcpModalOpen(false)}
           activeTab={activeTab}
           onNavigate={navigate}
@@ -1500,31 +1551,22 @@ return (
           partition={activeProfilePartition}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Theme Studio Popover */}
-    {isThemeModalOpen && (
+    <Presence open={isThemeModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
-        <ThemeCustomizerModal
-          isOpen={isThemeModalOpen}
+        <ThemeStudio
+          isOpen
           onClose={() => setIsThemeModalOpen(false)}
           activeSpace={activeSpace}
           spaceTheme={activeSpaceTheme}
-          customPresets={settings.customThemePresets || []}
-          onChangeCustomPresets={(nextPresets) => void updateSettings({ customThemePresets: nextPresets })}
           onChangeSpaceTheme={handleChangeSpaceTheme}
-          onResetSpaceTheme={handleResetSpaceTheme}
-          isDarkMode={isDarkMode}
-          onSetDarkMode={setDarkMode}
-          persistedCustomTheme={
-            settings.customTheme && typeof settings.customTheme === 'object'
-              ? (settings.customTheme as { themeId: string; accent: string })
-              : undefined
-          }
-          onPersistCustomTheme={(customTheme) => void updateSettings({ customTheme })}
+          onApplyToAllSpaces={applyThemeToAllSpaces}
+          sidebarLayout={!topTabs}
         />
       </Suspense>
-    )}
+    </Presence>
 
     {/* Welcome / Onboarding Flow for First Launch */}
     {isWelcomeOpen && (

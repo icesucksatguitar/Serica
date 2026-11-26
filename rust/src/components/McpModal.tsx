@@ -1,3 +1,4 @@
+import { appIcon } from './home/apps';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { McpConnectCard } from './McpConnectCard';
 import {
@@ -612,23 +613,24 @@ export const McpModal: React.FC<McpModalProps> = ({
                   <button
                     key={asst.id}
                     type="button"
-                    className={`assistant-chip ${selectedAssistant === asst.id ? 'selected' : ''}`}
+                    className={`assistant-chip logo-only ${selectedAssistant === asst.id ? 'selected' : ''}`}
                     onClick={() => setSelectedAssistant(asst.id)}
-                    title={`Switch to ${asst.name}`}
+                    title={asst.name}
+                    aria-label={asst.name}
+                    aria-pressed={selectedAssistant === asst.id}
                   >
-                    <span className="assistant-chip-dot" style={{ backgroundColor: asst.color }}>●</span>
-                    <span className="assistant-chip-name">{asst.name}</span>
+                    <img className="assistant-logo" src={appIcon(new URL(asst.url).hostname)} alt="" width={18} height={18} draggable={false} />
                   </button>
                 ))}
 
                 <button
                   type="button"
-                  className="assistant-chip local-switch-btn"
+                  className="assistant-chip logo-only local-switch-btn"
                   onClick={() => setActiveTabType('local')}
-                  title="Switch to Local Models (Ollama / LM Studio)"
+                  title="Local models (Ollama, LM Studio)"
+                  aria-label="Local models"
                 >
-                  <Cpu size={12} style={{ color: '#10B981' }} />
-                  <span>Local</span>
+                  <Cpu size={16} />
                 </button>
 
                 <div className="assistant-spacer" />

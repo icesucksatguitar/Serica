@@ -123,93 +123,241 @@ export interface BrowserSettings {
   sidebarAutoHide: boolean;
   sidebarWidth?: number;
   textScale: number;
-  /** Widgets on the new-tab page. */
+  /** Widgets and clock on the new-tab page. */
   homeWidgets: HomeWidgets;
+  /** What fills the new-tab page. */
+  homeBackground: HomeBackground;
+  /** Version of the setup screen last completed (0: never). */
+  setupVersion: number;
+  /** The first-run tour was played or dismissed. */
+  tourDone: boolean;
   /** Separate sizes for the sidebar, dock and new-tab parts. */
   uiScale: UiScale;
   [unknownKey: string]: unknown; // kept as saved, e.g. the legacy `theme` key
 }
 
 /** Widget kinds: built-in ones, and app widgets (`app:<id>`, see home/apps.ts). */
-export type WidgetKind = 'github' | 'weather' | 'notes' | 'calendar' | 'topsites' | `app:${string}`;
-/** Grid sizes: s 2x2, m 4x2, l 4x4, w 8x2 cells. */
+export type WidgetKind =
+  | 'github'
+  | 'weather'
+  | 'notes'
+  | 'calendar'
+  | 'topsites'
+  | 'worldclock'
+  | 'focus'
+  | `app:${string}`;
+/** Grid sizes in cells (columns x rows): s 2x2, m 4x2, l 4x4, w 8x2. */
 export type WidgetSize = 's' | 'm' | 'l' | 'w';
+
+export const WIDGET_SPAN: Readonly<Record<WidgetSize, readonly [number, number]>> = Object.freeze({
+  s: [2, 2] as const,
+  m: [4, 2] as const,
+  l: [4, 4] as const,
+  w: [8, 2] as const,
+});
+
+/** Columns of the new-tab grid (rows follow the window's height). */
+export const WIDGET_COLS = 12;
 
 export interface WidgetItem {
   id: string;
   kind: WidgetKind;
   size: WidgetSize;
+  /** Top-left cell (column, row). */
+  x: number;
+  y: number;
+  /** The widget's own settings: what it shows and how. */
+  config: Record<string, unknown>;
 }
 
-/** The new-tab page: what shows, in which order and size, and widget settings. */
+/** The new-tab page: placed widgets, the clock, and widget data. */
 export interface HomeWidgets {
-  /** Greeting, date and clock. */
-  clock: boolean;
-  /** The search field under the clock. */
-  search: boolean;
-  /** Placed widgets, in grid order. */
   items: WidgetItem[];
-  github: { user: string };
-  weather: { place: string; lat: number | null; lon: number | null; fahrenheit: boolean };
   /** Text of each notes widget, by widget id. */
   notes: Record<string, string>;
   /** The widget guide was shown (it can be replayed from the edit bar). */
   guideSeen: boolean;
+  clock: { hour12: boolean; seconds: boolean };
 }
 
 export const DEFAULT_HOME_WIDGETS: Readonly<HomeWidgets> = Object.freeze({
-  clock: true,
-  search: true,
   items: [],
-  github: { user: '' },
-  weather: { place: '', lat: null, lon: null, fahrenheit: false },
   notes: {},
   guideSeen: false,
+  clock: { hour12: false, seconds: true },
 });
 
 const WIDGET_SIZES: readonly WidgetSize[] = ['s', 'm', 'l', 'w'];
+const KNOWN_KINDS = ['github', 'weather', 'notes', 'calendar', 'topsites', 'worldclock', 'focus'];
+
+export interface CellRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Whether cell rectangles overlap. */
+export function rectsOverlap(a: CellRect, b: CellRect): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/** First free top-left cell (row by row) for a `w` x `h` widget, or null. */
+export function firstFreeCell(placed: CellRect[], w: number, h: number, cols: number, rows: number): { x: number; y: number } | null {
+  for (let y = 0; y + h <= rows; y++) {
+    for (let x = 0; x + w <= cols; x++) {
+      const r = { x, y, w, h };
+      if (!placed.some((p) => rectsOverlap(p, r))) return { x, y };
+    }
+  }
+  return null;
+}
 
 function normalizeHomeWidgets(raw: unknown): HomeWidgets {
   const o = raw !== null && typeof raw === 'object' ? (raw as Record<string, any>) : {};
   const g = o.github && typeof o.github === 'object' ? o.github : {};
   const w = o.weather && typeof o.weather === 'object' ? o.weather : {};
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  let items: WidgetItem[] = [];
   const notes: Record<string, string> = {};
+  const loose: { id: string; kind: WidgetKind; size: WidgetSize; x: number | null; y: number | null; config: Record<string, unknown> }[] = [];
+  const legacyConfig = (kind: string): Record<string, unknown> => {
+    // 0.4.x kept one GitHub user and one place for every widget of the kind.
+    if (kind === 'github' && typeof g.user === 'string' && g.user) return { user: g.user.slice(0, 39) };
+    if (kind === 'weather' && num(w.lat) !== null && num(w.lon) !== null) {
+      return { place: typeof w.place === 'string' ? w.place.slice(0, 80) : '', lat: num(w.lat), lon: num(w.lon), fahrenheit: w.fahrenheit === true };
+    }
+    return {};
+  };
   if (Array.isArray(o.items)) {
     const seen = new Set<string>();
     for (const it of o.items) {
       if (!it || typeof it.id !== 'string' || typeof it.kind !== 'string' || seen.has(it.id)) continue;
+      if (!KNOWN_KINDS.includes(it.kind) && !it.kind.startsWith('app:')) continue;
       seen.add(it.id);
-      items.push({ id: it.id, kind: it.kind as WidgetKind, size: WIDGET_SIZES.includes(it.size) ? it.size : 'm' });
+      const config = it.config && typeof it.config === 'object' && !Array.isArray(it.config) ? { ...it.config } : legacyConfig(it.kind);
+      loose.push({
+        id: it.id,
+        kind: it.kind as WidgetKind,
+        size: WIDGET_SIZES.includes(it.size) ? it.size : 'm',
+        x: Number.isInteger(it.x) ? it.x : null,
+        y: Number.isInteger(it.y) ? it.y : null,
+        config,
+      });
     }
     if (o.notes && typeof o.notes === 'object' && !('text' in o.notes)) {
       for (const [k, v] of Object.entries(o.notes)) if (typeof v === 'string') notes[k] = v.slice(0, 4000);
     }
   } else {
     // 0.4.6 kept one flag per widget; turn the enabled ones into placed widgets.
-    if (w.enabled === true) items.push({ id: 'weather-1', kind: 'weather', size: 'm' });
+    if (w.enabled === true) loose.push({ id: 'weather-1', kind: 'weather', size: 'm', x: null, y: null, config: legacyConfig('weather') });
     if (o.notes?.enabled === true) {
-      items.push({ id: 'notes-1', kind: 'notes', size: 'm' });
+      loose.push({ id: 'notes-1', kind: 'notes', size: 'm', x: null, y: null, config: {} });
       if (typeof o.notes.text === 'string') notes['notes-1'] = o.notes.text.slice(0, 4000);
     }
-    if (g.enabled === true) items.push({ id: 'github-1', kind: 'github', size: 'w' });
+    if (g.enabled === true) loose.push({ id: 'github-1', kind: 'github', size: 'w', x: null, y: null, config: legacyConfig('github') });
   }
-  items = items.slice(0, 24);
+  // Widgets from before positions existed (0.4.7: an ordered list) are laid
+  // out in their order, row by row; positioned ones keep their cells unless
+  // they overlap an earlier one or run off the grid.
+  const placed: CellRect[] = [];
+  const items: WidgetItem[] = [];
+  for (const it of loose.slice(0, 24)) {
+    const [cw, ch] = WIDGET_SPAN[it.size];
+    let pos: { x: number; y: number } | null = null;
+    if (it.x !== null && it.y !== null && it.x >= 0 && it.y >= 0 && it.x + cw <= WIDGET_COLS && it.y < 64) {
+      const r = { x: it.x, y: it.y, w: cw, h: ch };
+      if (!placed.some((p) => rectsOverlap(p, r))) pos = { x: it.x, y: it.y };
+    }
+    pos ??= firstFreeCell(placed, cw, ch, WIDGET_COLS, 64);
+    if (!pos) continue;
+    placed.push({ ...pos, w: cw, h: ch });
+    items.push({ id: it.id, kind: it.kind, size: it.size, x: pos.x, y: pos.y, config: it.config });
+  }
+  const c = o.clock && typeof o.clock === 'object' ? o.clock : {};
   return {
-    clock: typeof o.clock === 'boolean' ? o.clock : true,
-    search: typeof o.search === 'boolean' ? o.search : true,
     items,
-    github: { user: typeof g.user === 'string' ? g.user.slice(0, 39) : '' },
-    weather: {
-      place: typeof w.place === 'string' ? w.place.slice(0, 80) : '',
-      lat: num(w.lat),
-      lon: num(w.lon),
-      fahrenheit: w.fahrenheit === true,
-    },
     notes,
     guideSeen: o.guideSeen === true,
+    clock: { hour12: c.hour12 === true, seconds: c.seconds !== false },
   };
+}
+
+/** What fills the new-tab page behind the widgets. */
+export type HomeBackgroundMode = 'theme' | 'solid' | 'gradient' | 'image' | 'special';
+
+export interface GradientStop {
+  color: string;
+  /** 0..100 */
+  at: number;
+}
+
+export interface HomeBackground {
+  mode: HomeBackgroundMode;
+  solid: string;
+  gradient: { type: 'linear' | 'radial'; angle: number; stops: GradientStop[] };
+  image: { file: string; fit: 'cover' | 'contain' | 'center'; dim: number };
+  /** Serica Special: seconds each artwork stays before cross-fading to the next. */
+  special: { seconds: number };
+}
+
+export const DEFAULT_HOME_BACKGROUND: Readonly<HomeBackground> = Object.freeze({
+  mode: 'theme' as HomeBackgroundMode,
+  solid: '#1E2A26',
+  gradient: {
+    type: 'linear' as const,
+    angle: 160,
+    stops: [
+      { color: '#283C63', at: 0 },
+      { color: '#B06A6A', at: 55 },
+      { color: '#F0B27A', at: 100 },
+    ],
+  },
+  image: { file: '', fit: 'cover' as const, dim: 0.15 },
+  special: { seconds: 45 },
+});
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+function normalizeHomeBackground(raw: unknown): HomeBackground {
+  const o = raw !== null && typeof raw === 'object' ? (raw as Record<string, any>) : {};
+  const d = DEFAULT_HOME_BACKGROUND;
+  const mode: HomeBackgroundMode = ['theme', 'solid', 'gradient', 'image', 'special'].includes(o.mode) ? o.mode : d.mode;
+  const g = o.gradient && typeof o.gradient === 'object' ? o.gradient : {};
+  const stops: GradientStop[] = Array.isArray(g.stops)
+    ? g.stops
+        .filter((s: any) => s && typeof s.color === 'string' && HEX.test(s.color))
+        .map((s: any) => ({ color: s.color.toUpperCase(), at: Math.max(0, Math.min(100, Number(s.at) || 0)) }))
+        .slice(0, 5)
+    : [];
+  const img = o.image && typeof o.image === 'object' ? o.image : {};
+  const file = typeof img.file === 'string' && /^[A-Za-z0-9._-]{1,99}$/.test(img.file) ? img.file : '';
+  const sp = o.special && typeof o.special === 'object' ? o.special : {};
+  const seconds = Number(sp.seconds);
+  return {
+    mode: mode === 'image' && !file ? 'theme' : mode,
+    solid: typeof o.solid === 'string' && HEX.test(o.solid) ? o.solid.toUpperCase() : d.solid,
+    gradient: {
+      type: g.type === 'radial' ? 'radial' : 'linear',
+      angle: Number.isFinite(Number(g.angle)) && g.angle !== undefined ? ((Math.round(Number(g.angle)) % 360) + 360) % 360 : d.gradient.angle,
+      stops: stops.length >= 2 ? stops.sort((a, b) => a.at - b.at) : d.gradient.stops.map((s) => ({ ...s })),
+    },
+    image: {
+      file,
+      fit: img.fit === 'contain' || img.fit === 'center' ? img.fit : 'cover',
+      dim: Math.max(0, Math.min(0.7, Number.isFinite(Number(img.dim)) && img.dim !== undefined ? Number(img.dim) : d.image.dim)),
+    },
+    special: { seconds: Number.isFinite(seconds) && sp.seconds !== undefined ? Math.max(15, Math.min(600, Math.round(seconds))) : d.special.seconds },
+  };
+}
+
+/** CSS `background` for solid and gradient modes. */
+export function homeBackgroundCss(bg: HomeBackground): string | null {
+  if (bg.mode === 'solid') return bg.solid;
+  if (bg.mode === 'gradient') {
+    const stops = bg.gradient.stops.map((s) => `${s.color} ${s.at}%`).join(', ');
+    return bg.gradient.type === 'radial' ? `radial-gradient(circle at 50% 40%, ${stops})` : `linear-gradient(${bg.gradient.angle}deg, ${stops})`;
+  }
+  return null;
 }
 
 /** Sizes of separate parts of the interface, relative to their default (1). */
@@ -265,8 +413,14 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   sidebarWidth: 240,
   textScale: 1,
   homeWidgets: DEFAULT_HOME_WIDGETS,
+  homeBackground: DEFAULT_HOME_BACKGROUND,
+  setupVersion: 0,
+  tourDone: false,
   uiScale: DEFAULT_UI_SCALE,
 });
+
+/** The setup screen this build shows to anyone who hasn't completed it. */
+export const SETUP_VERSION = 2;
 
 function isArchiveIntervalHours(value: unknown): value is ArchiveIntervalHours {
   return (ARCHIVE_INTERVAL_OPTIONS as readonly unknown[]).includes(value);
@@ -402,6 +556,9 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     sidebarAutoHide: boolOr(source.sidebarAutoHide, DEFAULT_SETTINGS.sidebarAutoHide),
     textScale: normalizeTextScale(source.textScale),
     homeWidgets: normalizeHomeWidgets(source.homeWidgets),
+    homeBackground: normalizeHomeBackground(source.homeBackground),
+    setupVersion: typeof source.setupVersion === 'number' && Number.isFinite(source.setupVersion) ? Math.max(0, Math.floor(source.setupVersion)) : 0,
+    tourDone: source.tourDone === true,
     uiScale: normalizeUiScale(source.uiScale),
   };
 }
