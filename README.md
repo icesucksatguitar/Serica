@@ -36,13 +36,13 @@ Setup brings over bookmarks, history and passwords from Chrome, Edge, Brave, Viv
 ### Spaces and the sidebar
 <img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
-- **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Each space can use its own profile, so cookies and logins stay separate.
-- **Vertical sidebar** that slides in over the page (<kbd>Ctrl</kbd>+<kbd>S</kbd>, the space button, or the left edge of the window), with **Pinned** tabs, folders and a **Today** section. Back, forward and reload move into its top row while it's open. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
-- **Tab previews** on hover, and a media mini player for audio playing in another tab.
+- **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>, or swipe sideways on the sidebar. Each space can use its own profile, so cookies and logins stay separate.
+- **Vertical sidebar** that slides in over the page (<kbd>Ctrl</kbd>+<kbd>S</kbd>, the space button, or the left edge of the window) without pulling down an auto-hidden top bar, with **Pinned** tabs, folders and a **Today** section. Back, forward and reload move into its top row while it's open. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
+- **Tab previews** on hover, and a picture-in-picture mini player when you leave a tab with a playing video.
 - Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
 
 ### The new tab
-Only your widgets and the clock: press and hold a widget to move it anywhere on the grid (the others make room), resize it, or set it up; widgets are liquid glass that takes on the colours behind it. The background can be your space's colours, a solid colour, a gradient, your own picture, or **Serica Special**: three oil-pastel paintings after French Revolution-era art, crossfading slowly.
+Only your widgets and the clock (with an optional greeting in **Customize**): press and hold a widget to move it anywhere on the grid (the others make room), resize it, or set it up; widgets are liquid glass that takes on the colours behind it. The background can be your space's colours, a solid colour, a gradient, your own picture, or **Serica Special**: three oil-pastel paintings after French Revolution-era art, crossfading slowly.
 
 ### Focus Mode
 Block the sites that pull you away, Cold Turkey style: exact domains, `*.wildcards`, paths, categories and exceptions, for a set time or on a weekly schedule. Blocking happens in the request pipeline of every tab, profile and window, before the site is contacted, and shows a calm block page. A locked list can't be stopped, loosened or deleted until its time is up, not even by restarting Serica or moving the clock. **Statistics** show time focused, sessions kept, a streak, what you reached for while it was blocked and at what hour, and where your browsing time went, by day, week, month or year, with CSV export. Everything stays on your PC.
@@ -66,7 +66,7 @@ Each space gets its own theme from curated palettes (or a hue of your own), ligh
 Shields uses Brave's open-source [`adblock-rust`](https://github.com/brave/adblock-rust) engine with EasyList, EasyPrivacy and uBlock Origin's filter lists, covering network requests, cosmetic filters and scriptlets. Lists update in the background. You can allow a site with one click and see a live list of recent blocks.
 
 ### Tab hibernation
-Background tabs that sit idle for 10 minutes are put to sleep to free memory, and wake when you return to them. Pinned and playing tabs stay awake. You can also hibernate every inactive tab at once from the command palette.
+Background tabs that sit idle for 1 hour by default (configurable from 15 minutes to 12 hours, and sooner when memory runs low) are put to sleep to free memory, and wake when you return to them. Pinned and playing tabs stay awake. You can also hibernate every inactive tab at once from the command palette.
 
 ### Built-in MCP for AI agents
 <img src="docs/screenshots/mcp-connect.png" alt="MCP panel with the local endpoint enabled and ready-to-copy Claude configs" width="820">
@@ -76,11 +76,12 @@ Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.
 ### Also included
 - **Text size** for the whole browser (Small, Default, Large, Larger) in Settings → Appearance; new web pages open at the same size.
 - **Chrome Web Store extensions.** Open an extension's store page and press **Add to Serica**, then manage extensions at `serica://extensions`.
-- **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel and retry.
+- **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel, retry, and drag-out for finished files.
 - **Import** bookmarks, history and saved passwords from other browsers on this PC, or a passwords CSV, in Settings → General.
 - **Default browser**: one button in Settings → General.
 - **Drag and drop** links, text and files onto the window to open them, and Serica's own prompts for camera, microphone, location and notifications.
 - **Privacy tunnel:** DNS-over-HTTPS, Tor (SOCKS5) or your own SOCKS5/HTTP proxy, with an optional kill switch.
+- **Auto-updates** in the background with an update reminder popup, plus quick UI patches that apply without reinstalling.
 - **History** with search, find in page, zoom, and HTML fullscreen.
 
 ## Connect Claude to Serica
@@ -179,7 +180,7 @@ Tests:
 
 ```bash
 cd rust/src-tauri && cargo test
-cd rust && npx tsc --noEmit
+cd rust && npx tsc --noEmit && npm test
 ```
 
 Architecture notes and module overview: [`rust/README.md`](rust/README.md).
