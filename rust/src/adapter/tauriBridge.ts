@@ -83,6 +83,8 @@ export const tauriBridge = {
   // State, tabs & spaces
   getState: () => invoke<any>('get_browser_state'),
   createTab: (url?: string, spaceId?: string) => invoke<any>('create_tab', { url: url ?? null, spaceId: spaceId ?? null }),
+  /** A private tab: no history, cookies or site data kept once it closes. */
+  createPrivateTab: (url?: string) => invoke<any>('create_private_tab', { url: url ?? null }),
   updateTab: (tabId: string, partial: any) => invoke<void>('update_tab', { tabId, partial }),
   closeTab: (tabId: string) => invoke<void>('close_tab', { tabId }),
   selectTab: (tabId: string) => invoke<void>('select_tab', { tabId }),

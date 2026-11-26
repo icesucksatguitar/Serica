@@ -42,6 +42,14 @@ pub async fn create_tab(url: Option<String>, space_id: Option<String>, app: Stat
     Ok(app.mutate(|s| s.create_tab(url, space_id, true, None)))
 }
 
+/// A private tab (InPrivate: nothing kept once it closes), made active.
+#[tauri::command]
+pub async fn create_private_tab(url: Option<String>, app: State<'_, Shared>) -> R<TabState> {
+    let prefix = app.settings().search_prefix();
+    let url = url.and_then(|u| normalize_input(&u, prefix));
+    Ok(app.mutate(|s| s.create_private_tab(url)))
+}
+
 #[tauri::command]
 pub async fn close_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
     app.mutate(|s| s.close_tab(&tab_id));

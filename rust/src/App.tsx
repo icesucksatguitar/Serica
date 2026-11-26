@@ -821,6 +821,10 @@ useEffect(() => {
         if (state.activeTabId) {
           closeTab(state.activeTabId);
         }
+      } else if (key === 'n' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void window.serica?.createPrivateTab?.();
       } else if (key === 't' && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -1225,6 +1229,7 @@ return (
         onOpenFind={() => dispatchSiteAction('open-find')}
         tabId={activeTab?.id}
         pdfDarkKey={`${isDarkMode}-${settings.pdfDarkMode}`}
+        isPrivate={activeTab?.private === true}
       />
 
       {/* Top right: status pills and the browser menu, then the window controls */}

@@ -191,6 +191,15 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   // Command items prefixed with ">"
   const allCommands: Array<{ id: string; title: string; hint: string; action: () => void }> = [
     {
+      id: 'cmd-private-tab',
+      title: '> New Private Tab',
+      hint: 'Ctrl+Shift+N',
+      action: () => {
+        void window.serica?.createPrivateTab?.();
+        onClose();
+      },
+    },
+    {
       id: 'cmd-back',
       title: '> Go Back',
       hint: 'Alt+Left',

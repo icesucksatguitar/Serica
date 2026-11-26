@@ -91,6 +91,7 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
     if ctrl && !alt {
         return match vk {
             0x54 if shift => Some(Shortcut::ReopenTab), // T
+            0x4E if shift => Some(Shortcut::NewPrivateTab), // N
             0x54 => Some(Shortcut::NewTab),
             0x4C | 0x4B => Some(Shortcut::OpenCommandBar), // L, K
             0x57 | 0x73 => Some(Shortcut::CloseTab),        // W, F4

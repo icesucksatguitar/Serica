@@ -64,6 +64,7 @@ pub enum Shortcut {
     Downloads,
     Settings,
     SpaceIndex(usize),
+    NewPrivateTab,
     Escape,
     Home,
     OpenFile,
@@ -519,11 +520,14 @@ impl App {
                     tab.is_loading = false;
                     if success && !url.is_empty() && !url.starts_with("about:") {
                         tab.url = url.clone();
-                        let title = tab.title.clone();
-                        drop(s);
-                        self.history.lock().record_visit(&url, if title == url { "" } else { &title }, space.as_deref());
-                        history_changed = true;
-                        s = self.store.lock();
+                        // Private tabs leave no history.
+                        if !tab.private {
+                            let title = tab.title.clone();
+                            drop(s);
+                            self.history.lock().record_visit(&url, if title == url { "" } else { &title }, space.as_deref());
+                            history_changed = true;
+                            s = self.store.lock();
+                        }
                     }
                 }
                 TabEvent::Title(title) => {
@@ -591,6 +595,9 @@ impl App {
         let h = &self.handle;
         match sc {
             Shortcut::NewTab => ui_emit(h, "serica:open-command-bar", serde_json::json!({ "newTab": true })),
+            Shortcut::NewPrivateTab => {
+                self.mutate(|s| s.create_private_tab(None));
+            }
             Shortcut::OpenFile => crate::files::pick_and_open(self),
             Shortcut::OpenCommandBar => ui_emit(h, "serica:open-command-bar", serde_json::json!({})),
             Shortcut::ToggleSidebar => ui_emit(h, "serica:toggle-tabs", ()),

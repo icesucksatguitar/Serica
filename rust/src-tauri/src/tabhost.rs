@@ -405,6 +405,11 @@ impl TabHost {
                 let target = url.to_string();
                 let id2 = id.clone();
                 a.mutate(move |s| {
+                    // A private page's links stay private.
+                    if s.tab(&id2).is_some_and(|t| t.private) {
+                        s.create_private_tab(Some(target));
+                        return;
+                    }
                     let space = s.tab(&id2).map(|t| t.space_id.clone());
                     s.create_tab(Some(target), space, true, Some(&id2));
                 });
@@ -432,7 +437,7 @@ impl TabHost {
 
     /// Everything needed to create a tab webview at the current viewport
     /// bounds. Cheap; done under the host lock.
-    fn prepare(&self, app: &Shared, tab_id: &str, url: &str, profile: &str) -> Option<PendingView> {
+    fn prepare(&self, app: &Shared, tab_id: &str, url: &str, profile: &str, private: bool) -> Option<PendingView> {
         let bounds = self.bounds?;
         let window = app.handle.get_window("main")?;
         let parsed = url::Url::parse(url).ok()?;
@@ -443,7 +448,9 @@ impl TabHost {
         let start = url::Url::parse("about:blank").ok()?;
         #[cfg(not(windows))]
         let start = parsed.clone();
-        let builder = self.builder(app, label, start, profile, Some(tab_id));
+        // A private tab is an InPrivate page: its cookies, storage and cache
+        // live in memory and are gone once the last private page closes.
+        let builder = self.builder(app, label, start, profile, Some(tab_id)).incognito(private);
         Some(PendingView { window, builder, bounds, url: parsed })
     }
 
@@ -483,6 +490,7 @@ impl TabHost {
             profile: String,
             media: bool,
             zoom: f64,
+            private: bool,
         }
         let (wants, active, auto_pip, text_scale): (HashMap<String, Want>, Option<String>, bool, f64) = {
             let s = app.store.lock();
@@ -495,6 +503,7 @@ impl TabHost {
                         live: t.wants_webview(),
                         profile: s.space_profile(&t.space_id),
                         media: t.has_active_media,
+                        private: t.private,
                         // Zoom is per site; other pages keep the tab's own.
                         zoom: if crate::settings::zoom_site(&t.url).is_some() {
                             s.settings.zoom_for(&t.url)
@@ -616,7 +625,7 @@ impl TabHost {
         if let Some(id) = &active {
             if let Some(w) = wants.get(id) {
                 if w.live && !is_internal_url(&w.url) && !app.host.lock().paused.contains(&w.profile) {
-                    Self::create_active(app, id, w.url.clone(), w.profile.clone(), w.zoom);
+                    Self::create_active(app, id, w.url.clone(), w.profile.clone(), w.zoom, w.private);
                 }
             }
         }
@@ -625,12 +634,12 @@ impl TabHost {
     /// Builds the active tab's webview, then reconciles again to show it. The
     /// host lock is released while it is built, so another reconcile may be
     /// building it already.
-    fn create_active(app: &Shared, id: &str, url: String, profile: String, zoom: f64) {
+    fn create_active(app: &Shared, id: &str, url: String, profile: String, zoom: f64, private: bool) {
         let mut host = app.host.lock();
         if host.views.contains_key(id) || host.creating.contains(id) {
             return;
         }
-        let created = match host.prepare(app, id, &url, &profile) {
+        let created = match host.prepare(app, id, &url, &profile, private) {
             Some(p) => {
                 host.creating.insert(id.to_string());
                 drop(host);

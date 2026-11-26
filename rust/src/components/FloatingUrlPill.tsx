@@ -15,6 +15,8 @@ export interface FloatingUrlPillProps {
   tabId?: string;
   /** Re-reads the dark-PDF state when the app theme or settings change. */
   pdfDarkKey?: string;
+  /** The tab is private: shown with a "Private" mark. */
+  isPrivate?: boolean;
 }
 
 const isPdfUrl = (url?: string) => !!url && /\.pdf($|[?#])/i.test(url);
@@ -29,6 +31,7 @@ const isPdfUrl = (url?: string) => !!url && /\.pdf($|[?#])/i.test(url);
     onOpenFind,
     tabId,
     pdfDarkKey,
+    isPrivate,
   }) => {
     const [copied, setCopied] = useState(false);
     // Dark PDFs: shown when the setting is on and the app is dark; a PDF tab
@@ -100,7 +103,7 @@ const isPdfUrl = (url?: string) => !!url && /\.pdf($|[?#])/i.test(url);
 
     return (
       <div
-        className={`top-floating-url-pill ${isLoading ? 'loading' : ''} ${isWebUrl ? 'has-actions' : ''}`}
+        className={`top-floating-url-pill${isPrivate ? ' is-private' : ''} ${isLoading ? 'loading' : ''} ${isWebUrl ? 'has-actions' : ''}`}
         onPointerEnter={prewarmViewport}
         onClick={onClick}
         role="button"
@@ -114,6 +117,11 @@ const isPdfUrl = (url?: string) => !!url && /\.pdf($|[?#])/i.test(url);
           }
         }}
       >
+        {isPrivate && (
+          <span className="url-private-chip" title="Private tab: no history, cookies or site data are kept once it closes">
+            Private
+          </span>
+        )}
         <span className="url-pill-main">
           {isWebUrl && !isHttps ? (
             <Globe className="url-lock-icon insecure" size={12} aria-hidden="true" />

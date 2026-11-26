@@ -105,6 +105,11 @@ pub struct TabState {
     pub last_active_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<String>,
+    /// A private tab: an InPrivate page that keeps no history, cookies, site
+    /// data or cache once closed, and is never saved, slept, archived,
+    /// pinned or reopened.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
 }
 
 impl TabState {
@@ -132,6 +137,7 @@ impl TabState {
             unloaded: false,
             last_active_at: Some(now_ms()),
             folder_id: None,
+            private: false,
         }
     }
 

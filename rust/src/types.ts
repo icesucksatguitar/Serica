@@ -107,6 +107,8 @@ export interface TabState {
   lastActiveAt?: number;
   /** Optional folder in the pinned section of this space. */
   folderId?: string | null;
+  /** Private (InPrivate) tab: nothing is kept once it closes. */
+  private?: boolean;
 }
 
 export interface ActiveMediaState {

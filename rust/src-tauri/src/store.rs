@@ -278,8 +278,9 @@ impl Store {
             "profiles": self.profiles,
             "spaces": self.spaces,
             "activeSpaceId": self.active_space_id,
-            "tabs": self.tabs,
-            "activeTabId": self.active_tab_id,
+            // Private tabs are never written down.
+            "tabs": self.tabs.iter().filter(|t| !t.private).collect::<Vec<_>>(),
+            "activeTabId": self.active_tab_id.as_ref().filter(|id| self.tab(id).is_some_and(|t| !t.private)),
             "favorites": self.favorites,
             "folders": self.folders,
             "archive": self.archive,
@@ -504,6 +505,17 @@ impl Store {
         self.tab(&tab.id).cloned().unwrap_or(tab)
     }
 
+    /// A private tab in the active space, made active.
+    pub fn create_private_tab(&mut self, url: Option<String>) -> TabState {
+        let space_id = self.active_space_id.clone();
+        let mut tab = TabState::new(&space_id, url);
+        tab.private = true;
+        tab.zoom_factor = Some(self.settings.zoom_for(&tab.url));
+        self.place(tab.clone(), &space_id, Section::Today, None);
+        self.activate_tab(&tab.id);
+        self.tab(&tab.id).cloned().unwrap_or(tab)
+    }
+
     /// The tab to show after `closing` (in the active space) goes away:
     /// next in visible order, else previous, skipping unloaded pinned tabs.
     fn neighbor_of(&self, closing: &str) -> Option<String> {
@@ -531,7 +543,7 @@ impl Store {
             }
         } else {
             self.tabs.retain(|t| t.id != id);
-            if !is_internal_url(&tab.url) {
+            if !is_internal_url(&tab.url) && !tab.private {
                 self.closed.push(tab.clone());
                 if self.closed.len() > MAX_CLOSED {
                     self.closed.remove(0);
@@ -652,6 +664,10 @@ impl Store {
 
     fn relocate(&mut self, id: &str, from: &str, to: &str, space_id: &str, index: Option<i64>) -> Option<bool> {
         self.space(space_id)?;
+        // A private tab can't be pinned or kept as a favorite (both are saved).
+        if from != "favorite" && (to == "pinned" || to == "favorite") && self.tab(id).is_some_and(|t| t.private) {
+            return None;
+        }
         let dest_profile = self.space_profile(space_id);
         if from == "favorite" {
             let fav = self.favorites.iter().find(|f| f.id == id)?.clone();
@@ -1016,6 +1032,8 @@ impl Store {
                     && !t.is_sleeping
                     && !t.unloaded
                     && !t.has_active_media
+                    // Sleeping a private tab would end its session.
+                    && !t.private
                     && t.section() != Section::Pinned
                     && !is_internal_url(&t.url)
             })
@@ -1042,6 +1060,7 @@ impl Store {
             if t.section() == Section::Today
                 && Some(&t.id) != active.as_ref()
                 && !t.has_active_media
+                && !t.private
                 && t.last_active_at.unwrap_or(i64::MAX) < cutoff
             {
                 archived.push(t.clone());
@@ -1287,6 +1306,34 @@ mod tests {
         assert!(s.delete_space("space-work").is_ok());
         assert!(s.delete_space("space-leisure").is_ok());
         assert_eq!(s.delete_space("space-study"), Err("last-space"));
+    }
+
+    #[test]
+    fn private_tabs_leave_nothing_behind() {
+        let mut s = store();
+        let normal = s.create_tab(Some("https://normal.com".into()), None, true, None).id;
+        let p = s.create_private_tab(Some("https://secret.example".into()));
+        assert!(p.private);
+        assert_eq!(s.active_tab_id.as_deref(), Some(p.id.as_str()));
+        // Never written to disk, not even as the active tab.
+        let files = s.serialized();
+        let state = String::from_utf8(files.iter().find(|(f, _)| f.ends_with("state.json")).unwrap().1.clone()).unwrap();
+        assert!(!state.contains("secret.example"));
+        assert!(!state.contains(&p.id));
+        assert!(state.contains("normal.com"));
+        // Can't be pinned or kept as a favorite.
+        assert!(!s.set_pinned(&p.id, true));
+        assert!(!s.add_favorite(&p.id));
+        // Never slept or archived, even when idle for days.
+        s.activate_tab(&normal);
+        s.tab_mut(&p.id).unwrap().last_active_at = Some(now_ms() - 7 * 24 * 3_600_000);
+        assert_eq!(s.sleep_inactive(60_000), 0);
+        assert!(!s.tab(&p.id).unwrap().is_sleeping);
+        // Not offered again after closing.
+        s.close_tab(&p.id);
+        assert!(s.tab(&p.id).is_none());
+        let reopened = s.reopen_closed_tab();
+        assert!(reopened.map_or(true, |t| !t.url.contains("secret.example")));
     }
 
     #[test]

@@ -112,6 +112,7 @@ pub fn run() {
             commands::get_pdf_dark_tab,
             commands::set_pdf_dark_tab,
             commands::create_tab,
+            commands::create_private_tab,
             commands::close_tab,
             commands::select_tab,
             commands::reopen_closed_tab,
