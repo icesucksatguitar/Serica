@@ -56,6 +56,7 @@ import './styles/home.css';
 import './styles/settings2.css';
 import './styles/ai.css';
 import './styles/setup.css';
+import './styles/focus-stats.css';
 import './styles/motion.css';
 
 const ArchiveList = lazy(() =>

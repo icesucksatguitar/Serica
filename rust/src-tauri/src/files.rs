@@ -85,6 +85,63 @@ pub unsafe fn pick_one_file(owner: isize, filters: &[(&str, &str)], title: &str)
     pick_with(owner, filters, false, title).into_iter().next()
 }
 
+/// The system "Save as" dialog, modal to the main window, on its own thread.
+pub async fn pick_save(app: &Shared, name: &str, kind: &str, exts: &[&str]) -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        let owner = app.handle.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
+        let name = name.to_string();
+        let kind = kind.to_string();
+        let spec = exts.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
+        let ext = exts.first().map(|e| e.to_string());
+        tauri::async_runtime::spawn_blocking(move || unsafe { save_with(owner, &name, &kind, &spec, ext.as_deref()) }).await.ok().flatten()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, name, kind, exts);
+        None
+    }
+}
+
+#[cfg(windows)]
+unsafe fn save_with(owner: isize, name: &str, kind: &str, spec: &str, ext: Option<&str>) -> Option<std::path::PathBuf> {
+    use windows::core::{HSTRING, PCWSTR, PWSTR};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, FOS_OVERWRITEPROMPT, SIGDN_FILESYSPATH};
+
+    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    let mut out = None;
+    if let Ok(dialog) = CoCreateInstance::<_, IFileSaveDialog>(&FileSaveDialog, None, CLSCTX_INPROC_SERVER) {
+        let (n, s) = (HSTRING::from(kind), HSTRING::from(spec));
+        let specs = [COMDLG_FILTERSPEC { pszName: PCWSTR(n.as_ptr()), pszSpec: PCWSTR(s.as_ptr()) }];
+        let _ = dialog.SetFileTypes(&specs);
+        let _ = dialog.SetFileName(&HSTRING::from(name));
+        if let Some(e) = ext {
+            let _ = dialog.SetDefaultExtension(&HSTRING::from(e));
+        }
+        if let Ok(opts) = dialog.GetOptions() {
+            let _ = dialog.SetOptions(opts | FOS_OVERWRITEPROMPT);
+        }
+        let owner = (owner != 0).then_some(HWND(owner as _));
+        if dialog.Show(owner).is_ok() {
+            if let Ok(item) = dialog.GetResult() {
+                if let Ok(p) = item.GetDisplayName(SIGDN_FILESYSPATH) {
+                    let p: PWSTR = p;
+                    if let Ok(s) = p.to_string() {
+                        out = Some(std::path::PathBuf::from(s));
+                    }
+                    CoTaskMemFree(Some(p.0 as _));
+                }
+            }
+        }
+    }
+    CoUninitialize();
+    out
+}
+
 /// The system "Open" dialog, modal to `owner`.
 #[cfg(windows)]
 unsafe fn pick_with(owner: isize, filters: &[(&str, &str)], multi: bool, title: &str) -> Vec<String> {

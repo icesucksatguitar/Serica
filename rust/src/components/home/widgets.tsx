@@ -20,7 +20,8 @@ import {
 import type { WidgetItem, WidgetKind, WidgetSize } from '../../shared/settings';
 import type { GithubContributions, HistoryEntry, WeatherNow } from '../../types';
 import { APP_WIDGETS, appIcon, appQueryUrl, appWidget } from './apps';
-import { focusError, formatRemaining, remainingNow, useFocusView, useTicker } from '../../hooks/useFocus';
+import type { FocusStats } from '../../adapter/tauriBridge';
+import { fmtDuration, focusError, formatRemaining, remainingNow, useFocusView, useTicker } from '../../hooks/useFocus';
 
 // ---------------------------------------------------------------------------
 // Catalog
@@ -611,6 +612,11 @@ const FocusWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
   const minutes = num(ctx.item.config.minutes) ?? 25;
   const listId = str(ctx.item.config.listId);
   const list = view?.blocks.find((b) => b.id === listId) ?? view?.blocks[0];
+  // Today's focused time, refreshed when a list starts or ends.
+  const [today, setToday] = useState(0);
+  useEffect(() => {
+    void window.serica?.focusStats?.('day').then((s: FocusStats) => s && setToday(s.totals.focusMs));
+  }, [view]);
   if (active) {
     const name = view?.blocks.find((b) => b.id === active.blockId)?.name ?? 'Focus';
     const left = remainingNow(active.remainingMs);
@@ -640,6 +646,7 @@ const FocusWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
       <div className="w-head">
         <Target size={14} />
         <span className="w-title">Focus</span>
+        {today >= 60_000 && <span className="w-meta tnum" title="Focused today">{fmtDuration(today)} today</span>}
       </div>
       {list ? (
         <>

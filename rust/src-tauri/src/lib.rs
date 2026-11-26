@@ -10,6 +10,7 @@ mod downloads;
 mod extensions;
 mod files;
 mod focus;
+mod focus_stats;
 mod history;
 mod importer;
 mod mcp;
@@ -213,6 +214,10 @@ pub fn run() {
             focus::focus_stop,
             focus::focus_challenge,
             focus::focus_check,
+            focus_stats::focus_stats,
+            focus_stats::focus_stats_tracking,
+            focus_stats::focus_stats_clear,
+            focus_stats::focus_stats_export,
             backgrounds::pick_background_image,
             default_browser::default_browser_status,
             default_browser::make_default_browser,
@@ -229,6 +234,7 @@ pub fn run() {
                 shared.notify(app::Notice::Quit);
                 shared.save_now();
                 shared.focus.save(true);
+                shared.focus_stats.save(true);
                 tabhost::TabHost::close_all(&shared);
             }
         }

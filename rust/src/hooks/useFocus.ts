@@ -80,3 +80,13 @@ export function focusError(e: unknown): string {
       return 'Focus Mode could not do that.';
   }
 }
+
+/** A duration for statistics: 3h 05m, 42m, <1m. */
+export function fmtDuration(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return ms > 0 ? '<1m' : '0m';
+  const h = Math.floor(m / 60);
+  if (h === 0) return `${m}m`;
+  const rest = m % 60;
+  return rest ? `${h.toLocaleString()}h ${String(rest).padStart(2, '0')}m` : `${h.toLocaleString()}h`;
+}

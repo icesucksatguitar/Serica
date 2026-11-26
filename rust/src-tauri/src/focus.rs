@@ -401,6 +401,8 @@ struct Inner {
     dirty: bool,
     /// Time since Serica was closed hasn't been settled yet (no network answer).
     downtime_pending: Option<(i64, bool)>,
+    /// Sessions that ran to their end since last asked (for statistics).
+    finished: Vec<String>,
 }
 
 pub struct Focus {
@@ -499,6 +501,7 @@ impl Focus {
                 signature: Vec::new(),
                 dirty: false,
                 downtime_pending: had_sessions.then_some((saved.saved_at_ms, saved.saved_at_verified)),
+                finished: Vec::new(),
             }),
             active: RwLock::new(None),
             any: AtomicBool::new(false),
@@ -539,6 +542,8 @@ impl Focus {
                         *r -= down;
                     }
                 }
+                let done: Vec<String> = g.sessions.iter().filter(|s| s.remaining_ms.is_some_and(|r| r <= 0)).map(|s| s.block_id.clone()).collect();
+                g.finished.extend(done);
                 g.sessions.retain(|s| s.remaining_ms.map_or(true, |r| r > 0));
                 tracing::info!("focus: {down} ms passed while closed (network verified)");
             }
@@ -561,6 +566,8 @@ impl Focus {
                 }
             }
             let before = g.sessions.len();
+            let done: Vec<String> = g.sessions.iter().filter(|s| s.remaining_ms.is_some_and(|r| r <= 0)).map(|s| s.block_id.clone()).collect();
+            g.finished.extend(done);
             g.sessions.retain(|s| s.remaining_ms.map_or(true, |r| r > 0));
             if g.sessions.len() != before {
                 g.dirty = true;
@@ -570,6 +577,37 @@ impl Focus {
         g.suspended_until.retain(|_, until| *until > now);
         drop(g);
         self.recompile()
+    }
+
+    /// Sessions that ran to their end since the last call.
+    pub fn take_finished(&self) -> Vec<String> {
+        std::mem::take(&mut self.inner.lock().finished)
+    }
+
+    /// The lists in effect now (session or schedule), as (id, name).
+    pub fn active_lists(&self) -> Vec<(String, String)> {
+        let g = self.inner.lock();
+        g.signature
+            .iter()
+            .filter_map(|(id, _, _)| g.blocks.iter().find(|b| &b.id == id).map(|b| (b.id.clone(), b.name.clone())))
+            .collect()
+    }
+
+    /// Whether `url` is in any list (in effect or not), for statistics.
+    pub fn listed(&self, url: &str) -> bool {
+        let Some((host, path)) = split_url(url) else { return false };
+        let g = self.inner.lock();
+        let hit = |s: &str| parse_rule(s).is_some_and(|r| r.matches(&host, &path));
+        g.blocks.iter().any(|b| {
+            !b.allow.iter().any(|a| hit(a))
+                && (b.sites.iter().any(|s| hit(s))
+                    || b.categories.iter().any(|c| CATEGORIES.iter().find(|x| x.id == c).is_some_and(|cat| cat.sites.iter().any(|s| hit(s)))))
+        })
+    }
+
+    /// Whether `id` has a running session (not just its schedule).
+    pub fn has_session(&self, id: &str) -> bool {
+        self.inner.lock().sessions.iter().any(|s| s.block_id == id)
     }
 
     /// Rebuilds the rules in effect. Returns whether the active set changed.
@@ -1065,6 +1103,9 @@ pub fn after_change(app: &crate::app::Shared, before: Option<Arc<Compiled>>) {
         let was = before.as_ref().and_then(|c| c.check(&url)).is_some();
         let now = after.as_ref().and_then(|c| c.check(&url)).is_some();
         if was != now {
+            if now {
+                app.focus_stats.expect_block(&url);
+            }
             if let Ok(u) = url::Url::parse(&url) {
                 let _ = wv.navigate(u);
             }
@@ -1076,6 +1117,9 @@ pub fn after_change(app: &crate::app::Shared, before: Option<Arc<Compiled>>) {
             let was = before.as_ref().and_then(|c| c.check(&s)).is_some();
             let now = after.as_ref().and_then(|c| c.check(&s)).is_some();
             if was != now {
+                if now {
+                    app.focus_stats.expect_block(&s);
+                }
                 let _ = wv.navigate(u);
             }
         });
@@ -1108,7 +1152,12 @@ pub async fn focus_delete_block(id: String, app: tauri::State<'_, crate::app::Sh
 #[tauri::command]
 pub async fn focus_start(id: String, minutes: Option<u32>, lock: bool, app: tauri::State<'_, crate::app::Shared>) -> R<FocusView> {
     let before = app.focus.snapshot();
+    let new = !app.focus.has_session(&id);
     app.focus.start(&id, minutes, lock)?;
+    if new {
+        app.focus_stats.session_started();
+        app.focus_stats.save(false);
+    }
     after_change(&app, before);
     Ok(app.focus.view())
 }
@@ -1116,7 +1165,12 @@ pub async fn focus_start(id: String, minutes: Option<u32>, lock: bool, app: taur
 #[tauri::command]
 pub async fn focus_stop(id: String, text: Option<String>, app: tauri::State<'_, crate::app::Shared>) -> R<FocusView> {
     let before = app.focus.snapshot();
+    let was_on = app.focus.active_lists().iter().any(|(b, _)| *b == id);
     app.focus.stop(&id, text.as_deref())?;
+    if was_on {
+        app.focus_stats.session_ended(false);
+        app.focus_stats.save(false);
+    }
     after_change(&app, before);
     Ok(app.focus.view())
 }

@@ -80,6 +80,7 @@ pub struct App {
     pub downloads: Downloads,
     pub mcp_http: crate::mcp_http::McpHttp,
     pub focus: crate::focus::Focus,
+    pub focus_stats: crate::focus_stats::Stats,
     pub host: Mutex<TabHost>,
     pub mcp_logs: Mutex<VecDeque<Value>>,
     blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
@@ -235,6 +236,7 @@ impl App {
             downloads: Downloads::new(data_dir.join("downloads.json")),
             mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
             focus: crate::focus::Focus::load(data_dir.join("focus.json")),
+            focus_stats: crate::focus_stats::Stats::load(data_dir.join("focus-stats.json")),
             host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net, block_3pc)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
@@ -387,6 +389,7 @@ impl App {
         tauri::async_runtime::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             let mut n: u64 = 0;
+            let mut last = std::time::Instant::now();
             loop {
                 tick.tick().await;
                 n += 1;
@@ -395,6 +398,19 @@ impl App {
                     crate::focus::after_change(&app, before);
                 } else if n % 15 == 0 && app.focus.is_active() {
                     app.focus.save(false);
+                }
+                // Statistics: focus time, finished sessions, time on sites.
+                // A long gap (the PC slept) counts as two seconds, not hours.
+                let dt = (last.elapsed().as_millis() as i64).min(2000);
+                last = std::time::Instant::now();
+                let finished = app.focus.take_finished();
+                for _ in &finished {
+                    app.focus_stats.session_ended(true);
+                }
+                let browsing = crate::focus_stats::sample_browsing(&app);
+                app.focus_stats.tick(dt, &app.focus.active_lists(), browsing);
+                if n % 60 == 0 || !finished.is_empty() {
+                    app.focus_stats.save(false);
                 }
             }
         });

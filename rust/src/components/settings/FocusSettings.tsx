@@ -5,6 +5,7 @@ import { focusError, formatRemaining, remainingNow, setFocusView, useFocusView, 
 import { usePresence } from '../../hooks/usePresence';
 import { Segmented } from '../home/WidgetEditor';
 import { Switch } from '../Switch';
+import { FocusStatsPanel } from './FocusStats';
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -357,6 +358,22 @@ export const FocusSettings: React.FC = () => {
   useEffect(() => void (starting && setLastStarting(starting)), [starting]);
   useEffect(() => void (unlocking && setLastUnlocking(unlocking)), [unlocking]);
 
+  const [tab, setTab] = useState<'lists' | 'stats'>(() => {
+    try {
+      return localStorage.getItem('serica_focus_tab') === 'stats' ? 'stats' : 'lists';
+    } catch {
+      return 'lists';
+    }
+  });
+  const pickTab = (t: 'lists' | 'stats') => {
+    setTab(t);
+    try {
+      localStorage.setItem('serica_focus_tab', t);
+    } catch {
+      // Not remembered.
+    }
+  };
+
   const activeOf = useMemo(() => new Map((view?.active ?? []).map((a) => [a.blockId, a])), [view]);
   if (!view) return <p className="s2-note">Loading…</p>;
 
@@ -375,6 +392,18 @@ export const FocusSettings: React.FC = () => {
 
   return (
     <>
+      <div className="seg focus-view-switch" role="tablist" aria-label="Focus">
+        <button type="button" role="tab" aria-selected={tab === 'lists'} className={tab === 'lists' ? 'on' : ''} onClick={() => pickTab('lists')}>
+          Lists
+        </button>
+        <button type="button" role="tab" data-setting-id="focus.stats" aria-selected={tab === 'stats'} className={tab === 'stats' ? 'on' : ''} onClick={() => pickTab('stats')}>
+          Statistics
+        </button>
+      </div>
+      {tab === 'stats' ? (
+        <FocusStatsPanel />
+      ) : (
+      <>
       <div className="focus-hero">
         <div className="focus-hero-text">
           <h3>Block what distracts you, for as long as you choose.</h3>
@@ -450,6 +479,8 @@ export const FocusSettings: React.FC = () => {
         </div>
         {error && <p className="wed-error">{error}</p>}
       </section>
+      </>
+      )}
 
       {editorP.mounted && (editing ?? lastEditing) && (
         <div className="presence" data-state={editorP.state}>

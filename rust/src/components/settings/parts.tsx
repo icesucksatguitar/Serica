@@ -92,6 +92,7 @@ export const SETTINGS_INDEX: IndexEntry[] = [
   { id: 'tabs.pdf', page: 'tabs', group: 'Video and documents', title: 'Dark PDFs', detail: 'In dark mode, PDFs have dark pages and light text', words: ['pdf', 'dark'] },
 
   { id: 'focus.lists', page: 'focus', group: 'Focus lists', title: 'Focus Mode', detail: 'Block distracting sites for a while', words: ['block', 'blocker', 'cold turkey', 'productivity', 'focus', 'distraction', 'schedule', 'lock'] },
+  { id: 'focus.stats', page: 'focus', group: 'Focus', title: 'Focus statistics', detail: 'Time focused, blocked attempts, streaks, time on sites', words: ['stats', 'statistics', 'usage', 'screen time', 'report', 'streak', 'history', 'time spent', 'export', 'csv', 'cold turkey'] },
 
   { id: 'spaces.profiles', page: 'spaces', group: 'Spaces and profiles', title: 'Profiles and spaces', detail: 'Separate sign-ins and sets of tabs', words: ['profile', 'space', 'workspace'] },
 

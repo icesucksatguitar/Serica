@@ -254,6 +254,11 @@ export const tauriBridge = {
   focusStop: (id: string, text?: string) => invoke<FocusView>('focus_stop', { id, text: text ?? null }),
   focusChallenge: (id: string) => invoke<string>('focus_challenge', { id }),
   focusCheck: (url: string) => invoke<boolean>('focus_check', { url }),
+  focusStats: (range: FocusRange) => invoke<FocusStats>('focus_stats', { range }),
+  focusStatsTracking: (on: boolean) => invoke<void>('focus_stats_tracking', { on }),
+  focusStatsClear: () => invoke<void>('focus_stats_clear'),
+  /** Saves every day as CSV where the user picks; the path, or null if cancelled. */
+  focusStatsExport: () => invoke<string | null>('focus_stats_export'),
   onFocusUpdated: (cb: (v: FocusView) => void) => on('serica:focus-updated', cb),
 
   // New-tab background picture, default browser, importing
@@ -298,6 +303,38 @@ export interface FocusView {
   active: FocusActive[];
   categories: { id: string; label: string; sites: string[] }[];
   clockVerified: boolean;
+}
+
+export type FocusRange = 'day' | 'week' | 'month' | 'year';
+
+export interface FocusTotals {
+  focusMs: number;
+  browseMs: number;
+  distractMs: number;
+  blocked: number;
+  started: number;
+  completed: number;
+  stopped: number;
+  longestMs: number;
+}
+
+export interface FocusStats {
+  range: FocusRange;
+  tracking: boolean;
+  /** Hours of today (`"14"`), days (`"2026-11-26"`) or months (`"2026-11"`). */
+  buckets: { key: string; focusMs: number; browseMs: number; distractMs: number; blocked: number }[];
+  totals: FocusTotals;
+  previous: FocusTotals;
+  days: number;
+  streak: number;
+  bestStreak: number;
+  streakGoalMs: number;
+  sites: { host: string; ms: number; listed: boolean }[];
+  blockedSites: { host: string; count: number }[];
+  blockedHours: number[];
+  focusHours: number[];
+  lists: { id: string; name: string; ms: number }[];
+  hasData: boolean;
 }
 
 export interface ImportSource {

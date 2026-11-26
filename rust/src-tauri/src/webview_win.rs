@@ -431,6 +431,7 @@ unsafe fn install(
                 // also lose the requests other pages make to them.
                 if let Some(hit) = app.focus.check(&uri) {
                     if rc == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
+                        app.focus_stats.blocked(&uri);
                         args.SetResponse(&focus_response(&env, &hit, &uri)?)?;
                         return Ok(());
                     }
@@ -1591,6 +1592,7 @@ pub fn attach_permissions(app: &Shared, owner: &str, wv: &Webview) {
                 args.Request()?.Uri(&mut uri)?;
                 let uri = take(uri);
                 if let Some(hit) = app2.focus.check(&uri) {
+                    app2.focus_stats.blocked(&uri);
                     args.SetResponse(&focus_response(&env, &hit, &uri)?)?;
                 }
                 Ok(())
