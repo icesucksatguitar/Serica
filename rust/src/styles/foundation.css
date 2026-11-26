@@ -1,0 +1,156 @@
+/* ==========================================================================
+   Serica foundation: type, motion and the hairline language.
+   --------------------------------------------------------------------------
+   Loads after system.css. Everything new is built from these tokens.
+
+   Type: Inter (variable, optical sizing on), bundled with the app. Tracking
+   follows Inter's dynamic metrics: slightly open at 11-12px, tighter as the
+   size grows. Numbers that change in place (clocks, counters, timers) use
+   tabular figures so they never jitter.
+
+   Motion: entrances decelerate, exits accelerate, moves use a damped spring.
+   Only transform, opacity and clip-path animate.
+   ========================================================================== */
+
+:root {
+  --font-ui: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Inter Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-family-base: var(--font-ui);
+  --font-heading: var(--font-display);
+  --font-sans: var(--font-ui);
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, monospace;
+
+  /* Size and tracking pairs */
+  --fs-11: 11px;  --tr-11: 0.005em;
+  --fs-12: 12px;  --tr-12: 0em;
+  --fs-13: 13px;  --tr-13: -0.003em;
+  --fs-14: 14px;  --tr-14: -0.006em;
+  --fs-16: 16px;  --tr-16: -0.011em;
+  --fs-20: 20px;  --tr-20: -0.017em;
+  --fs-26: 26px;  --tr-26: -0.02em;
+  --fs-34: 34px;  --tr-34: -0.022em;
+  --fs-56: 56px;  --tr-56: -0.024em;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* entrances: decelerate */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* exits: accelerate */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Damped springs (response / damping): glide 0.34 / 0.82, snap 0.26 / 0.86 */
+  --spring-glide: linear(0, 0.0522, 0.1715, 0.3169, 0.4629, 0.5954, 0.7078, 0.7983, 0.8679, 0.9192, 0.9556, 0.98, 0.9956, 1.0047, 1.0093, 1.011, 1.0109, 1.0098, 1.0082, 1.0066, 1.0051, 1.0037, 1.0026, 1.0018, 1.0011, 1.0006, 1.0003, 1.0001, 1);
+  --spring-snap: linear(0, 0.075, 0.2336, 0.4103, 0.5719, 0.7048, 0.8067, 0.8803, 0.9308, 0.9637, 0.9841, 0.9957, 1.0018, 1.0044, 1.005, 1.0046, 1.0039, 1.003, 1.0022, 1.0015, 1.001, 1.0006, 1);
+  --dur-press: 90ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
+  --dur-exit: 150ms;
+  --dur-glide: 540ms;
+  --dur-snap: 400ms;
+
+  /* Hairline language (Search-style): neutral ink on the space's ground. */
+  --ink: var(--ui-fg);
+  --ink-2: var(--ui-fg-muted);
+  --ink-3: var(--ui-fg-faint);
+  --ground: var(--ui-bg);
+  --card: color-mix(in srgb, var(--theme-fg, #f2f2f2) 3.5%, var(--ui-bg));
+  --wash: color-mix(in srgb, var(--theme-fg, #f2f2f2) 5%, transparent);
+  --hairline: color-mix(in srgb, var(--theme-fg, #f2f2f2) 10%, transparent);
+  --hairline-strong: color-mix(in srgb, var(--theme-fg, #f2f2f2) 16%, transparent);
+  --radius-card: 12px;
+  --radius-sheet: 16px;
+  --shadow-sheet: 0 0 0 1px color-mix(in srgb, var(--theme-fg, #f2f2f2) 9%, transparent), 0 18px 48px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme='light'] {
+  --card: color-mix(in srgb, var(--theme-fg, #1c1c1c) 2.5%, var(--ui-bg));
+  --shadow-sheet: 0 0 0 1px color-mix(in srgb, var(--theme-fg, #1c1c1c) 8%, transparent), 0 18px 48px rgba(20, 20, 30, 0.14), 0 2px 6px rgba(20, 20, 30, 0.06);
+}
+
+html,
+body {
+  font-family: var(--font-ui);
+  font-optical-sizing: auto;
+  font-feature-settings: 'cv05' 1, 'ss03' 1;
+  letter-spacing: var(--tr-13);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+kbd {
+  font-family: var(--font-ui);
+  font-feature-settings: 'tnum' 1, 'case' 1;
+}
+
+/* Numbers that update in place */
+.tnum,
+time,
+[data-tnum] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'cv05' 1;
+}
+
+/* Default state feedback for anything clickable that doesn't set its own:
+   a short fade rather than a snap. */
+:where(button, [role='button'], a, summary) {
+  transition-property: opacity, transform, background-color, color, border-color;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+:where(button, [role='button']):active:not(:disabled) {
+  transition-duration: var(--dur-press);
+}
+
+/* Focus rings ease in instead of appearing at once. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  transition-property: outline-offset, outline-color, opacity, transform, background-color, color, border-color;
+  transition-duration: var(--dur-fast);
+}
+
+/* --------------------------------------------------------------------------
+   Presence: overlays mount with data-state="closed", flip to "open" on the
+   next frame, and leave with "closed" again before they unmount
+   (see hooks/usePresence.ts). The wrapper has no box of its own.
+   -------------------------------------------------------------------------- */
+
+.presence {
+  display: contents;
+}
+
+.presence > * {
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+.presence[data-state='closed'] > * {
+  opacity: 0;
+  transition: opacity var(--dur-exit) var(--ease-in);
+}
+
+/* Sheets and panels inside an overlay also lift slightly. */
+.presence :is(.panel, .sheet, .page-dialog, .wgallery, .studio, .settings2, .perm-card, .setup-card) {
+  transition: transform var(--dur-slow) var(--spring-snap), opacity var(--dur-base) var(--ease-out);
+}
+
+.presence[data-state='closed'] :is(.panel, .sheet, .page-dialog, .wgallery, .studio, .settings2, .perm-card, .setup-card) {
+  transform: translateY(6px) scale(0.985);
+  opacity: 0;
+  transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

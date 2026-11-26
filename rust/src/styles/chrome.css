@@ -1,0 +1,164 @@
+/* ==========================================================================
+   Window chrome: the top bar and how the sidebar takes in its controls.
+   Loads last.
+
+   Top bar: 35px (was 30), controls 26px, so the omnibox, the site buttons
+   and the window buttons are easier to hit without the bar getting heavy.
+
+   Sidebar control absorption: when the sidebar opens, the top bar's left
+   controls (sidebar toggle, back / forward / reload / home, new tab) become
+   the sidebar's own toolbar, in place. Nothing moves sideways:
+   - the bar rises above the sidebar, and its background is cut away over the
+     sidebar in step with the slide, so the controls end up on the sidebar's
+     surface, in a toolbar row the sidebar reserves for them;
+   - the space pill folds down to its icon (the sidebar names the space just
+     below) and the buttons after it glide left to close the gap.
+   Only clip-path, opacity and transform animate. Closing plays it backwards
+   and the controls come to rest exactly where they started.
+   ========================================================================== */
+
+:root {
+  --topbar-control-h: 26px;
+  --absorb-in: 220ms cubic-bezier(0.22, 1, 0.36, 1); /* the sidebar's slide in */
+  --absorb-out: 180ms cubic-bezier(0.4, 0, 0.6, 1); /* and out */
+}
+
+/* ---- Sizes ------------------------------------------------------------- */
+
+.floating-top-chrome-capsule.floating-top-chrome-capsule {
+  height: var(--topbar-h, 35px);
+}
+
+.floating-top-chrome-capsule .macos-window-controls-cluster,
+.floating-top-chrome-capsule .site-nav-controls,
+.floating-top-chrome-capsule .macos-tabs-toggle-pill,
+.floating-top-chrome-capsule .minimal-top-right-cluster,
+.floating-top-chrome-capsule .minimal-pill-btn,
+.floating-top-chrome-capsule .top-floating-url-pill {
+  height: var(--topbar-control-h);
+}
+
+.floating-top-chrome-capsule .site-nav-btn {
+  width: var(--topbar-control-h);
+  height: calc(var(--topbar-control-h) - 2px);
+}
+
+.floating-top-chrome-capsule .minimal-icon-btn {
+  width: var(--topbar-control-h);
+  height: var(--topbar-control-h);
+}
+
+.floating-top-chrome-capsule .top-floating-url-pill {
+  font-size: var(--fs-13);
+  letter-spacing: var(--tr-13);
+}
+
+.macos-window-drag-bar.on-webpage {
+  height: var(--topbar-h, 35px);
+}
+
+/* ---- The bar's background is its own layer ----------------------------
+   (so the bar can sit above the sidebar without covering it) */
+
+.floating-top-chrome-capsule.on-webpage.on-webpage {
+  background: transparent !important;
+  border-bottom-color: transparent !important;
+}
+
+.floating-top-chrome-capsule.on-webpage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--theme-bg-canvas);
+  border-bottom: 1px solid var(--border);
+  clip-path: inset(0 0 0 0);
+  transition: clip-path var(--absorb-out), background-color 200ms ease, border-color 200ms ease;
+}
+
+.floating-top-chrome-capsule.on-webpage.topbar-tinted::before {
+  background: var(--topbar-tint-bg);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule {
+  z-index: 10110;
+}
+
+html.sidebar-covering .floating-top-chrome-capsule.on-webpage::before {
+  clip-path: inset(0 0 0 var(--sidebar-cover, 0px));
+  transition: clip-path var(--absorb-in), background-color 200ms ease, border-color 200ms ease;
+}
+
+/* The old behaviour slid the controls to the right of the sidebar. */
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster {
+  transform: none;
+}
+
+/* ---- Absorption: the space pill folds to its icon ---------------------- */
+
+.macos-window-controls-cluster {
+  --pill-shift: 0px;
+}
+
+.floating-top-chrome-capsule .macos-tabs-toggle-pill {
+  padding-left: 7px;
+  clip-path: inset(0 0 0 0 round 8px);
+  transition: clip-path var(--absorb-out), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.floating-top-chrome-capsule .macos-tabs-toggle-pill > :not(svg) {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.floating-top-chrome-capsule .macos-window-controls-cluster > :not(.macos-tabs-toggle-pill) {
+  transition: transform var(--absorb-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-tabs-toggle-pill {
+  /* 28px stays visible: the panel icon */
+  clip-path: inset(0 calc(100% - 28px) 0 0 round 8px);
+  transition: clip-path var(--absorb-in), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-tabs-toggle-pill > :not(svg) {
+  opacity: 0;
+  transition: opacity 90ms var(--ease-in);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster > :not(.macos-tabs-toggle-pill) {
+  transform: translate3d(calc(-1 * var(--pill-shift)), 0, 0);
+  transition: transform var(--dur-glide) var(--spring-glide), opacity var(--dur-fast) var(--ease-out);
+}
+
+/* A narrow sidebar has no room for the new-tab button (its own New Tab row
+   is right below). */
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster.absorb-compact .topbar-new-tab-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- The sidebar's toolbar row ------------------------------------------ */
+
+.nsb.autohide {
+  padding-top: calc(var(--topbar-h, 35px) + 6px);
+}
+
+.nsb-chrome-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h, 35px);
+  border-bottom: 1px solid var(--hairline);
+  -webkit-app-region: drag;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-top-chrome-capsule .macos-window-controls-cluster > *,
+  .floating-top-chrome-capsule .macos-tabs-toggle-pill,
+  .floating-top-chrome-capsule.on-webpage::before {
+    transition: none !important;
+  }
+}

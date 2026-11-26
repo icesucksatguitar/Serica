@@ -10,8 +10,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole } from './useViewportOverlay';
 
-/** Height of the top bar on web pages (CSS px). */
-export const TOP_BAR_HEIGHT = 30;
+/** Height of the top bar (CSS px). Keep in step with `--topbar-h` users in CSS. */
+export const TOP_BAR_HEIGHT = 35;
 /** Strip at the top edge left uncovered by the page, where the pointer reveals the bar. */
 export const TOP_BAR_REVEAL_STRIP = 6;
 
@@ -33,6 +33,8 @@ export interface TopBarAutoHide {
  */
 export function useTopBarAutoHide(enabled: boolean, pinned: boolean): TopBarAutoHide {
   const [revealed, setRevealed] = useState(false);
+  const revealedRef = useRef(false);
+  revealedRef.current = revealed;
   const [shownState, setShownState] = useState(false);
   const hideTimer = useRef<number | null>(null);
 
@@ -64,11 +66,13 @@ export function useTopBarAutoHide(enabled: boolean, pinned: boolean): TopBarAuto
   // pointer moves, which keeps it shown too.
   useEffect(() => {
     if (!enabled) return;
+    // Acts on changes only: every scheduled hide starts a page capture, so
+    // it must not run again for each pointer event below the bar.
     const onMove = (e: MouseEvent) => {
       if (e.clientY <= TOP_BAR_HEIGHT + 2) {
-        if (e.clientY <= TOP_BAR_REVEAL_STRIP) revealNow();
-        else cancelHide();
-      } else {
+        if (e.clientY <= TOP_BAR_REVEAL_STRIP && !revealedRef.current) revealNow();
+        else if (hideTimer.current !== null) cancelHide();
+      } else if (revealedRef.current && hideTimer.current === null) {
         scheduleHide();
       }
     };

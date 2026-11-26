@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useBrowser } from './hooks/useBrowser';
 import { useProfiles } from './hooks/useProfiles';
 import { Sidebar } from './components/Sidebar';
@@ -14,6 +14,8 @@ import { UpdateNotice } from './components/UpdateNotice';
 import { WhatsNew } from './components/WhatsNew';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
+import { PermissionPrompt } from './components/PermissionPrompt';
+import { DropZones } from './components/DropZones';
 import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
 import { useSettings } from './hooks/useSettings';
 import { prewarmPageUnderlay, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
@@ -42,6 +44,9 @@ import './styles/system.css';
 import './styles/settings.css';
 import './styles/panels.css';
 import './styles/sidebar-v2.css';
+import './styles/foundation.css';
+import './styles/features.css';
+import './styles/chrome.css';
 
 const ArchiveList = lazy(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
@@ -132,6 +137,9 @@ export function App() {
   // Sidebar: a full-height panel that floats over the page. It starts hidden and
   // opens from the toolbar button, Ctrl+S / Ctrl+E or the left edge of the window.
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Whether the sidebar is on screen (opened from the toggle, a shortcut or
+  // the left edge): its toolbar row then holds the top bar's left controls.
+  const [sidebarShown, setSidebarShown] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const setSidebarExpanded = useCallback((next: boolean) => setSidebarOpen(next), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
@@ -912,7 +920,7 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
 const TOP_TAB_STRIP_HEIGHT = 38;
 const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide === true;
 const overlayCount = useViewportOverlayCount();
-const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0);
+const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0 || sidebarShown);
 // Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
 const contentTop = isHtmlFullscreen
   ? 0
@@ -933,6 +941,27 @@ useEffect(() => {
     setSidebarWidth(saved);
   }
 }, [(settings as any).sidebarWidth]);
+
+// Sidebar control absorption (chrome.css): how far the site buttons glide
+// left when the space pill folds to its icon, and whether the new-tab button
+// still fits on a narrow sidebar. Measured only when the pill's size changes.
+const clusterRef = useRef<HTMLElement>(null);
+const [absorbCompact, setAbsorbCompact] = useState(false);
+useLayoutEffect(() => {
+  const cluster = clusterRef.current;
+  const pill = cluster?.querySelector<HTMLElement>('.macos-tabs-toggle-pill');
+  if (!cluster || !pill) return;
+  const measure = () => {
+    const shift = Math.max(0, pill.offsetWidth - 28);
+    cluster.style.setProperty('--pill-shift', `${shift}px`);
+    const left = cluster.offsetLeft + (cluster.offsetParent as HTMLElement | null ?? cluster).offsetLeft;
+    setAbsorbCompact(left + cluster.scrollWidth - shift + 6 > sidebarWidth);
+  };
+  measure();
+  const ro = new ResizeObserver(measure);
+  ro.observe(pill);
+  return () => ro.disconnect();
+}, [sidebarWidth, topTabs]);
 
 // Native page views paint above HTML; freeze the page while any of these cover it.
 useViewportOverlay(
@@ -1007,6 +1036,7 @@ return (
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
         onUpdateSidebarState={(patch) => void updateSettings(patch)}
+        onShownChange={setSidebarShown}
         scale={settings.uiScale?.sidebar ?? 1}
       />
     )}
@@ -1018,7 +1048,7 @@ return (
       data-topbar-tint={isTopBarTinted && topBarTint ? topBarTint.source : 'default'}
     >
       {/* Top left: sidebar toggle, site navigation and new tab */}
-      <aside className="macos-window-controls-cluster" aria-label="Navigation">
+      <aside ref={clusterRef} className={`macos-window-controls-cluster${absorbCompact ? ' absorb-compact' : ''}`} aria-label="Navigation">
         {!topTabs && (
         <button
           className={`macos-tabs-toggle-pill ${sidebarOpen ? 'active' : ''}`}
@@ -1283,6 +1313,17 @@ return (
 
     {/* Page alert/confirm/prompt, "Leave site?" and "Open in app?" in Serica's style */}
     <PageDialog activeTabId={state.activeTabId} tabIds={pageDialogTabIds} />
+
+    {/* Camera, microphone, location... asked in Serica's own prompt */}
+    <PermissionPrompt activeTabId={state.activeTabId} tabIds={pageDialogTabIds} />
+
+    {/* Files, links and text dropped on Serica's own interface */}
+    <DropZones
+      onNewTabPage={!isWebpage}
+      spaceName={activeSpace?.name}
+      onOpenInNewTab={(url) => void createTab(url, state.activeSpaceId)}
+      onOpenHere={(url) => navigate(url)}
+    />
 
     {/* Vertical Pinned Websites Dock (Right Side with macOS Magnification) */}
     {/* Hidden by the Settings toggle; stored pinnedSites stay untouched (R19.2, R19.3) */}

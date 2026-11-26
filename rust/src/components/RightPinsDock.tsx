@@ -210,23 +210,48 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
   // Magnification: icons near the pointer grow (cosine falloff), like the
   // macOS dock. On sites the page is clipped to the dock's shape, so the
   // growth is smaller there and stays inside it.
-  const [scales, setScales] = useState<{ [id: string]: number }>({});
+  // Magnification runs once per frame and writes transforms directly: no
+  // React render and no layout read per pointer event. Item centers come
+  // from offsetTop (layout position, unaffected by the scale transforms).
+  const magnifyFrame = useRef(0);
+  const magnifyY = useRef<number | null>(null);
+  const applyScales = useCallback(() => {
+    magnifyFrame.current = 0;
+    const y = magnifyY.current;
+    const maxRadius = 64 * dockScale;
+    const maxScale = isOnWebpage ? 1.18 : 1.4;
+    // offsetTop is relative to the items' offset parent: one rect read per frame.
+    const first = Object.values(itemRefs.current).find((el): el is HTMLDivElement => !!el);
+    const parent = (first?.offsetParent as HTMLElement | null) ?? null;
+    const top = parent ? parent.getBoundingClientRect().top + parent.clientTop : 0;
+    for (const id of [...pins.map((p) => p.id), 'add-btn']) {
+      const el = itemRefs.current[id];
+      if (!el) continue;
+      let scale = 1;
+      if (y !== null) {
+        const center = top + el.offsetTop + el.offsetHeight / 2;
+        const dist = Math.abs(y - center);
+        scale = dist < maxRadius ? 1 + (maxScale - 1) * Math.pow(Math.cos((dist / maxRadius) * (Math.PI / 2)), 1.5) : 1;
+      }
+      el.style.transform = scale === 1 ? '' : `scale(${scale.toFixed(3)})`;
+      el.style.zIndex = scale === 1 ? '' : String(Math.round(scale * 10));
+    }
+  }, [pins, isOnWebpage, dockScale]);
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
-      const maxRadius = 64 * dockScale;
-      const maxScale = isOnWebpage ? 1.18 : 1.4;
-      const next: { [id: string]: number } = {};
-      for (const id of [...pins.map((p) => p.id), 'add-btn']) {
-        const el = itemRefs.current[id];
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        const dist = Math.abs(e.clientY - (r.top + r.height / 2));
-        next[id] = dist < maxRadius ? 1 + (maxScale - 1) * Math.pow(Math.cos((dist / maxRadius) * (Math.PI / 2)), 1.5) : 1;
-      }
-      setScales(next);
+      magnifyY.current = e.clientY;
+      if (!magnifyFrame.current) magnifyFrame.current = requestAnimationFrame(applyScales);
     },
-    [pins, isOnWebpage, dockScale],
+    [applyScales],
   );
+  const setScales = useCallback(
+    (_reset: Record<string, number>) => {
+      magnifyY.current = null;
+      if (!magnifyFrame.current) magnifyFrame.current = requestAnimationFrame(applyScales);
+    },
+    [applyScales],
+  );
+  useEffect(() => () => cancelAnimationFrame(magnifyFrame.current), []);
   const handleMouseLeave = () => {
     setScales({});
     setHoveredPinId(null);
@@ -329,7 +354,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
                 key={pin.id}
                 ref={(el) => (itemRefs.current[pin.id] = el)}
                 className="pin-dock-item"
-                style={{ transform: `scale(${scales[pin.id] || 1})`, zIndex: Math.round((scales[pin.id] || 1) * 10) }}
                 onClick={() => onNavigate(pin.url)}
                 onMouseEnter={() => {
                   if (!menuPos) setHoveredPinId(pin.id);
@@ -380,7 +404,6 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
           <div
             ref={(el) => (itemRefs.current['add-btn'] = el)}
             className="pin-dock-item pin-dock-add-item"
-            style={{ transform: `scale(${scales['add-btn'] || 1})` }}
             onClick={() => setIsAddModalOpen(true)}
             title="Add a website"
           >

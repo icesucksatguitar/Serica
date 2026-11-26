@@ -136,6 +136,8 @@ export interface SidebarProps {
   livePage?: boolean;
   /** Size of the sidebar's contents relative to the default (Settings → Sizes). */
   scale?: number;
+  /** Called with whether the sidebar is on screen (auto-hide mode). */
+  onShownChange?: (shown: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +318,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRequestClose,
   livePage = false,
   scale = 1,
+  onShownChange,
 }) => {
   // --- Sidebar Resizing (R12.11) -------------------------------------------
   const [isResizing, setIsResizing] = useState(false);
@@ -364,9 +367,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { activeSpaceId, activeTabId } = state;
 
   // --- Auto-hide (R12.4) -----------------------------------------------------
-  const [pointerX, setPointerX] = useState<number | null>(null);
+  // Only whether the pointer is at the window's left edge matters, so the
+  // position is kept as "at the edge" (0) or "elsewhere" (edge + 1): moving
+  // the mouse anywhere else no longer re-renders the whole sidebar per event.
+  const [pointerX, setPointerXRaw] = useState<number | null>(null);
+  const setPointerX = useCallback((x: number | null) => {
+    setPointerXRaw(x === null ? null : x <= SIDEBAR_EDGE_PX ? 0 : SIDEBAR_EDGE_PX + 1);
+  }, []);
   const [overSidebar, setOverSidebar] = useState(false);
   const [autoHideRevealed, setAutoHideRevealed] = useState(false);
+  const revealedRef = useRef(false);
+  revealedRef.current = autoHideRevealed;
   const autoHideRevealedAtRef = useRef<number>(0);
   const autoHideTimerRef = useRef<number | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -425,10 +436,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const onMove = (e: MouseEvent) => {
       setPointerX(e.clientX);
       if (e.clientX <= SIDEBAR_EDGE_PX) {
-        revealSidebar();
+        if (!revealedRef.current) revealSidebar();
       } else if (e.clientX > targetWidth && !overSidebar) {
-        scheduleHideSidebar();
-      } else {
+        // Once per exit, not per event: each call also starts a page capture.
+        if (revealedRef.current && autoHideTimerRef.current === null) scheduleHideSidebar();
+      } else if (autoHideTimerRef.current !== null) {
         cancelHideSidebar();
       }
     };
@@ -565,7 +577,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const root = document.documentElement;
     root.style.setProperty('--sidebar-cover', shown ? `${holeWidth}px` : '0px');
     root.classList.toggle('sidebar-covering', shown);
-  }, [autoHide, shown, holeWidth]);
+    onShownChange?.(shown);
+  }, [autoHide, shown, holeWidth, onShownChange]);
   useEffect(
     () => () => {
       document.documentElement.style.removeProperty('--sidebar-cover');
@@ -1279,6 +1292,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-orientation="vertical"
           />
         )}
+        {/* The toolbar row: the top bar's left controls rest here while the
+            sidebar is open (see chrome.css, "absorption"). */}
+        {autoHide && <div className="nsb-chrome-row" aria-hidden="true" />}
         {/* Active space: name, icon and color (R13.6) */}
         <div className="nsb-header">
           {activeSpace && (
