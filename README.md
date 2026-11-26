@@ -131,24 +131,49 @@ The endpoint is off by default and listens only on `127.0.0.1`. Every request ne
 
 ```bash
 git clone https://github.com/icesucksatguitar/Serica.git
-cd Serica/rust
-npm install
-npm run tauri dev        # run with hot reload
+cd Serica/rust && npm install && cd ..
+python build.py          # a menu of everything below
 ```
 
-Release build (stages `release/rust/Serica.exe`):
+Everything goes through `build.py` (or `.\build.ps1` with the same options as `-switches`). `python build.py --help` lists every flag.
+
+**Try it out.** Nothing is shipped, and your everyday Serica profile is never touched:
 
 ```bash
-cd Serica
-python build.py --bump none     # or: --bump patch | minor | major, --clean, --run
+python build.py --test            # build an optimized "Serica Test" copy and open it
+python build.py --test --fresh    # ...with an empty test profile (first-run setup again)
+python build.py --dev             # hot reload while you edit the UI
 ```
 
-MSI installer (written to `rust/src-tauri/target/release/bundle/msi/`):
+The test copy (`release/test/Serica-Test.exe`) has its own identifier, `com.serica.browser.test`, set in `rust/src-tauri/tauri.test.conf.json`. That gives it its own profile folder, and it opens even while your installed Serica is running. It never auto-updates or loads UI patches, so it always shows exactly the code you built. A log window opens next to it.
+
+**Local build** (stages `release/rust/Serica.exe`; it uses your real profile):
 
 ```bash
-cd Serica/rust
-npx tauri build --bundles msi
+python build.py                   # or --bump patch | minor | major, --clean, --run
 ```
+
+**Shipping to users.** There are two ways:
+
+1. **Full release:** for any change, Rust included. Installed copies offer the update and run the new installer.
+
+   ```bash
+   python build.py -b patch --bundle            # signed MSI + latest.json in release/github
+   git commit -am "Version X.Y.Z" && git push
+   python build.py --publish-release            # uploads as a draft GitHub release
+   python build.py --publish-release --live     # ...or publishes it and marks it Latest
+   ```
+
+   Signing needs the updater key at `~/.tauri/serica-updater.key`, and publishing needs the GitHub CLI (`gh`).
+
+2. **UI patch:** for React/CSS-only fixes, with no installer and no reinstall. Running copies download it in the background (15 s after launch, then every 30 min) and offer a one-click **Reload** that swaps it in within a second. If you dismiss it, the patch is used on the next launch. A patch that fails to render is rolled back automatically. The script refuses to make one if Rust code changed since the release users run; those changes need a full release.
+
+   ```bash
+   python build.py --ui-patch --notes "Smoother sidebar"            # stage in release/ui-patch
+   python build.py --ui-patch --notes "Smoother sidebar" --publish  # ...and upload it
+   ```
+
+`python build.py --status` shows what's built and staged.
 
 Tests:
 

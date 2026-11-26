@@ -325,7 +325,8 @@ export interface SericaAPI {
   selectTab: (tabId: string) => Promise<void>;
   togglePinTab: (tabId: string) => Promise<void>;
   toggleSleepTab: (tabId: string) => Promise<void>;
-  selectSpace: (spaceId: string) => Promise<void>;
+  selectSpace: (spaceId: string, keepUiFocus?: boolean) => Promise<void>;
+  focusPage?: (focus?: boolean) => Promise<void>;
   createSpace?: (name: string, color?: string, profileId?: string) => Promise<Space | null>;
   deleteSpace?: (spaceId: string) => Promise<IpcResult>;
   updateSpace?: (spaceId: string, patch: SpacePatch) => Promise<IpcResult<{ space: Space }>>;

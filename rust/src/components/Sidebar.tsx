@@ -76,7 +76,8 @@ export type { SidebarItemKind, SidebarItemRef } from '../utils/sidebarModel';
  */
 export interface SidebarActions {
   selectTab: (tabId: string) => void;
-  selectSpace: (spaceId: string) => void;
+  /** `keepUiFocus`: made from the open sidebar (see `selectSpaceHere`). */
+  selectSpace: (spaceId: string, opts?: { keepUiFocus?: boolean }) => void;
   createTab: (url?: string, spaceId?: string) => unknown;
   closeTab: (tabId: string) => void;
   pinTab: (tabId: string) => unknown;
@@ -301,7 +302,7 @@ const SIDEBAR_GUIDE_KEY = 'serica_sidebar_guide_v1';
 
 // ---------------------------------------------------------------------------
 
-export const Sidebar: React.FC<SidebarProps> = ({
+const SidebarImpl: React.FC<SidebarProps> = ({
   state,
   actions,
   expanded,
@@ -339,23 +340,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!isResizing) return;
     document.body.classList.add('sidebar-resizing-active');
 
+    // At most one width update per frame: each one re-renders the app and
+    // re-cuts the page's clip, so mouse events faster than the display
+    // (high-polling mice) would otherwise queue up work and stutter.
+    let frame = 0;
+    let pendingWidth: number | null = null;
+    const widthAt = (clientX: number) =>
+      Math.max(160, Math.min(520, Math.round(startWidthRef.current + clientX - startXRef.current)));
+
     const onMouseMove = (e: MouseEvent) => {
-      const delta = e.clientX - startXRef.current;
-      const nextWidth = Math.max(160, Math.min(520, Math.round(startWidthRef.current + delta)));
-      onUpdateSidebarWidth?.(nextWidth);
+      pendingWidth = widthAt(e.clientX);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (pendingWidth !== null) onUpdateSidebarWidth?.(pendingWidth);
+        pendingWidth = null;
+      });
     };
 
     const onMouseUp = (e: MouseEvent) => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      pendingWidth = null;
       setIsResizing(false);
       document.body.classList.remove('sidebar-resizing-active');
-      const delta = e.clientX - startXRef.current;
-      const finalWidth = Math.max(160, Math.min(520, Math.round(startWidthRef.current + delta)));
+      const finalWidth = widthAt(e.clientX);
+      onUpdateSidebarWidth?.(finalWidth);
       onUpdateSidebarState({ sidebarWidth: finalWidth });
     };
 
-    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('mouseup', onMouseUp);
     return () => {
+      cancelAnimationFrame(frame);
       document.body.classList.remove('sidebar-resizing-active');
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
@@ -650,6 +667,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
   useEffect(() => {
     if (!shown) return;
+    // Another tour is on screen (the first-run product tour opens the
+    // sidebar in one of its steps): don't start on top of it. The guide
+    // stays unplayed and comes up the next time the sidebar opens.
+    if (document.querySelector('.guide-layer')) return;
     try {
       if (localStorage.getItem(SIDEBAR_GUIDE_KEY)) return;
       localStorage.setItem(SIDEBAR_GUIDE_KEY, '1');
@@ -710,6 +731,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const itemExtraProps = (item: SidebarItemRef): ExtraProps =>
     mergeProps(drag.itemProps(item) as ExtraProps, preview.itemProps(item) as ExtraProps);
 
+  // --- Space switches made here keep focus in the sidebar ---------------------
+  // The page a switch brings on screen would otherwise take keyboard focus,
+  // and with it the touchpad's scroll and swipe input: the next swipe over
+  // the sidebar went to the page instead, until the sidebar was clicked. The
+  // backend leaves focus in the UI (`keepUiFocus`) until the sidebar closes,
+  // then the page gets it, unless the UI moved on to something with focus of
+  // its own (the address bar, say).
+  const keptFocusRef = useRef(false);
+  const selectSpaceHere = useCallback(
+    (spaceId: string) => {
+      keptFocusRef.current = true;
+      actions.selectSpace(spaceId, { keepUiFocus: true });
+    },
+    [actions],
+  );
+  const releaseFocus = useCallback(() => {
+    if (!keptFocusRef.current) return;
+    keptFocusRef.current = false;
+    const el = document.activeElement;
+    const uiIdle = !el || el === document.body || el.closest('.nsb') !== null;
+    void window.serica?.focusPage?.(uiIdle)?.catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!shown) releaseFocus();
+  }, [shown, releaseFocus]);
+  useEffect(() => releaseFocus, [releaseFocus]);
+
   // --- Swipe between spaces (R13.3) -------------------------------------------
   // Panes: previous, current and next space on a horizontal track. useSpaceSwipe
   // moves the track by ref; the current pane is the only interactive one.
@@ -722,7 +770,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     order: swipeOrder,
     activeId: activeSpaceId,
     blocked: drag.dragging || menu !== null || folderMenu !== null || spaceMenu !== null || renamingSpaceId !== null,
-    onCommit: actions.selectSpace,
+    onCommit: selectSpaceHere,
     onStart: hidePreview,
   });
   const activeIndex = view.spaceOrder.findIndex((s) => s.id === activeSpaceId);
@@ -735,13 +783,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ? view.spaceOrder[activeIndex + 1].id
         : undefined;
   const displayState = drag.displayState;
+  // The neighbour panes only matter while the sidebar is on screen (a swipe or
+  // a slide between spaces). While it is hidden, every tab update (titles and
+  // favicons change constantly while pages load) would otherwise rebuild and
+  // re-render three full lists instead of one. `visible` turns true before
+  // `shown` (which waits on the page's clip), so they are ready by the slide.
+  const withNeighbours = visible || shown;
   const prevView = useMemo(
-    () => (prevId ? buildSidebarView({ ...displayState, activeSpaceId: prevId }) : null),
-    [displayState, prevId],
+    () => (withNeighbours && prevId ? buildSidebarView({ ...displayState, activeSpaceId: prevId }) : null),
+    [displayState, prevId, withNeighbours],
   );
   const nextView = useMemo(
-    () => (nextId ? buildSidebarView({ ...displayState, activeSpaceId: nextId }) : null),
-    [displayState, nextId],
+    () => (withNeighbours && nextId ? buildSidebarView({ ...displayState, activeSpaceId: nextId }) : null),
+    [displayState, nextId, withNeighbours],
   );
   // Favorites belong to the profile: static above the track unless a neighbour has another profile.
   const profileOfSpace = new Map(view.groups.flatMap((g) => g.spaces.map((s) => [s.id, g.profile.id] as const)));
@@ -1236,7 +1290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: profileCount > 1 ? `${space.name} (${profile.name})` : space.name,
       'aria-label': `Space ${space.name}, profile ${profile.name}`,
       style: { '--nsb-btn-color': space.color } as React.CSSProperties,
-      onClick: () => actions.selectSpace(space.id),
+      onClick: () => selectSpaceHere(space.id),
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
         openSpaceMenu(space.id, e.clientX, e.clientY - 300);
@@ -1414,7 +1468,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ref={drag.ghostRef}
           className={`nsb-drag-ghost ${drag.ghost.item.kind === 'favorite' ? 'tile' : ''}`}
           aria-hidden="true"
-          style={{ transform: `translate(${drag.ghost.x + 12}px, ${drag.ghost.y + 8}px)` }}
+          style={{ transform: `translate3d(${drag.ghost.x + 12}px, ${drag.ghost.y + 8}px, 0)` }}
         >
           <Favicon src={drag.ghost.item.favicon ?? drag.ghost.item.tab?.favicon} />
           {drag.ghost.item.kind !== 'favorite' && (
@@ -1601,7 +1655,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const space = group?.spaces.find((s) => s.id === spaceMenu.spaceId);
           if (!group || !space) return null;
           const select = () => {
-            if (space.id !== activeSpaceId) actions.selectSpace(space.id);
+            if (space.id !== activeSpaceId) selectSpaceHere(space.id);
           };
           return (
             <div
@@ -1663,5 +1717,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
+
+/**
+ * Memoized: the app shell re-renders for many reasons unrelated to the
+ * sidebar (including the sidebar's own show/hide, reported through
+ * `onShownChange`), and re-rendering every row then lands right as the slide
+ * starts. Callers pass stable props, so it only re-renders when they change.
+ */
+export const Sidebar = React.memo(SidebarImpl);
 
 export default Sidebar;

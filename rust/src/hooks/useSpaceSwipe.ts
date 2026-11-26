@@ -11,6 +11,7 @@ import {
   easeOutCubic,
   estimateVelocity,
   lockAxis,
+  rawBounds,
   resolveOffset,
   settleOffset,
   type SwipeAxis,
@@ -78,40 +79,82 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     /** Offset the commit animation heads for (one pane either way). */
     settle: 0,
     prevActive: opts.activeId,
+    /** The track's running compositor animation (see `animate`). */
+    anim: null as Animation | null,
+    animFrom: 0,
+    animTo: 0,
+    animMs: 0,
+    /** Last tint written, so unchanged frames skip a style recalculation. */
+    tint: '',
   }).current;
+
+  const writeTint = (value: string) => {
+    if (value === s.tint) return;
+    s.tint = value;
+    optsRef.current.rootRef.current?.style.setProperty(TINT_VAR, value);
+  };
 
   const setTint = (offset: number) => {
     const { order, activeId, rootRef } = optsRef.current;
-    const root = rootRef.current;
-    if (!root) return;
+    if (!rootRef.current) return;
     const i = order.findIndex((x) => x.id === activeId);
     const own = order[i]?.color;
     if (!own) return;
     const other = s.otherColor ?? order[i + (offset < 0 ? 1 : -1)]?.color;
     const p = Math.min(1, Math.abs(offset) / (s.width || 1));
-    root.style.setProperty(TINT_VAR, other && p > 0 ? `color-mix(in srgb, ${other} ${(p * 100).toFixed(1)}%, ${own})` : own);
+    // Whole percents: finer steps are invisible and would recalculate the
+    // sidebar's styles on every frame of a slide.
+    const pct = Math.round(p * 100);
+    writeTint(other && pct > 0 ? `color-mix(in srgb, ${other} ${pct}%, ${own})` : own);
   };
 
   const plainTint = (id: string) => {
-    const { order, rootRef } = optsRef.current;
-    const color = order.find((x) => x.id === id)?.color;
-    if (color) rootRef.current?.style.setProperty(TINT_VAR, color);
+    const color = optsRef.current.order.find((x) => x.id === id)?.color;
+    if (!color) return;
+    // Always written (once per slide): React also sets this property from the
+    // active space's colour, so the cached value may be out of date here.
+    s.tint = color;
+    optsRef.current.rootRef.current?.style.setProperty(TINT_VAR, color);
   };
+
+  const trackTransform = (offset: number) => `translate3d(${offset - s.width}px,0,0)`;
 
   const apply = (offset: number) => {
     s.offset = offset;
     const track = optsRef.current.trackRef.current;
-    if (track) track.style.transform = `translate3d(${offset - s.width}px,0,0)`;
+    if (track) track.style.transform = trackTransform(offset);
     setTint(offset);
   };
 
+  /** Where the running track animation is on screen right now. */
+  const animOffset = () => {
+    const a = s.anim;
+    if (!a) return s.offset;
+    const t = Number(a.currentTime ?? 0);
+    return s.animFrom + (s.animTo - s.animFrom) * easeOutCubic(s.animMs > 0 ? t / s.animMs : 1);
+  };
+
+  /** Stops any slide, leaving the track exactly where it is on screen. */
   const stopAnim = () => {
     cancelAnimationFrame(s.raf);
     cancelAnimationFrame(s.frame);
     s.raf = 0;
     s.frame = 0;
+    if (s.anim) {
+      // Pin the inline transform to the visible spot before the animation's
+      // effect goes away, so nothing jumps.
+      apply(animOffset());
+      s.anim.cancel();
+      s.anim = null;
+    }
   };
 
+  /**
+   * Glides the track to `to`. The movement itself runs as a compositor
+   * animation, so it stays smooth while the main thread is busy (switching
+   * spaces re-renders the app and swaps the page at exactly this moment); a
+   * rAF loop alongside only keeps `s.offset` and the colour tint in step.
+   */
   const animate = (to: number, done: () => void) => {
     stopAnim();
     const from = s.offset;
@@ -120,19 +163,43 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
       done();
       return;
     }
-    const t0 = performance.now();
     // Dynamically scale duration with distance: full pane is SNAP_MS (~220ms), tiny adjustments take ~130ms
     const dist = Math.abs(to - from);
     const duration = Math.min(SNAP_MS, Math.max(130, (dist / (s.width || 260)) * SNAP_MS));
-    const step = (t: number) => {
-      const p = Math.min(1, (t - t0) / duration);
-      apply(from + (to - from) * easeOutCubic(p));
-      if (p < 1) s.raf = requestAnimationFrame(step);
-      else {
-        s.raf = 0;
-        apply(to);
-        done();
+    const track = optsRef.current.trackRef.current;
+    if (track && typeof track.animate === 'function') {
+      s.animFrom = from;
+      s.animTo = to;
+      s.animMs = duration;
+      // cubic-bezier(0.33, 1, 0.68, 1) is easeOutCubic.
+      s.anim = track.animate([{ transform: trackTransform(from) }, { transform: trackTransform(to) }], {
+        duration,
+        easing: 'cubic-bezier(0.33, 1, 0.68, 1)',
+        fill: 'forwards',
+      });
+    }
+    const t0 = performance.now();
+    const finish = () => {
+      s.raf = 0;
+      apply(to); // inline transform takes over before the animation is dropped
+      if (s.anim) {
+        s.anim.cancel();
+        s.anim = null;
       }
+      done();
+    };
+    const step = (t: number) => {
+      if (s.anim) {
+        if (s.anim.playState === 'finished') return finish();
+        s.offset = animOffset();
+        setTint(s.offset);
+        s.raf = requestAnimationFrame(step);
+        return;
+      }
+      const p = Math.min(1, (t - t0) / duration);
+      if (p >= 1) return finish();
+      apply(from + (to - from) * easeOutCubic(p));
+      s.raf = requestAnimationFrame(step);
     };
     s.raf = requestAnimationFrame(step);
   };
@@ -290,8 +357,8 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     } else {
       s.raw -= e.deltaX;
       // Bound accumulated raw displacement to avoid deadzones on direction reversal
-      const maxRaw = (s.width || 260) * 1.35;
-      s.raw = Math.max(-maxRaw, Math.min(maxRaw, s.raw));
+      const [minRaw, maxRaw] = rawBounds(s.index, o.order.length, s.width);
+      s.raw = Math.max(minRaw, Math.min(maxRaw, s.raw));
     }
     e.preventDefault();
     s.samples.push({ t: now, x: s.raw });

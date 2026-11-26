@@ -641,10 +641,23 @@ pub async fn media_control(tab_id: String, action: String, value: Option<f64>, a
 
 // ------------------------------------------------------------------ spaces & profiles
 
+/// `keep_ui_focus`: the switch was made from the open sidebar, so the page
+/// that comes on screen leaves focus in the UI (see `TabHost::keep_ui_focus`).
 #[tauri::command]
-pub async fn select_space(space_id: String, app: State<'_, Shared>) -> R<()> {
+pub async fn select_space(space_id: String, keep_ui_focus: Option<bool>, app: State<'_, Shared>) -> R<()> {
+    if keep_ui_focus == Some(true) {
+        app.host.lock().keep_ui_focus = true;
+    }
     app.mutate(|s| s.activate_space(&space_id));
     Ok(())
+}
+
+/// Ends a `select_space(.., keep_ui_focus)` session: pages take focus as usual
+/// again, and the page on screen gets it now unless `focus` is false (the
+/// UI has moved on to something else that has focus, like the address bar).
+#[tauri::command]
+pub fn focus_page(focus: Option<bool>, app: State<'_, Shared>) {
+    TabHost::focus_page(app.inner(), focus.unwrap_or(true));
 }
 
 #[tauri::command]

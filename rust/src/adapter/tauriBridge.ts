@@ -99,7 +99,10 @@ export const tauriBridge = {
   togglePinTab: (tabId: string) => invoke<void>('toggle_pin_tab', { tabId }),
   toggleSleepTab: (tabId: string) => invoke<void>('toggle_sleep_tab', { tabId }),
   reorderTabs: (draggedTabId: string, targetTabId: string) => invoke<void>('reorder_tabs', { draggedTabId, targetTabId }),
-  selectSpace: (spaceId: string) => invoke<void>('select_space', { spaceId }),
+  /** `keepUiFocus`: made from the open sidebar; the page shown leaves focus in the UI until `focusPage`. */
+  selectSpace: (spaceId: string, keepUiFocus?: boolean) => invoke<void>('select_space', { spaceId, keepUiFocus: keepUiFocus ?? null }),
+  /** Ends a `keepUiFocus` switch; the page on screen gets focus unless `focus` is false. */
+  focusPage: (focus = true) => invoke<void>('focus_page', { focus }),
   createSpace: (name: string, color?: string, profileId?: string) =>
     invoke<any>('create_space', { name, color: color ?? null, profileId: profileId ?? null }),
   deleteSpace: (spaceId: string) => invoke<any>('delete_space', { spaceId }),

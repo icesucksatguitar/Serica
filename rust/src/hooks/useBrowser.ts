@@ -241,10 +241,10 @@ export function useBrowser() {
     window.serica?.toggleSleepTab(tabId);
   }, []);
 
-  const selectSpace = useCallback((spaceId: string): Promise<void> => {
+  const selectSpace = useCallback((spaceId: string, opts?: { keepUiFocus?: boolean }): Promise<void> => {
     const seq = ++spaceSeqRef.current;
     pendingSpaceRef.current = { id: spaceId, seq };
-    const done = Promise.resolve(window.serica?.selectSpace(spaceId))
+    const done = Promise.resolve(window.serica?.selectSpace(spaceId, opts?.keepUiFocus))
       .catch(() => undefined)
       .finally(() => {
         // Confirmed (or failed): backend updates are authoritative again.

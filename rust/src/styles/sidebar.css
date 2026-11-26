@@ -315,6 +315,10 @@ html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluste
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Each pane lays out and paints on its own: a tab's title or favicon
+     changing (constant while pages load) touches only its pane, not the
+     whole sidebar, and the three panes move as one layer while sliding. */
+  contain: layout paint;
 }
 .nsb-pane.inert {
   pointer-events: none;

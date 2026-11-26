@@ -32,8 +32,10 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
   const [card, setCard] = useState<HTMLDivElement | null>(null);
   const [cardPos, setCardPos] = useState<{ left: number; top: number } | null>(null);
   const step = steps[i];
-  // The card shows through a live page like the app's menus.
-  useElementHole(`guide-${id}`, card);
+  // The card shows through a live page like the app's menus. It is placed
+  // after it mounts (measured off screen, then moved beside its target), so
+  // the hole follows its position, not just its size.
+  useElementHole(`guide-${id}`, card, 0, cardPos ? `${cardPos.left},${cardPos.top}` : undefined);
   useEffect(() => {
     steps[i]?.onEnter?.();
     // Once per step shown, not again if the parent hands over a new array.

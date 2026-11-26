@@ -175,6 +175,7 @@ pub fn run() {
             commands::get_media_state,
             commands::media_control,
             commands::select_space,
+            commands::focus_page,
             commands::create_space,
             commands::delete_space,
             commands::update_space,

@@ -215,6 +215,11 @@ pub struct TabHost {
     /// Profiles whose pages are kept closed for now (their password store is
     /// being written by an import).
     paused: std::collections::HashSet<String>,
+    /// While set, pages that come on screen leave keyboard focus in the UI. Set for a space switch made from the open sidebar, where the
+    /// pointer is still in use: a focused page takes the touchpad's scroll
+    /// and swipe input, so the sidebar could not swipe again until clicked.
+    /// The UI hands focus to the page (`focus_page`) once the sidebar closes.
+    pub keep_ui_focus: bool,
 }
 
 /// Two-finger horizontal touchpad swipe over a page goes back/forward, when
@@ -430,6 +435,7 @@ impl TabHost {
             create_failures: 0,
             creating: std::collections::HashSet::new(),
             paused: std::collections::HashSet::new(),
+            keep_ui_focus: false,
         }
     }
 
@@ -675,6 +681,12 @@ impl TabHost {
         // Switched to a tab without a page on screen (new tab page, or a page
         // still being built): the UI takes focus so its shortcuts work.
         let focus_ui = visible && focus_page.is_none() && !active_shown_before && previous != active;
+        // The UI asked to keep focus (see `keep_ui_focus`): pages come on
+        // screen without taking it (including one still being built for the
+        // switch, shown by a later pass) until the UI calls `focus_page`.
+        if host.keep_ui_focus {
+            focus_page = None;
+        }
         #[cfg(windows)]
         Self::sync_clip_pages(&host, text_scale);
         #[cfg(not(windows))]
@@ -1037,6 +1049,21 @@ impl TabHost {
     pub fn apply_pdf_dark(app: &Shared) {
         for (tab_id, v) in app.host.lock().views.iter() {
             let _ = v.webview.eval(&pdf_dark_js(app.pdf_dark_for(tab_id)));
+        }
+    }
+
+    /// The UI is done keeping focus (see `keep_ui_focus`): pages take it as
+    /// usual again, and with `focus` the active page, if on screen, gets it now.
+    pub fn focus_page(app: &Shared, focus: bool) {
+        let active = app.store.lock().active_tab_id.clone();
+        let page = {
+            let mut host = app.host.lock();
+            host.keep_ui_focus = false;
+            let visible = host.visible;
+            active.as_ref().and_then(|id| host.views.get(id)).filter(|v| visible && v.shown).map(|v| v.webview.clone())
+        };
+        if let Some(wv) = page.filter(|_| focus) {
+            let _ = wv.set_focus();
         }
     }
 

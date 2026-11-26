@@ -17,7 +17,7 @@ import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
 import { PermissionPrompt } from './components/PermissionPrompt';
 import { DropZones } from './components/DropZones';
-import type { UserProfile } from './types';
+import type { SidebarState, UserProfile } from './types';
 import { ProductTour } from './components/ProductTour';
 import { SafeBoundary } from './components/SafeBoundary';
 import { FocusButton } from './components/FocusButton';
@@ -156,9 +156,6 @@ export function App() {
   // Sidebar: a full-height panel that floats over the page. It starts hidden and
   // opens from the toolbar button, Ctrl+S / Ctrl+E or the left edge of the window.
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Whether the sidebar is on screen (opened from the toggle, a shortcut or
-  // the left edge): its toolbar row then holds the top bar's left controls.
-  const [sidebarShown, setSidebarShown] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const setSidebarExpanded = useCallback((next: boolean) => setSidebarOpen(next), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
@@ -575,11 +572,11 @@ export function App() {
   const activeSpaceIdRef = useRef(state.activeSpaceId);
   activeSpaceIdRef.current = state.activeSpaceId;
   const handleSelectSpace = useCallback(
-    (spaceId: string) => {
+    (spaceId: string, opts?: { keepUiFocus?: boolean }) => {
       if (spaceId === activeSpaceIdRef.current) return;
       activeSpaceIdRef.current = spaceId;
       triggerThemeCrossFade();
-      void selectSpace(spaceId);
+      void selectSpace(spaceId, opts);
     },
     [selectSpace, triggerThemeCrossFade],
   );
@@ -1001,7 +998,11 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
 const TOP_TAB_STRIP_HEIGHT = 38;
 const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide === true;
 const overlayCount = useViewportOverlayCount();
-const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0 || sidebarShown);
+// The sidebar and the top bar show and hide on their own: opening the
+// sidebar no longer brings the auto-hidden top bar down with it. If the bar
+// is revealed while the sidebar is open, its left controls still sit in the
+// sidebar's toolbar row.
+const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0);
 // Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
 const contentTop = isHtmlFullscreen
   ? 0
@@ -1022,6 +1023,58 @@ useEffect(() => {
     setSidebarWidth(saved);
   }
 }, [(settings as any).sidebarWidth]);
+
+// Stable props for the (memoized) sidebar, so unrelated app re-renders skip it.
+// useBrowser's commands are all useCallback-stable.
+const sidebarActions = useMemo(
+  () => ({
+    selectTab: browser.selectTab,
+    selectSpace: handleSelectSpace,
+    createTab: browser.createTab,
+    closeTab: browser.closeTab,
+    pinTab: browser.pinTab,
+    unpinTab: browser.unpinTab,
+    addFavorite: browser.addFavorite,
+    removeFavorite: browser.removeFavorite,
+    duplicateTab: browser.duplicateTab,
+    moveTab: browser.moveTab,
+    createFolder: browser.createFolder,
+    updateFolder: browser.updateFolder,
+    deleteFolder: browser.deleteFolder,
+    moveTabToFolder: browser.moveTabToFolder,
+    createSpace: handleCreateSpace,
+    updateSpace: browser.updateSpace,
+    deleteSpace: browser.deleteSpace,
+    reorderSpace: browser.reorderSpace,
+    openCommandBar: openNewTabCommandBar,
+  }),
+  [
+    browser.selectTab,
+    handleSelectSpace,
+    browser.createTab,
+    browser.closeTab,
+    browser.pinTab,
+    browser.unpinTab,
+    browser.addFavorite,
+    browser.removeFavorite,
+    browser.duplicateTab,
+    browser.moveTab,
+    browser.createFolder,
+    browser.updateFolder,
+    browser.deleteFolder,
+    browser.moveTabToFolder,
+    handleCreateSpace,
+    browser.updateSpace,
+    browser.deleteSpace,
+    browser.reorderSpace,
+    openNewTabCommandBar,
+  ],
+);
+const updateSettingsRef = useRef(updateSettings);
+updateSettingsRef.current = updateSettings;
+const updateSidebarSettings = useCallback((patch: Partial<SidebarState>) => {
+  void updateSettingsRef.current(patch);
+}, []);
 
 // Sidebar control absorption (chrome.css): how far the site buttons glide
 // left when the space pill folds to its icon, and whether the new-tab button
@@ -1117,7 +1170,7 @@ return (
       <Sidebar
         className="app-sidebar"
         state={state}
-        actions={{ ...browser, selectSpace: handleSelectSpace, createSpace: handleCreateSpace, openCommandBar: openNewTabCommandBar }}
+        actions={sidebarActions}
         expanded
         autoHide
         pinnedOpen={sidebarOpen}
@@ -1125,8 +1178,7 @@ return (
         livePage={isWebpage && !activeTab?.unloaded}
         sidebarWidth={sidebarWidth}
         onUpdateSidebarWidth={setSidebarWidth}
-        onUpdateSidebarState={(patch) => void updateSettings(patch)}
-        onShownChange={setSidebarShown}
+        onUpdateSidebarState={updateSidebarSettings}
         scale={settings.uiScale?.sidebar ?? 1}
       />
     )}

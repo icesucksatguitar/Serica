@@ -3,18 +3,35 @@
 ==============================================================================
 SERICA BROWSER - BUILD & RELEASE SCRIPT
 ==============================================================================
-Builds, versions, and stages the Rust (Tauri v2) release:
+Every way to build, try out and ship Serica. Run it with no arguments for a
+menu.
 
-  release/
-  ├── rust/            <- Standalone Windows executable (Serica.exe) + icons
-  └── manifest.json    <- Current version, size and build time
+  TRY IT OUT (nothing is shipped, your real Serica profile is never touched)
+    python build.py --test              Test run: build an isolated test copy and open it
+    python build.py --test --fresh      ...starting from an empty test profile
+    python build.py --dev               Dev mode: hot reload while you edit the UI
 
-Usage:
-  python build.py --bump [major|minor|patch|none] [--clean] [--run]
-  python build.py -b patch
-  python build.py -b patch --bundle   <- release: signed MSI + latest.json in release/github
-  python build.py --ui-patch --notes "Fixed X" --publish
-                                      <- UI-only fix: signed in ~30 s, live for users in minutes
+  BUILD LOCALLY
+    python build.py                     Local release exe -> release/rust/Serica.exe
+    python build.py --run               ...and open it (uses your real profile)
+
+  SHIP TO USERS
+    1. Full release (anything changed, Rust included). Users get an update
+       prompt and the installer runs:
+         python build.py -b patch --bundle      signed MSI + latest.json -> release/github
+         git commit -am "Version X.Y.Z" && git push
+         python build.py --publish-release      upload as a draft GitHub release
+         python build.py --publish-release --live   ...or publish it straight away
+    2. UI patch (React/CSS-only fixes). No installer, no reinstall: running
+       copies download it in the background (within 30 min, or 15 s after
+       launch), offer a one-click "Reload" that swaps it in within a second,
+       and roll it back by themselves if it fails to render. Refused when
+       Rust code changed since the release users run:
+         python build.py --ui-patch --notes "Fixed X"            stage in release/ui-patch
+         python build.py --ui-patch --notes "Fixed X" --publish  ...and upload it
+
+  OTHER
+    python build.py --status            What's built and staged
 """
 
 import os
@@ -30,6 +47,13 @@ from pathlib import Path
 # Enable ANSI escape sequences on Windows consoles
 if os.name == "nt":
     os.system("")
+# Piped or redirected output defaults to the ANSI code page on Windows, which
+# can't encode the summary's ✓/✗ marks and crashed the end of every build.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 cargo_bin_dir = Path.home() / ".cargo" / "bin"
 if cargo_bin_dir.exists() and str(cargo_bin_dir) not in os.environ.get("PATH", ""):
@@ -485,6 +509,177 @@ def build_ui_patch(notes: str, publish: bool, force: bool) -> bool:
 
 
 # ==============================================================================
+# Publish a staged full release (release/github) to GitHub
+# ==============================================================================
+
+def publish_release(live: bool) -> bool:
+    """Uploads what --bundle staged in release/github to the GitHub release
+    v<version>. Created as a draft (nothing reaches users until you publish
+    it on GitHub) unless `live`, which publishes and marks it Latest, so
+    installed copies offer the update within their next check."""
+    log_header("PUBLISHING RELEASE TO GITHUB")
+    version = get_rust_version()
+    tag = f"v{version}"
+    latest = GITHUB_RELEASE_DIR / "latest.json"
+    if not latest.exists():
+        log_error(f"Nothing staged in {GITHUB_RELEASE_DIR}. Run: python build.py -b patch --bundle")
+        return False
+    staged_ver = json.loads(latest.read_text(encoding="utf-8")).get("version")
+    if staged_ver != version:
+        log_error(f"Staged assets are v{staged_ver}, but the code is v{version}. Rebuild with --bundle.")
+        return False
+
+    # The tag must point at the code that was built: committed and pushed.
+    if _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        log_error("Uncommitted changes. Commit the version bump (and anything else in this build) first:")
+        log_info(f'  git commit -am "Version {version}" && git push')
+        return False
+    head = _git("rev-parse", "HEAD").stdout.strip()
+    upstream = _git("rev-parse", "@{u}")
+    if upstream.returncode != 0 or upstream.stdout.strip() != head:
+        log_error("This commit isn't pushed (or the branch has no upstream). Push it first: git push")
+        return False
+
+    files = [str(p) for p in sorted(GITHUB_RELEASE_DIR.iterdir()) if p.is_file()]
+    exists = subprocess.run(["gh", "release", "view", tag, "--repo", GITHUB_REPO],
+                            capture_output=True, text=True).returncode == 0
+    if exists:
+        log_info(f"Release {tag} exists: replacing its assets.")
+        if not run_cmd(["gh", "release", "upload", tag, *files, "--clobber", "--repo", GITHUB_REPO], cwd=ROOT_DIR):
+            return False
+    else:
+        # Always created as a draft first, so latest.json is never public
+        # before the installer it points at has finished uploading.
+        if not run_cmd(["gh", "release", "create", tag, *files, "--repo", GITHUB_REPO, "--draft",
+                        "--title", f"Serica {tag}", "--target", head, "--generate-notes"], cwd=ROOT_DIR):
+            return False
+    if live:
+        if not run_cmd(["gh", "release", "edit", tag, "--repo", GITHUB_REPO, "--draft=false", "--latest"], cwd=ROOT_DIR):
+            return False
+        log_success(f"{tag} is live. Installed copies will offer the update on their next check.")
+    else:
+        log_success(f"{tag} uploaded as a draft. Review and publish it on GitHub, or rerun with --live:")
+        log_info(f"  https://github.com/{GITHUB_REPO}/releases")
+    return True
+
+
+# ==============================================================================
+# Test run and dev mode: an isolated copy you can try without shipping anything
+# ==============================================================================
+
+TEST_CONFIG = RUST_DIR / "src-tauri" / "tauri.test.conf.json"
+TEST_TARGET_DIR = RUST_DIR / "src-tauri" / "target-test"
+TEST_RELEASE_DIR = RELEASE_DIR / "test"
+
+
+def _test_identifier() -> str:
+    return json.loads(TEST_CONFIG.read_text(encoding="utf-8"))["identifier"]
+
+
+def _test_profile_dirs() -> list[Path]:
+    ident = _test_identifier()
+    return [Path(os.environ[v]) / ident for v in ("APPDATA", "LOCALAPPDATA") if os.environ.get(v)]
+
+
+def build_test(fresh: bool, launch: bool = True) -> bool:
+    """Builds an optimized copy of the current code as "Serica Test"
+    (release/test/Serica-Test.exe) and opens it.
+
+    It is kept apart from the real browser: its own identifier
+    (tauri.test.conf.json), so its own profile folder and its own
+    single-instance lock (it opens even while Serica is running); no auto
+    updates and no UI patches (debug assertions are on, which both check), so
+    it always shows exactly the code you built. A log window opens next to it.
+    The version, release/rust and the release manifest are left alone."""
+    log_header("TEST RUN")
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+    log_info("Building the UI...")
+    if not run_cmd([npm_cmd, "run", "build"], cwd=RUST_DIR):
+        return False
+
+    env = os.environ.copy()
+    env["TAURI_CONFIG"] = TEST_CONFIG.read_text(encoding="utf-8")
+    env["CARGO_TARGET_DIR"] = str(TEST_TARGET_DIR)  # keeps the real release build's cache intact
+    env["CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS"] = "true"
+    # Optimized like a release, minus the slow whole-program passes.
+    env["CARGO_PROFILE_RELEASE_LTO"] = "false"
+    env["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] = "16"
+    cargo_bin = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / ("cargo.exe" if os.name == "nt" else "cargo"))
+    log_info("Building the test copy (the first one takes a while; later ones are quick)...")
+    if not run_cmd([cargo_bin, "build", "--release", "--features", "custom-protocol"], cwd=RUST_DIR / "src-tauri", env=env):
+        return False
+
+    exe_name = "serica-rust.exe" if os.name == "nt" else "serica-rust"
+    built = TEST_TARGET_DIR / "release" / exe_name
+    TEST_RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+    target = TEST_RELEASE_DIR / ("Serica-Test.exe" if os.name == "nt" else "serica-test")
+    try:
+        shutil.copy2(built, target)
+    except PermissionError:
+        log_error(f"{target.name} is still running. Close the test copy and run this again.")
+        return False
+
+    if fresh:
+        for d in _test_profile_dirs():
+            if d.exists():
+                log_info(f"Clearing test profile: {d}")
+                shutil.rmtree(d, ignore_errors=True)
+
+    log_success(f"Test copy: {BOLD}{target}{RESET}")
+    log_info(f"Its profile: {', '.join(str(d) for d in _test_profile_dirs())}")
+    if launch:
+        subprocess.Popen([str(target)], cwd=str(TEST_RELEASE_DIR))
+        log_success("Opened Serica Test.")
+    return True
+
+
+def run_dev() -> bool:
+    """`tauri dev` with hot reload, under the test identifier so it uses the
+    test profile and runs alongside an installed Serica."""
+    log_header("DEV MODE (hot reload, Ctrl+C to stop)")
+    npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+    return run_cmd([npx_cmd, "tauri", "dev", "--config", str(TEST_CONFIG.relative_to(RUST_DIR))], cwd=RUST_DIR)
+
+
+# ==============================================================================
+# Interactive menu (no arguments)
+# ==============================================================================
+
+def menu_args() -> list[str] | None:
+    options = [
+        ("Test run: build an isolated test copy and open it", ["--test"]),
+        ("Test run with an empty test profile", ["--test", "--fresh"]),
+        ("Dev mode: hot reload while editing", ["--dev"]),
+        ("Local build: release/rust/Serica.exe", []),
+        ("Full release: bump the version, build the signed installer + auto-update files", None),
+        ("Publish the staged full release to GitHub (as a draft)", ["--publish-release"]),
+        ("UI patch: ship a React/CSS fix without a reinstall", None),
+        ("Status: what's built and staged", ["--status"]),
+    ]
+    print(f"{BOLD}{MAGENTA}Serica build{RESET}  (python build.py --help lists every flag)\n")
+    for i, (label, _) in enumerate(options, 1):
+        print(f"  {BOLD}{i}{RESET}  {label}")
+    try:
+        choice = input("\nChoose 1-8 (Enter to cancel): ").strip()
+        if not choice:
+            return None
+        label, args = options[int(choice) - 1]
+        if args is not None:
+            return args
+        if label.startswith("Full release"):
+            bump = input("Bump: patch / minor / major [patch]: ").strip() or "patch"
+            return ["--bump", bump, "--bundle"]
+        notes = input("One line shown to users (e.g. \"Smoother sidebar\"): ").strip()
+        publish = input("Upload it now so users get it? [y/N]: ").strip().lower() == "y"
+        return ["--ui-patch", "--notes", notes] + (["--publish"] if publish else [])
+    except (ValueError, IndexError):
+        log_error("Not an option.")
+        return None
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+# ==============================================================================
 # Release Directory Summary & Launcher
 # ==============================================================================
 
@@ -508,6 +703,23 @@ def print_summary():
         print(f"{BOLD}{env_name.capitalize():<14}{RESET} {ver:<10} {size:<12} {exe} [{status_marker}]")
 
     print(f"\n{BOLD}Release Directory:{RESET} {RELEASE_DIR}")
+    print_staged()
+
+
+def print_staged():
+    """Test copy, staged full release and staged UI patch, if any."""
+    test_exe = TEST_RELEASE_DIR / "Serica-Test.exe"
+    if test_exe.exists():
+        built = datetime.fromtimestamp(test_exe.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        print(f"{BOLD}Test copy:{RESET}         {test_exe} (built {built})")
+    latest = GITHUB_RELEASE_DIR / "latest.json"
+    if latest.exists():
+        v = json.loads(latest.read_text(encoding="utf-8")).get("version")
+        print(f"{BOLD}Staged release:{RESET}    v{v} in {GITHUB_RELEASE_DIR} (upload: --publish-release)")
+    ui = UI_PATCH_DIR / "ui-latest.json"
+    if ui.exists():
+        m = json.loads(ui.read_text(encoding="utf-8"))
+        print(f"{BOLD}Staged UI patch:{RESET}   build {m.get('build')} for v{m.get('app_version')}: {m.get('notes') or '(no notes)'}")
 
 
 def launch_release(env_name: str):
@@ -532,49 +744,55 @@ def launch_release(env_name: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Serica Browser - build and stage the Rust (Tauri v2) release",
+        description="Serica Browser - build, try out and ship. Run with no arguments for a menu.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python build.py --bump none
-  python build.py --bump patch --clean
-  python build.py --run
-        """
+        epilog=(__doc__ or "").split("menu.\n", 1)[-1],
     )
-    parser.add_argument(
-        "-b", "--bump",
-        choices=["major", "minor", "patch", "none"],
-        default="none",
-        help="Version bump increment (major, minor, patch, none). Default: none"
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Clean previous build artifacts before building"
-    )
-    parser.add_argument(
-        "--bundle",
-        action="store_true",
-        help="Also build the signed MSI and stage GitHub release assets (with latest.json for auto-update) in release/github"
-    )
-    parser.add_argument(
-        "--ui-patch",
-        action="store_true",
-        help="Ship only the UI (React/CSS) as a signed patch for the current version. No cargo, no installer."
-    )
-    parser.add_argument("--notes", default="", help="With --ui-patch: one line shown to users, e.g. \"AI tabs keep your chat\"")
-    parser.add_argument("--publish", action="store_true", help="With --ui-patch: upload it to the GitHub release")
-    parser.add_argument("--force", action="store_true", help="With --ui-patch: ship even though Rust code changed")
-    parser.add_argument(
-        "--run",
-        action="store_true",
-        help="Launch the application after a successful build"
-    )
+    try_out = parser.add_argument_group("try it out (nothing is shipped)")
+    try_out.add_argument("--test", action="store_true",
+                         help="Test run: build an isolated copy (own profile, no auto-updates) and open it")
+    try_out.add_argument("--fresh", action="store_true", help="With --test: start from an empty test profile")
+    try_out.add_argument("--no-launch", action="store_true", help="With --test: build only, don't open it")
+    try_out.add_argument("--dev", action="store_true", help="Dev mode: tauri dev with hot reload, on the test profile")
 
-    args = parser.parse_args()
+    build = parser.add_argument_group("build and full release")
+    build.add_argument("-b", "--bump", choices=["major", "minor", "patch", "none"], default="none",
+                       help="Version bump increment. Default: none")
+    build.add_argument("--clean", action="store_true", help="Clean previous build artifacts before building")
+    build.add_argument("--bundle", action="store_true",
+                       help="Also build the signed MSI and stage GitHub release assets (with latest.json for auto-update) in release/github")
+    build.add_argument("--publish-release", action="store_true",
+                       help="Upload what --bundle staged to the GitHub release v<version> (a draft unless --live)")
+    build.add_argument("--live", action="store_true", help="With --publish-release: publish it and mark it Latest right away")
+    build.add_argument("--run", action="store_true", help="Launch the local build afterwards (uses your real profile)")
 
+    patch = parser.add_argument_group("UI patch (no reinstall)")
+    patch.add_argument("--ui-patch", action="store_true",
+                       help="Ship only the UI (React/CSS) as a signed patch for the current version. No cargo, no installer.")
+    patch.add_argument("--notes", default="", help="With --ui-patch: one line shown to users, e.g. \"AI tabs keep your chat\"")
+    patch.add_argument("--publish", action="store_true", help="With --ui-patch: upload it to the GitHub release")
+    patch.add_argument("--force", action="store_true", help="With --ui-patch: ship even though Rust code changed")
+
+    parser.add_argument("--status", action="store_true", help="Show what's built and staged")
+
+    argv = sys.argv[1:]
+    if not argv and sys.stdin.isatty():
+        argv = menu_args()
+        if argv is None:
+            return 0
+    args = parser.parse_args(argv)
+
+    if args.status:
+        print_summary()
+        return 0
+    if args.test:
+        return 0 if build_test(args.fresh, launch=not args.no_launch) else 1
+    if args.dev:
+        return 0 if run_dev() else 1
     if args.ui_patch:
         return 0 if build_ui_patch(args.notes, args.publish, args.force) else 1
+    if args.publish_release:
+        return 0 if publish_release(args.live) else 1
 
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
     print(f"{BOLD}{MAGENTA}              SERICA BROWSER - BUILD SYSTEM                   {RESET}")
@@ -586,9 +804,14 @@ Examples:
         log_error("Build failed.")
         return 1
 
-    if args.bundle and not build_bundle():
-        log_error("Bundling failed.")
-        return 1
+    if args.bundle:
+        if not build_bundle():
+            log_error("Bundling failed.")
+            return 1
+        version = get_rust_version()
+        log_info("Next: commit and push the version bump, then upload the release:")
+        log_info(f'  git commit -am "Version {version}" && git push')
+        log_info("  python build.py --publish-release        (a draft; add --live to publish at once)")
 
     print_summary()
     log_success("Build completed successfully!")

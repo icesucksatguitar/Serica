@@ -220,7 +220,7 @@ export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => un
       const next = t === undefined ? s : retargetDragSession(s, t);
       if (next !== sessionRef.current) setSessionBoth(next);
       if (ghostRef.current) {
-        ghostRef.current.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 8}px)`;
+        ghostRef.current.style.transform = `translate3d(${e.clientX + 12}px, ${e.clientY + 8}px, 0)`;
       }
     },
     [cancel],

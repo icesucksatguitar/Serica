@@ -36,16 +36,43 @@ export function rubberBand(distance: number, width: number): number {
   return distance < 0 ? -out : out;
 }
 
+/** Furthest the track moves when pulled past the first or last space (px). */
+export const EDGE_PULL_MAX = 48;
+
+/**
+ * Pull past the first or last space: a short, stiff bounce that never shows
+ * more than a sliver of the empty side (at most EDGE_PULL_MAX, or 18% of a
+ * narrow pane), so it reads as "no more spaces" rather than an empty pane.
+ */
+export function edgePull(distance: number, width: number): number {
+  const limit = Math.min(EDGE_PULL_MAX, 0.18 * width);
+  if (limit <= 0) return 0;
+  const d = Math.abs(distance);
+  const out = limit * (1 - 1 / (d / (2 * limit) + 1));
+  return distance < 0 ? -out : out;
+}
+
 /**
  * Track offset for a raw (1:1) offset: clamped to one pane either way, with
- * rubber-band resistance when pulling past the first or last space.
+ * a short bounce when pulling past the first or last space.
  */
 export function resolveOffset(raw: number, index: number, count: number, width: number): number {
   if (width <= 0) return 0;
   const clamped = Math.max(-width, Math.min(width, raw));
-  if (clamped > 0 && index <= 0) return rubberBand(clamped, width);
-  if (clamped < 0 && index >= count - 1) return rubberBand(clamped, width);
+  if (clamped > 0 && index <= 0) return edgePull(clamped, width);
+  if (clamped < 0 && index >= count - 1) return edgePull(clamped, width);
   return clamped;
+}
+
+/**
+ * Bounds for the raw gesture offset. Towards an existing space it may go a
+ * little past one pane; past the first or last space it stops at one pane, so
+ * pulling further and then reversing has no dead stretch to undo first.
+ */
+export function rawBounds(index: number, count: number, width: number): [number, number] {
+  const w = width || 260;
+  const far = w * 1.35;
+  return [index >= count - 1 ? -w : -far, index <= 0 ? w : far];
 }
 
 /** Index the track should settle on after release. Never wraps. */

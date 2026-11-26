@@ -4,7 +4,7 @@
 // While any overlay (modal, popover, context menu, hover card) is registered,
 // BrowserViewport replaces the live page with a snapshot and hides the native
 // view so the overlay is visible and clickable.
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 let count = 0;
 const listeners = new Set<() => void>();
@@ -391,8 +391,9 @@ export function removeViewportHole(id: string): void {
  * out of the page while it is mounted. Returns whether the cut is in place:
  * keep the element invisible until then, or it would flash under the page.
  */
-export function useElementHole(id: string, el: HTMLElement | null, pad = 0): boolean {
+export function useElementHole(id: string, el: HTMLElement | null, pad = 0, position?: string): boolean {
   const [ready, setReady] = useState(false);
+  const pushRef = useRef<(() => Promise<unknown>) | null>(null);
   useLayoutEffect(() => {
     setReady(false);
     if (!el) return;
@@ -402,6 +403,7 @@ export function useElementHole(id: string, el: HTMLElement | null, pad = 0): boo
       setViewportHole(id, [el.offsetLeft - pad, el.offsetTop - pad, el.offsetWidth + pad * 2, el.offsetHeight + pad * 2], {
         radius: radius + pad,
       });
+    pushRef.current = push;
     void push().then(() => {
       if (alive) setReady(true);
     });
@@ -409,9 +411,16 @@ export function useElementHole(id: string, el: HTMLElement | null, pad = 0): boo
     ro.observe(el);
     return () => {
       alive = false;
+      pushRef.current = null;
       ro.disconnect();
       removeViewportHole(id);
     };
   }, [id, el, pad]);
+  // An element placed after it mounts (measured off screen first, then moved
+  // beside its target) changes position without changing size, which the
+  // ResizeObserver never reports: pass its position here so the hole follows.
+  useLayoutEffect(() => {
+    if (position !== undefined) void pushRef.current?.();
+  }, [position]);
   return ready;
 }
