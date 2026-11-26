@@ -9938,6 +9938,8 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 .tools-tray-items {
   display: flex;
   align-items: center;
+  /* The tools sit against the "more" button; any slack goes to the far end. */
+  justify-content: flex-end;
   gap: var(--tools-gap);
   box-sizing: content-box;
   width: 0;
@@ -9957,13 +9959,15 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 .tools-tray.open .tools-tray-items {
   width: calc(var(--tools-count) * var(--tools-btn) + (var(--tools-count) - 1) * var(--tools-gap));
   padding: 4px 3px;
-  margin-right: 6px;
+  margin-right: 2px;
   opacity: 1;
   pointer-events: auto;
 }
 
 .tools-tray-btn {
   flex: none;
+  /* Exactly the width the capsule reserves for each tool. */
+  width: var(--tools-btn);
   opacity: 0;
   transform: translateX(14px) scale(0.86);
   transition:
@@ -10789,6 +10793,12 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 /* Right side: no box around the group, no divider before the window dots. */
 .topbar-style-flat .window-controls-divider {
   display: none;
+}
+
+/* Flat buttons are 24px: the tray reserves that, not the pill size. */
+.topbar-style-flat .tools-tray {
+  --tools-btn: 24px;
+  --tools-gap: 4px;
 }
 
 /* The "⋯" tools button keeps still; the tray still grows out of it. */
