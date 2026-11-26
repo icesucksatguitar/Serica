@@ -63,6 +63,26 @@ export function familyTheme(hue: number, sat: number, mode: SpaceThemeMode, inte
   };
 }
 
+/**
+ * A theme moved to the other side (light or dark): the same hues, at the
+ * lightness Studio's own palettes use there. Only flipping the mode would
+ * leave dark colours under a light UI (or the reverse): a muddy mid-tone
+ * surface with poor contrast.
+ */
+export function retoneTheme(theme: SpaceTheme, mode: SpaceThemeMode, dark: boolean): SpaceTheme {
+  const L = dark ? 22 : 86;
+  const step = dark ? 6 : -4;
+  const offsets = [0, step, -step];
+  return {
+    ...theme,
+    mode,
+    points: theme.points.map((p, i) => {
+      const { h, s } = hexToHsl(p.color);
+      return { ...p, color: hslToHex(h, s, L + offsets[i % 3]) };
+    }),
+  };
+}
+
 function nearestTint(intensity: number) {
   return TINTS.reduce((best, t) => (Math.abs(t.value - intensity) < Math.abs(best.value - intensity) ? t : best), TINTS[1]);
 }
@@ -193,7 +213,12 @@ export const ThemeStudio: React.FC<ThemeStudioProps> = ({ isOpen, onClose, activ
 
   // Mode and tint keep the palette: rebuilt for the new mode when it is one
   // of Studio's, otherwise only the mode/intensity change.
-  const setMode = (m: SpaceThemeMode) => apply(current ? themeFor(current, m) : { ...spaceTheme, mode: m });
+  const setMode = (m: SpaceThemeMode) => {
+    if (current) return apply(themeFor(current, m));
+    const was = spaceTheme.mode === 'dark' || (spaceTheme.mode === 'auto' && osDark);
+    const now = m === 'dark' || (m === 'auto' && osDark);
+    apply(was === now ? { ...spaceTheme, mode: m } : retoneTheme(spaceTheme, m, now));
+  };
   const setTint = (value: number) => apply(current ? themeFor(current, mode, value) : { ...spaceTheme, intensity: value });
 
   const shown = hover ?? spaceTheme;

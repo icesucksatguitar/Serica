@@ -417,16 +417,22 @@ export function App() {
     [settings.spaceThemes, state.spaces, updateSettings],
   );
 
-  /** Setup's colour choice: shown at once, given to every space. */
-  const applySetupTheme = useCallback(
-    (theme: SpaceTheme) => {
+  /** Setup's colour choice: the whole space-theme map, and the one shown now. */
+  const applySetupThemes = useCallback(
+    (themes: Record<string, unknown>, shown: SpaceTheme) => {
       triggerThemeCrossFade();
-      const palette = applySpaceThemeToRoot(theme, osPrefersDark);
-      void window.serica?.setThemeMode?.(theme.mode === 'auto' ? 'system' : palette.effectiveMode);
+      const palette = applySpaceThemeToRoot(shown, osPrefersDark);
+      void window.serica?.setThemeMode?.(shown.mode === 'auto' ? 'system' : palette.effectiveMode);
       setIsDarkMode(palette.effectiveMode === 'dark');
-      applyThemeToAllSpaces(theme);
+      void updateSettings({ spaceThemes: themes as Record<string, SpaceTheme> });
     },
-    [applyThemeToAllSpaces, osPrefersDark, triggerThemeCrossFade],
+    [osPrefersDark, triggerThemeCrossFade, updateSettings],
+  );
+  const setupSpaceThemes = useMemo(
+    () => (isWelcomeOpen ? Object.fromEntries(state.spaces.map((sp) => [sp.id, resolveSpaceTheme(settings, sp.id)])) : {}),
+    // Taken when setup opens; Setup keeps its own copy from then on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isWelcomeOpen],
   );
 
   const upgrading = useMemo(() => {
@@ -1581,9 +1587,10 @@ return (
           settings={settings}
           onUpdateSettings={updateSettings}
           upgrading={upgrading}
-          currentTheme={activeSpaceTheme}
+          spaceThemes={setupSpaceThemes}
+          activeSpaceId={state.activeSpaceId}
           osDark={osPrefersDark}
-          onApplyTheme={applySetupTheme}
+          onApplyThemes={applySetupThemes}
           onFinish={finishSetup}
         />
       </Suspense>

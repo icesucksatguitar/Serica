@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, Monitor, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { SericaLogo } from './SericaLogo';
 import { ImportPanel } from './settings/ImportPanel';
-import { FAMILIES, familyTheme } from './ThemeStudio';
+import { FAMILIES, familyTheme, retoneTheme } from './ThemeStudio';
 import { SPECIAL_ART } from './Homescreen';
 import { DEFAULT_HOME_BACKGROUND, homeBackgroundCss, type BrowserSettings, type HomeBackground, type SpaceTheme } from '../shared/settings';
 import type { SpaceThemeMode } from '../shared/spaceTheme';
@@ -16,11 +16,12 @@ export interface SetupProps {
   onUpdateSettings: (patch: Partial<BrowserSettings>) => void;
   /** Someone updating from an earlier Serica: everything they have stays. */
   upgrading: boolean;
-  /** The current space's theme (kept unless another is picked). */
-  currentTheme: SpaceTheme;
+  /** Every space's theme as it is now (resolved), by space id. */
+  spaceThemes: Record<string, SpaceTheme>;
+  activeSpaceId: string;
   osDark: boolean;
-  /** Gives every space this theme. */
-  onApplyTheme: (theme: SpaceTheme) => void;
+  /** Replaces the saved space themes with `themes` and shows `shown` at once. */
+  onApplyThemes: (themes: Record<string, unknown>, shown: SpaceTheme) => void;
   onFinish: () => void;
 }
 
@@ -30,7 +31,7 @@ export interface SetupProps {
  * It never removes or resets anything: tabs, sign-ins, cookies, passwords
  * and settings all stay; only what is picked here changes.
  */
-export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrading, currentTheme, osDark, onApplyTheme, onFinish }) => {
+export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrading, spaceThemes, activeSpaceId, osDark, onApplyThemes, onFinish }) => {
   const [i, setI] = useState(0);
   const [dir, setDir] = useState(1);
   const step = STEPS[i];
@@ -39,23 +40,46 @@ export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrad
     setI((x) => Math.max(0, Math.min(STEPS.length - 1, x + d)));
   };
 
-  // Look: "keep" leaves everyone's colours as they are.
+  // Look. Everything is worked out from the themes as they were when setup
+  // opened, so "Keep mine" always gives back each space's own theme exactly,
+  // whatever was tried in between.
+  const original = useRef<{ raw: Record<string, unknown>; resolved: Record<string, SpaceTheme>; active: SpaceTheme } | null>(null);
+  if (!original.current) {
+    original.current = {
+      raw: { ...((settings.spaceThemes as Record<string, unknown> | undefined) ?? {}) },
+      resolved: { ...spaceThemes },
+      active: spaceThemes[activeSpaceId] ?? Object.values(spaceThemes)[0],
+    };
+  }
+  const orig = original.current;
   const [palette, setPalette] = useState<string>(upgrading ? 'keep' : 'graphite');
-  const [mode, setMode] = useState<SpaceThemeMode>(currentTheme.mode);
-  const applyLook = (p: string, m: SpaceThemeMode) => {
+  const [mode, setMode] = useState<SpaceThemeMode>(orig.active.mode);
+  const [modeTouched, setModeTouched] = useState(false);
+  const isDark = (m: SpaceThemeMode) => m === 'dark' || (m === 'auto' && osDark);
+  const applyLook = (p: string, m: SpaceThemeMode, touched: boolean) => {
     setPalette(p);
     setMode(m);
-    const dark = m === 'dark' || (m === 'auto' && osDark);
+    setModeTouched(touched);
+    const dark = isDark(m);
     if (p === 'keep') {
-      onApplyTheme({ ...currentTheme, mode: m });
+      if (!touched) {
+        onApplyThemes(orig.raw, orig.active);
+        return;
+      }
+      // Each space keeps its colours, moved to the other side only when it changes.
+      const adjust = (t: SpaceTheme) => (isDark(t.mode) === dark ? { ...t, mode: m } : retoneTheme(t, m, dark));
+      const all = Object.fromEntries(Object.entries(orig.resolved).map(([id, t]) => [id, adjust(t)]));
+      onApplyThemes({ ...orig.raw, ...all }, adjust(orig.active));
       return;
     }
     const f = FAMILIES.find((x) => x.id === p)!;
-    onApplyTheme(familyTheme(f.hue, f.sat, m, 0.58, dark));
+    const theme = familyTheme(f.hue, f.sat, m, 0.58, dark);
+    const all = Object.fromEntries(Object.keys(orig.resolved).map((id) => [id, { ...theme, points: theme.points.map((pt) => ({ ...pt })) }]));
+    onApplyThemes({ ...orig.raw, ...all }, theme);
   };
   useEffect(() => {
     // A new install starts from Graphite; people updating keep theirs.
-    if (!upgrading) applyLook('graphite', currentTheme.mode);
+    if (!upgrading) applyLook('graphite', orig.active.mode, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -99,9 +123,11 @@ export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrad
     return `linear-gradient(135deg, ${p.backdropC1}, ${p.backdropC2} 60%, ${p.surfaceSolid})`;
   };
   const keepSwatch = useMemo(() => {
-    const p = computeThemePalette(currentTheme, osDark);
+    const t = modeTouched && isDark(mode) !== isDark(orig.active.mode) ? retoneTheme(orig.active, mode, isDark(mode)) : orig.active;
+    const p = computeThemePalette(t, osDark);
     return `linear-gradient(135deg, ${p.backdropC1}, ${p.backdropC2} 60%, ${p.surfaceSolid})`;
-  }, [currentTheme, osDark]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, modeTouched, osDark]);
 
   const page = (() => {
     switch (step) {
@@ -193,7 +219,7 @@ export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrad
                   ['auto', 'Match Windows', Monitor],
                 ] as const
               ).map(([m, label, Icon]) => (
-                <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} onClick={() => applyLook(palette, m)}>
+                <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} onClick={() => applyLook(palette, m, true)}>
                   <Icon size={13} aria-hidden="true" style={{ marginRight: 6, verticalAlign: -2 }} />
                   {label}
                 </button>
@@ -201,13 +227,13 @@ export const Setup: React.FC<SetupProps> = ({ settings, onUpdateSettings, upgrad
             </div>
             <div className="setup-palettes" role="radiogroup" aria-label="Colours">
               {upgrading && (
-                <button type="button" role="radio" aria-checked={palette === 'keep'} className={`setup-palette${palette === 'keep' ? ' on' : ''}`} onClick={() => applyLook('keep', mode)}>
+                <button type="button" role="radio" aria-checked={palette === 'keep'} className={`setup-palette${palette === 'keep' ? ' on' : ''}`} onClick={() => applyLook('keep', mode, modeTouched)}>
                   <span style={{ background: keepSwatch }} />
                   Keep mine
                 </button>
               )}
               {FAMILIES.slice(0, upgrading ? 7 : 8).map((f) => (
-                <button key={f.id} type="button" role="radio" aria-checked={palette === f.id} className={`setup-palette${palette === f.id ? ' on' : ''}`} onClick={() => applyLook(f.id, mode)}>
+                <button key={f.id} type="button" role="radio" aria-checked={palette === f.id} className={`setup-palette${palette === f.id ? ' on' : ''}`} onClick={() => applyLook(f.id, mode, modeTouched)}>
                   <span style={{ background: swatch(f.id) }} />
                   {f.name}
                 </button>
