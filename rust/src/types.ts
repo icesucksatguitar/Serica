@@ -545,3 +545,13 @@ export interface WeatherNow {
   max: number | null;
   min: number | null;
 }
+
+/** Saved by the 0.4 onboarding: the name the greeting used. Kept for older profiles. */
+export interface UserProfile {
+  name: string;
+  /** Always null: Serica keeps no account. */
+  email: string | null;
+  isGuest: boolean;
+  theme: 'obsidian' | 'charcoal' | 'slate';
+  mode: 'minimal' | 'architect';
+}

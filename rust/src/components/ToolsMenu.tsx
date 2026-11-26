@@ -96,6 +96,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = (p) => {
       <button
         type="button"
         className={`minimal-icon-btn tools-menu-btn${open ? ' active' : ''}`}
+        data-tour="tools"
         aria-expanded={open}
         aria-label={open ? 'Hide browser tools' : 'Browser tools'}
         title={open ? 'Hide browser tools' : 'Browser tools'}

@@ -6,6 +6,8 @@ export interface GuideStep {
   target?: string;
   title: string;
   body: string;
+  /** Runs when the step is shown (open the sidebar, a menu...). */
+  onEnter?: () => void;
 }
 
 interface Rect {
@@ -32,6 +34,9 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
   const step = steps[i];
   // The card shows through a live page like the app's menus.
   useElementHole(`guide-${id}`, card);
+  useEffect(() => {
+    step?.onEnter?.();
+  }, [step]);
 
   // Follow the target while layout settles (panels sliding in) and on resize.
   useLayoutEffect(() => {
@@ -121,13 +126,19 @@ export const GuideTour: React.FC<{ id: string; steps: GuideStep[]; onClose: () =
       <div
         ref={setCard}
         className="guide-card"
+        key={i}
         style={{ left: cardPos?.left ?? -9999, top: cardPos?.top ?? 0, width: CARD_W }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="guide-progress" aria-hidden="true">
-          {steps.map((_, k) => (
-            <span key={k} className={k === i ? 'on' : k < i ? 'done' : ''} />
-          ))}
+        <div className="guide-progress-row">
+          <div className="guide-progress" aria-hidden="true">
+            {steps.map((_, k) => (
+              <span key={k} className={k === i ? 'on' : k < i ? 'done' : ''} />
+            ))}
+          </div>
+          <span className="guide-count tnum">
+            {i + 1} of {steps.length}
+          </span>
         </div>
         <h3 className="guide-title">{step.title}</h3>
         <p className="guide-body">{step.body}</p>

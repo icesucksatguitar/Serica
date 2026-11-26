@@ -16,13 +16,15 @@ import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
 import { PermissionPrompt } from './components/PermissionPrompt';
 import { DropZones } from './components/DropZones';
-import type { UserProfile, WelcomePrefs } from './components/WelcomeModal';
+import type { UserProfile } from './types';
+import { ProductTour } from './components/ProductTour';
+import { FocusButton } from './components/FocusButton';
 import { useSettings } from './hooks/useSettings';
 import { prewarmPageUnderlay, useLingering, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
 import { Presence } from './hooks/usePresence';
 import type { SettingsPage } from './components/settings/parts';
 import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
-import { resolveSpaceTheme, resolveReducedEffectsActive } from './shared/settings';
+import { resolveSpaceTheme, resolveReducedEffectsActive, SETUP_VERSION } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
 import { computeTopBarTint, type PageColorReport, type TabPageColor } from './utils/topBarTint';
@@ -52,6 +54,7 @@ import './styles/chrome.css';
 import './styles/home.css';
 import './styles/settings2.css';
 import './styles/ai.css';
+import './styles/setup.css';
 import './styles/motion.css';
 
 const ArchiveList = lazy(() =>
@@ -72,9 +75,7 @@ const ThemeStudio = lazy(() =>
 const MediaPlayer = lazy(() =>
   import('./components/MediaPlayer').then((m) => ({ default: m.MediaPlayer }))
 );
-const WelcomeModal = lazy(() =>
-  import('./components/WelcomeModal').then((m) => ({ default: m.WelcomeModal }))
-);
+const Setup = lazy(() => import('./components/Setup').then((m) => ({ default: m.Setup })));
 const Settings2 = lazy(() =>
   import('./components/settings/Settings2').then((m) => ({ default: m.Settings2 }))
 );
@@ -182,46 +183,10 @@ export function App() {
     }
   });
 
-  const [isWelcomeOpen, setIsWelcomeOpen] = useState<boolean>(() => {
-    try {
-      return (localStorage.getItem('serica_onboarding_completed') || localStorage.getItem('neutrino_onboarding_completed')) === null;
-    } catch {
-      return false;
-    }
-  });
-
-  const handleWelcomeComplete = (profile: UserProfile, prefs: WelcomePrefs) => {
-    setUserProfile(profile);
-    setIsWelcomeOpen(false);
-    const dockPins: PinnedSite[] = prefs.dockSites.map((s) => ({ id: `pin-${s.id}`, title: s.title, url: s.url }));
-    // The chosen theme goes to every space; Theme Studio can change each one later.
-    const spaceThemes = Object.fromEntries(
-      state.spaces.map((s) => [s.id, { ...prefs.spaceTheme, points: prefs.spaceTheme.points.map((p) => ({ ...p })) }]),
-    );
-    const palette = applySpaceThemeToRoot(prefs.spaceTheme, osPrefersDark);
-    triggerThemeCrossFade();
-    try {
-      localStorage.setItem('serica_user_profile', JSON.stringify(profile));
-      localStorage.setItem('serica_onboarding_completed', 'true');
-      localStorage.setItem('serica_pinned_sites', JSON.stringify(dockPins));
-    } catch { }
-    void updateSettings({
-      userProfile: profile,
-      onboardingCompleted: true,
-      theme: palette.effectiveMode,
-      tabLayout: prefs.tabLayout,
-      textScale: prefs.textScale,
-      rightPinsDockVisible: prefs.dockVisible,
-      pinnedSites: dockPins,
-      spaceThemes: { ...(settings.spaceThemes || {}), ...spaceThemes },
-    });
-    if (prefs.sidebarSites.length > 0) {
-      void window.serica?.addPinnedSites?.(
-        prefs.sidebarSites.map((s) => ({ url: s.url, title: s.title })),
-        state.activeSpaceId,
-      );
-    }
-  };
+  // Setup: on first launch, and once after updating to a version with a new
+  // setup screen (settings.setupVersion). It never resets anything.
+  const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
+  const setupChecked = useRef(false);
 
   // Display name edited in the Settings panel; same key and shape WelcomeModal writes.
   const handleUserNameChange = useCallback(
@@ -450,6 +415,38 @@ export function App() {
     [settings.spaceThemes, state.spaces, updateSettings],
   );
 
+  /** Setup's colour choice: shown at once, given to every space. */
+  const applySetupTheme = useCallback(
+    (theme: SpaceTheme) => {
+      triggerThemeCrossFade();
+      const palette = applySpaceThemeToRoot(theme, osPrefersDark);
+      void window.serica?.setThemeMode?.(theme.mode === 'auto' ? 'system' : palette.effectiveMode);
+      setIsDarkMode(palette.effectiveMode === 'dark');
+      applyThemeToAllSpaces(theme);
+    },
+    [applyThemeToAllSpaces, osPrefersDark, triggerThemeCrossFade],
+  );
+
+  const upgrading = useMemo(() => {
+    try {
+      return settings.onboardingCompleted === true || !!settings.userProfile || localStorage.getItem('serica_onboarding_completed') !== null || localStorage.getItem('neutrino_onboarding_completed') !== null;
+    } catch {
+      return settings.onboardingCompleted === true;
+    }
+  }, [settings.onboardingCompleted, settings.userProfile]);
+
+  const finishSetup = useCallback(() => {
+    setIsWelcomeOpen(false);
+    try {
+      localStorage.setItem('serica_onboarding_completed', 'true');
+    } catch {
+      // Private window: the settings file still records it.
+    }
+    void updateSettings({ setupVersion: SETUP_VERSION, onboardingCompleted: true });
+    // The tour starts once setup has left the screen.
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent('serica:start-tour')), PANEL_EXIT_MS + 260);
+  }, [updateSettings]);
+
   // Reconcile cached main-process settings (`browser-state.json`) once loaded on startup
   const hydratedFromMainRef = useRef(false);
   useEffect(() => {
@@ -465,13 +462,11 @@ export function App() {
     const persistedProfile = settings.userProfile as UserProfile | undefined;
     if (persistedProfile && typeof persistedProfile === 'object' && typeof persistedProfile.name === 'string') {
       setUserProfile(persistedProfile);
-      setIsWelcomeOpen(false);
       try {
         localStorage.setItem('serica_user_profile', JSON.stringify(persistedProfile));
         localStorage.setItem('serica_onboarding_completed', 'true');
       } catch { }
     } else if (settings.onboardingCompleted === true) {
-      setIsWelcomeOpen(false);
       try {
         localStorage.setItem('serica_onboarding_completed', 'true');
       } catch { }
@@ -498,6 +493,12 @@ export function App() {
       void updateSettings(migrationPatch);
     }
   }, [settingsLoaded, settings, isDarkMode, userProfile, updateSettings]);
+
+  useEffect(() => {
+    if (!settingsLoaded || setupChecked.current) return;
+    setupChecked.current = true;
+    if ((settings.setupVersion ?? 0) < SETUP_VERSION) setIsWelcomeOpen(true);
+  }, [settingsLoaded, settings.setupVersion]);
 
   // Clean up any legacy zoom locks or invalid custom themes
   useEffect(() => {
@@ -1208,6 +1209,8 @@ return (
           </button>
         )}
 
+        <FocusButton onOpen={() => openSettings('focus')} />
+
         {(() => {
           const activeHost = (() => {
             try {
@@ -1569,16 +1572,30 @@ return (
       </Suspense>
     </Presence>
 
-    {/* Welcome / Onboarding Flow for First Launch */}
-    {isWelcomeOpen && (
+    {/* Setup: first launch, and once after updating to a new setup version */}
+    <Presence open={isWelcomeOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
-        <WelcomeModal
-          isOpen={isWelcomeOpen}
-          onPreviewTextScale={(textScale) => void updateSettings({ textScale })}
-          onComplete={handleWelcomeComplete}
+        <Setup
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          upgrading={upgrading}
+          currentTheme={activeSpaceTheme}
+          osDark={osPrefersDark}
+          onApplyTheme={applySetupTheme}
+          onFinish={finishSetup}
         />
       </Suspense>
-    )}
+    </Presence>
+
+    {/* The first-run tour (after setup; replayed from Settings › About) */}
+    <ProductTour
+      topTabs={topTabs}
+      onNewTab={!isWebpage}
+      setSidebarOpen={setSidebarExpanded}
+      onDone={() => {
+        if (!settings.tourDone) void updateSettings({ tourDone: true });
+      }}
+    />
   </div>
 );
 }
