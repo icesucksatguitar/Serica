@@ -177,3 +177,57 @@ html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluste
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* ---- Sharp sidebar text ---------------------------------------------------
+   The window is transparent, so WebView2 draws all interface text with
+   greyscale anti-aliasing (no ClearType); Zen does the same. What made the
+   sidebar look soft next to Zen was the font: Inter has no hinting, so at
+   12-13px on a 100% scale display its stems fall between pixels and blur.
+   Segoe UI Variable is hinted for Windows and snaps to the pixel grid, which
+   is what Zen uses. */
+
+.nsb.nsb {
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', var(--font-ui);
+  font-feature-settings: normal;
+  letter-spacing: 0;
+}
+
+/* ---- The sidebar's toolbar row fills the sidebar's width ------------------
+   App.tsx measures the room left in the row and sets --absorb-gap: the extra
+   space between each of the six controls (sidebar toggle, back, forward,
+   reload, home, new tab), so they spread out to the sidebar's right edge. */
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster > .site-nav-controls {
+  transform: translate3d(calc(var(--absorb-gap, 0px) - var(--pill-shift)), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster > .topbar-new-tab-btn {
+  transform: translate3d(calc(5 * var(--absorb-gap, 0px) - var(--pill-shift)), 0, 0);
+}
+
+.floating-top-chrome-capsule .site-nav-controls .site-nav-btn {
+  transition: transform var(--absorb-out);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn {
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(2) {
+  transform: translate3d(var(--absorb-gap, 0px), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(3) {
+  transform: translate3d(calc(2 * var(--absorb-gap, 0px)), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(4) {
+  transform: translate3d(calc(3 * var(--absorb-gap, 0px)), 0, 0);
+}
+
+/* The buttons spread past the group's own capsule, so it has none here. */
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
