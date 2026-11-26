@@ -377,6 +377,11 @@ impl TabHost {
         let mut b = WebviewBuilder::new(label, WebviewUrl::External(url))
             .data_directory(self.profile_dir(profile))
             .additional_browser_args(&self.browser_args())
+            // Tauri's file-drop handler turns WebView2's own drop support off
+            // and only reports file paths to the app: pages then could not take
+            // dropped files (uploads), links or text, and HTML5 drag and drop
+            // inside them broke. Pages handle drops themselves, as in Edge.
+            .disable_drag_drop_handler()
             .background_color(tauri::webview::Color(255, 255, 255, 255))
             .browser_extensions_enabled(true)
             .initialization_script(PAGE_SCRIPT)
@@ -959,6 +964,8 @@ impl TabHost {
         let wv = window
             .add_child(builder, LogicalPosition::new(b.x, b.y), LogicalSize::new(b.w.max(1.0), b.h.max(1.0)))
             .map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        crate::webview_win::attach_permissions(app, "assistant", &wv);
         if let Some((old, _)) = app.host.lock().assistant.replace((wv, b)) {
             let _ = old.close();
         }

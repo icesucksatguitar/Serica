@@ -236,7 +236,35 @@ export const tauriBridge = {
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => on('serica:update-status', cb),
   onHtmlFullscreen: (cb: (isFullscreen: boolean) => void) => on('serica:html-fullscreen', cb),
   onPageDialog: (cb: (d: PageDialogRequest) => void) => on('serica:page-dialog', cb),
+
+  // Site permissions (camera, microphone, location...) asked in Serica's prompt
+  onPermissionRequest: (cb: (r: PermissionRequest) => void) => on('serica:permission-request', cb),
+  answerPermission: (id: number, decision: 'allow' | 'allow-once' | 'block' | 'deny') =>
+    invoke<void>('answer_permission', { id, decision }),
+
+  // Drag and drop onto Serica's own interface
+  onDrag: (cb: (e: DragEventPayload) => void) => on('serica:drag', cb),
+  openDroppedPaths: (paths: string[]) => invoke<number>('open_dropped_paths', { paths }),
 };
+
+export interface PermissionRequest {
+  id: number;
+  tabId: string;
+  /** `https://host[:port]`: the unit an answer is remembered for. */
+  origin: string;
+  host: string;
+  kind: string;
+  userInitiated: boolean;
+}
+
+export interface DragEventPayload {
+  phase: 'enter' | 'over' | 'leave' | 'drop';
+  /** Physical client px of the main window, and its client width (to get CSS px). */
+  x: number;
+  y: number;
+  clientWidth: number;
+  data: { kind: 'files' | 'url' | 'text'; paths: string[]; url?: string | null; text?: string | null } | null;
+}
 
 export type TauriBridge = typeof tauriBridge;
 

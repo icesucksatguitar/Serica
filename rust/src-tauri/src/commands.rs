@@ -335,6 +335,36 @@ pub async fn answer_page_dialog(id: u64, accept: bool, text: Option<String>, app
     Ok(())
 }
 
+/// Answers a site's permission request shown by the UI (`permission-request`
+/// event): "allow" / "block" are remembered for the site, "allow-once" and
+/// "deny" apply this time only.
+#[tauri::command]
+pub async fn answer_permission(id: u64, decision: String, app: State<'_, Shared>) -> R<()> {
+    if !matches!(decision.as_str(), "allow" | "allow-once" | "block" | "deny") {
+        return Err("bad decision".into());
+    }
+    #[cfg(windows)]
+    {
+        let a = app.inner().clone();
+        let _ = app.handle.run_on_main_thread(move || crate::webview_win::answer_permission(&a, id, &decision));
+    }
+    #[cfg(not(windows))]
+    let _ = (id, app);
+    Ok(())
+}
+
+/// Opens files dropped on Serica's own interface (not on a page) in new tabs.
+#[tauri::command]
+pub async fn open_dropped_paths(paths: Vec<String>, app: State<'_, Shared>) -> R<usize> {
+    let urls: Vec<String> = paths.iter().take(20).filter_map(|p| crate::files::file_url(std::path::Path::new(p))).collect();
+    let n = urls.len();
+    let app = app.inner();
+    for (i, url) in urls.into_iter().enumerate() {
+        app.mutate(|s| s.create_tab(Some(url), None, i == 0, None));
+    }
+    Ok(n)
+}
+
 // ------------------------------------------------------------------ viewport
 
 #[tauri::command]

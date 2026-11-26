@@ -81,6 +81,11 @@ pub struct BrowserSettings {
     /// Sites at the default zoom (the text size) have no entry.
     #[serde(default)]
     pub site_zoom: std::collections::BTreeMap<String, f64>,
+    /// Remembered answers to sites' permission requests (camera, microphone,
+    /// location...): origin -> permission -> "allow" | "block". Answers given
+    /// "this time" only are not kept.
+    #[serde(default)]
+    pub site_permissions: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// Local MCP endpoint for external agents (off by default).
     #[serde(default)]
     pub mcp_server_enabled: bool,
@@ -96,6 +101,21 @@ fn yes() -> bool {
 fn default_sidebar_width() -> f64 {
     240.0
 }
+/// Permissions a site can be asked about; Serica's prompt names them so.
+pub const PERMISSION_KINDS: &[&str] = &[
+    "camera",
+    "microphone",
+    "location",
+    "notifications",
+    "clipboard",
+    "downloads",
+    "files",
+    "sensors",
+    "fonts",
+    "midi",
+    "windows",
+];
+
 pub const TEXT_SCALES: [f64; 4] = [0.9, 1.0, 1.1, 1.25];
 fn default_text_scale() -> f64 {
     1.0
@@ -180,6 +200,24 @@ impl BrowserSettings {
                     obj.remove(key);
                 }
             }
+        }
+        // Site permissions: keep only well-formed `origin -> kind -> allow|block`
+        // entries, so one bad entry can't make the whole file fall back.
+        if let Some(v) = obj.remove("sitePermissions") {
+            let mut clean = Map::new();
+            if let Value::Object(sites) = v {
+                for (origin, kinds) in sites {
+                    let Value::Object(kinds) = kinds else { continue };
+                    let kept: Map<String, Value> = kinds
+                        .into_iter()
+                        .filter(|(k, s)| PERMISSION_KINDS.contains(&k.as_str()) && matches!(s.as_str(), Some("allow" | "block")))
+                        .collect();
+                    if !kept.is_empty() && origin.len() < 300 {
+                        clean.insert(origin, Value::Object(kept));
+                    }
+                }
+            }
+            obj.insert("sitePermissions".into(), Value::Object(clean));
         }
         let mut s: BrowserSettings = serde_json::from_value(Value::Object(obj)).unwrap_or_else(|e| {
             tracing::warn!("settings could not be parsed, using defaults: {e}");
@@ -278,6 +316,36 @@ impl BrowserSettings {
         }
     }
 
+    /// The remembered answer for `kind` on `origin`, if any.
+    pub fn permission(&self, origin: &str, kind: &str) -> Option<bool> {
+        match self.site_permissions.get(origin)?.get(kind)?.as_str() {
+            "allow" => Some(true),
+            "block" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Remembers an answer (`None` forgets it). Returns whether anything changed.
+    pub fn remember_permission(&mut self, origin: &str, kind: &str, allow: Option<bool>) -> bool {
+        if !PERMISSION_KINDS.contains(&kind) || origin.is_empty() {
+            return false;
+        }
+        match allow {
+            Some(a) => {
+                let v = if a { "allow" } else { "block" }.to_string();
+                self.site_permissions.entry(origin.to_string()).or_default().insert(kind.to_string(), v.clone()) != Some(v)
+            }
+            None => {
+                let Some(kinds) = self.site_permissions.get_mut(origin) else { return false };
+                let changed = kinds.remove(kind).is_some();
+                if kinds.is_empty() {
+                    self.site_permissions.remove(origin);
+                }
+                changed
+            }
+        }
+    }
+
     /// Hours after which an unused Today tab is archived; `None` = never.
     pub fn archive_after_hours(&self) -> Option<i64> {
         self.archive_interval_hours.as_i64()
@@ -364,6 +432,30 @@ mod tests {
         assert_eq!(s.shield_whitelist, vec!["example.com".to_string()]);
         assert!(s.is_whitelisted("sub.example.com"));
         assert!(!s.is_whitelisted("notexample.com"));
+    }
+
+    #[test]
+    fn site_permissions_are_sanitized_and_remembered() {
+        let s = BrowserSettings::from_value(json!({
+            "adblockEnabled": false,
+            "sitePermissions": {
+                "https://meet.google.com": { "camera": "allow", "microphone": "block", "teleport": "allow" },
+                "https://bad.example": { "camera": 7 },
+                "https://worse.example": "nope"
+            }
+        }));
+        // A malformed entry never resets other settings.
+        assert!(!s.adblock_enabled);
+        assert_eq!(s.permission("https://meet.google.com", "camera"), Some(true));
+        assert_eq!(s.permission("https://meet.google.com", "microphone"), Some(false));
+        assert_eq!(s.permission("https://meet.google.com", "teleport"), None);
+        assert!(!s.site_permissions.contains_key("https://bad.example"));
+        let mut s = BrowserSettings::default();
+        assert!(s.remember_permission("https://a.test", "location", Some(true)));
+        assert!(!s.remember_permission("https://a.test", "location", Some(true)));
+        assert!(s.remember_permission("https://a.test", "location", None));
+        assert!(s.site_permissions.is_empty());
+        assert!(!s.remember_permission("https://a.test", "bogus", Some(true)));
     }
 
     #[test]

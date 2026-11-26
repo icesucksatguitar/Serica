@@ -20,6 +20,8 @@ mod widgets;
 mod window_state;
 #[cfg(windows)]
 mod webview_win;
+#[cfg(windows)]
+mod dragdrop_win;
 
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -83,6 +85,11 @@ pub fn run() {
                 commands::apply_ui_zoom(&shared, scale);
             }
             files::open_args(&shared, std::env::args().skip(1));
+            // Files, links and text dropped on Serica's own interface.
+            #[cfg(windows)]
+            if let Some(main) = app.get_webview("main") {
+                dragdrop_win::install(&shared, &main);
+            }
             app.manage(shared);
             updater::start(app.handle().clone());
             Ok(())
@@ -119,6 +126,8 @@ pub fn run() {
             commands::site_action,
             commands::open_external_url,
             commands::answer_page_dialog,
+            commands::answer_permission,
+            commands::open_dropped_paths,
             commands::set_viewport,
             commands::viewport_capture,
             commands::set_viewport_hole,

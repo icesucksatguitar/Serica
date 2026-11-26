@@ -1,0 +1,144 @@
+/* Permission prompt and drop targets (PermissionPrompt.tsx, DropZones.tsx). */
+
+.perm-card {
+  position: fixed;
+  z-index: 10600;
+  width: 360px;
+  box-sizing: border-box;
+  padding: 14px 14px 10px;
+  border-radius: var(--radius-card);
+  background: var(--ui-surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sheet);
+  font-size: var(--fs-13);
+  letter-spacing: var(--tr-13);
+  transform-origin: 24px -8px;
+}
+
+.perm-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.perm-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--ink);
+}
+
+.perm-text {
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.perm-host {
+  font-weight: 600;
+  font-size: var(--fs-14);
+  letter-spacing: var(--tr-14);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm-ask {
+  margin-top: 2px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.perm-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.perm-spacer {
+  flex: 1;
+}
+
+.perm-foot {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-3);
+  font-size: var(--fs-11);
+  letter-spacing: var(--tr-11);
+}
+
+/* ---- Drop zones: shown while something is dragged over Serica's own UI */
+
+.drop-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 10550;
+  pointer-events: none;
+}
+
+.drop-zone {
+  position: fixed;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1.5px dashed color-mix(in srgb, var(--ink) 38%, transparent);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  opacity: 0;
+  transform: scale(0.985);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+.drop-zone.on {
+  opacity: 1;
+  transform: none;
+}
+
+.drop-zone.hot {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--ink) 60%, transparent);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+
+.drop-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-sheet);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Top tab strip: drag to reorder (TopTabStrip.tsx) */
+
+.ttab {
+  touch-action: none;
+}
+
+.ttab.shifting {
+  transition: transform var(--dur-slow) var(--spring-snap);
+}
+
+.ttab.dragging {
+  position: relative;
+  z-index: 3;
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}

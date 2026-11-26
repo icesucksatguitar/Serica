@@ -319,6 +319,9 @@ unsafe fn install(
         )?;
     }
     install_dialogs(&app, &tab_id, &core)?;
+    if let Err(e) = install_permissions(&app, &tab_id, &core) {
+        tracing::warn!("permission hook install failed: {e}");
+    }
     {
         let app = app.clone();
         core.add_ContainsFullScreenElementChanged(
@@ -1386,6 +1389,131 @@ unsafe fn install_dialogs(app: &Shared, tab_id: &str, core: &ICoreWebView2) -> w
         )?;
     }
     Ok(())
+}
+
+// ------------------------------------------------------------------ site permissions
+
+/// Serica's name for a WebView2 permission kind; `None` for kinds the engine
+/// decides on its own (autoplay follows Chromium's policy).
+fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> Option<&'static str> {
+    Some(match kind {
+        COREWEBVIEW2_PERMISSION_KIND_CAMERA => "camera",
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => "microphone",
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => "location",
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => "notifications",
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ => "clipboard",
+        COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS => "downloads",
+        COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE => "files",
+        COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS => "sensors",
+        COREWEBVIEW2_PERMISSION_KIND_LOCAL_FONTS => "fonts",
+        COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES => "midi",
+        COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT => "windows",
+        _ => return None,
+    })
+}
+
+/// `https://host[:port]` of a page, the unit permissions are kept for.
+pub fn permission_origin(uri: &str) -> Option<String> {
+    let u = url::Url::parse(uri).ok()?;
+    if !matches!(u.scheme(), "http" | "https") {
+        return None;
+    }
+    Some(u.origin().ascii_serialization())
+}
+
+struct PendingPermission {
+    args: ICoreWebView2PermissionRequestedEventArgs,
+    deferral: ICoreWebView2Deferral,
+    origin: String,
+    kind: &'static str,
+}
+
+thread_local! {
+    static PERMISSIONS: RefCell<HashMap<u64, PendingPermission>> = RefCell::new(HashMap::new());
+}
+static NEXT_PERMISSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Asks for camera, microphone, location and the other permissions in
+/// Serica's own prompt instead of the engine's (Edge-styled) one. Answers
+/// kept as "always" live in Serica's settings, not in the WebView2 profile,
+/// so they can be listed and revoked in Settings › Privacy.
+unsafe fn install_permissions(app: &Shared, tab_id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
+    let mut token = Default::default();
+    let (app, id) = (app.clone(), tab_id.to_string());
+    core.add_PermissionRequested(
+        &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+            args.PermissionKind(&mut kind)?;
+            let Some(name) = permission_name(kind) else { return Ok(()) };
+            let mut uri = PWSTR::null();
+            args.Uri(&mut uri)?;
+            let uri = take(uri);
+            // Never let the engine remember an answer behind Serica's back.
+            if let Ok(a3) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+                let _ = a3.SetSavesInProfile(false);
+            }
+            let Some(origin) = permission_origin(&uri) else {
+                // Not a web origin (file:, data:): nothing to ask about.
+                args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY)?;
+                return Ok(());
+            };
+            if let Some(allow) = app.settings().permission(&origin, name) {
+                args.SetState(if allow { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY })?;
+                return Ok(());
+            }
+            let mut user = Default::default();
+            let _ = args.IsUserInitiated(&mut user);
+            let deferral = args.GetDeferral()?;
+            let request_id = NEXT_PERMISSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            PERMISSIONS.with(|p| p.borrow_mut().insert(request_id, PendingPermission { args: args.clone(), deferral, origin: origin.clone(), kind: name }));
+            ui_emit(
+                &app.handle,
+                "serica:permission-request",
+                serde_json::json!({
+                    "id": request_id,
+                    "tabId": id,
+                    "origin": origin,
+                    "host": origin_of(&uri),
+                    "kind": name,
+                    "userInitiated": user.as_bool(),
+                }),
+            );
+            Ok(())
+        })),
+        &mut token,
+    )?;
+    Ok(())
+}
+
+/// Answers a permission request: "allow" / "block" (remembered for the
+/// site), "allow-once", or "deny" (this time only, also for a dismissed
+/// prompt). Must run on the UI thread.
+pub fn answer_permission(app: &Shared, id: u64, decision: &str) {
+    let Some(p) = PERMISSIONS.with(|m| m.borrow_mut().remove(&id)) else { return };
+    let allow = matches!(decision, "allow" | "allow-once");
+    unsafe {
+        let _ = p.args.SetState(if allow { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY });
+        let _ = p.deferral.Complete();
+    }
+    if matches!(decision, "allow" | "block") {
+        let changed = app.store.lock().settings.remember_permission(&p.origin, p.kind, Some(decision == "allow"));
+        if changed {
+            app.notify(crate::app::Notice::Settings);
+        }
+    }
+}
+
+/// Permission handling for a webview that isn't a tab (the assistant drawer).
+pub fn attach_permissions(app: &Shared, owner: &str, wv: &Webview) {
+    let (app, owner) = (app.clone(), owner.to_string());
+    let _ = wv.with_webview(move |pw| unsafe {
+        if let Ok(core) = pw.controller().CoreWebView2() {
+            if let Err(e) = install_permissions(&app, &owner, &core) {
+                tracing::warn!("permission hook install failed: {e}");
+            }
+        }
+    });
 }
 
 /// Answers a dialog raised by `install_dialogs`. Must run on the UI thread.

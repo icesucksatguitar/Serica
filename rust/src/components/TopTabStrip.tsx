@@ -153,18 +153,141 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
     scrollRef.current?.querySelector('.ttab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [state.activeTabId]);
 
+  // --- Drag to reorder ---------------------------------------------------------
+  // Pointer-captured: the tab follows the pointer along the strip (offset from
+  // where it was grabbed), its neighbours slide aside, and the drop moves it.
+  const dragRef = useRef<{
+    id: string;
+    section: 'pinned' | 'today';
+    pointerId: number;
+    startX: number;
+    moved: boolean;
+    el: HTMLElement;
+    /** Other tabs of the section, in order, with their resting centers. */
+    others: { id: string; el: HTMLElement; center: number }[];
+    width: number;
+    /** Resting center of the dragged tab. */
+    center0: number;
+    fromIndex: number;
+    toIndex: number;
+  } | null>(null);
+  const suppressClick = useRef(false);
+  const [pendingOrder, setPendingOrder] = useState<{ section: 'pinned' | 'today'; ids: string[] } | null>(null);
+  useEffect(() => setPendingOrder(null), [state]);
+  const canDrag = (section: 'pinned' | 'today', item: SidebarItemRef) =>
+    section === 'today' || (!item.folderId && !view.pinned.some((p) => p.folderId));
+
+  const onTabPointerDown = (e: React.PointerEvent<HTMLElement>, item: SidebarItemRef, section: 'pinned' | 'today') => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('.ttab-close') || !canDrag(section, item)) return;
+    const list = section === 'pinned' ? view.pinned : view.today;
+    const strip = e.currentTarget.parentElement!;
+    const els = list
+      .map((it) => ({ id: it.id, el: strip.querySelector<HTMLElement>(`[data-ttab-id="${CSS.escape(it.id)}"]`) }))
+      .filter((x): x is { id: string; el: HTMLElement } => !!x.el);
+    const fromIndex = els.findIndex((x) => x.id === item.id);
+    if (fromIndex < 0) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    dragRef.current = {
+      id: item.id,
+      section,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      moved: false,
+      el: e.currentTarget,
+      others: els.filter((x) => x.id !== item.id).map((x) => {
+        const rr = x.el.getBoundingClientRect();
+        return { ...x, center: rr.left + rr.width / 2 };
+      }),
+      width: r.width + 4,
+      center0: r.left + r.width / 2,
+      fromIndex,
+      toIndex: fromIndex,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onTabPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    const dx = e.clientX - d.startX;
+    if (!d.moved) {
+      if (Math.abs(dx) < 5) return;
+      d.moved = true;
+      preview.hide();
+      d.el.classList.add('dragging');
+      for (const o of d.others) o.el.classList.add('shifting');
+    }
+    d.el.style.transform = `translate3d(${dx}px, 0, 0)`;
+    // From the rects taken at the start: no layout reads while dragging.
+    const center = d.center0 + dx;
+    // Where the dragged tab's center now falls among the others.
+    let to = 0;
+    for (const o of d.others) if (center > o.center) to++;
+    d.toIndex = to;
+    d.others.forEach((o, i) => {
+      // Others between the old and new slot move one tab width the other way.
+      let shift = 0;
+      if (i >= d.fromIndex && i < to) shift = -d.width;
+      else if (i < d.fromIndex && i >= to) shift = d.width;
+      o.el.style.transform = shift ? `translate3d(${shift}px, 0, 0)` : '';
+    });
+  };
+
+  const endTabDrag = (e: React.PointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    dragRef.current = null;
+    const reset = () => {
+      d.el.classList.remove('dragging');
+      d.el.style.transform = '';
+      for (const o of d.others) {
+        o.el.classList.remove('shifting');
+        o.el.style.transform = '';
+      }
+    };
+    if (!d.moved) {
+      reset();
+      return;
+    }
+    suppressClick.current = true;
+    window.setTimeout(() => (suppressClick.current = false), 0);
+    if (d.toIndex !== d.fromIndex) {
+      const ids = d.others.map((o) => o.id);
+      ids.splice(d.toIndex, 0, d.id);
+      setPendingOrder({ section: d.section, ids });
+      void actions.moveTab({ type: 'reorder', section: d.section, id: d.id, toIndex: d.toIndex, ...(d.section === 'pinned' ? { folderId: null } : {}) });
+    }
+    // The new order renders in the same frame the transforms are dropped.
+    requestAnimationFrame(reset);
+  };
+
+  const ordered = (section: 'pinned' | 'today', list: SidebarItemRef[]) => {
+    if (!pendingOrder || pendingOrder.section !== section) return list;
+    const by = new Map(list.map((i) => [i.id, i]));
+    const out = pendingOrder.ids.map((id) => by.get(id)).filter((i): i is SidebarItemRef => !!i);
+    return out.length === list.length ? out : list;
+  };
+
   const renderTab = (item: SidebarItemRef, pinned: boolean) => {
     const active = item.id === state.activeTabId;
     const props = preview.itemProps(item, 'below');
+    const section = pinned ? 'pinned' : 'today';
     return (
       <div
         key={item.id}
+        data-ttab-id={item.id}
         role="tab"
         aria-selected={active}
         tabIndex={0}
         className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}`}
         title={pinned ? item.title : undefined}
-        onClick={() => onSelectTab(item.id)}
+        onPointerMove={onTabPointerMove}
+        onPointerUp={endTabDrag}
+        onPointerCancel={endTabDrag}
+        onClick={() => {
+          if (suppressClick.current) return;
+          onSelectTab(item.id);
+        }}
         onAuxClick={(e) => {
           if (e.button === 1 && !pinned) {
             e.preventDefault();
@@ -183,6 +306,10 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
           }
         }}
         {...props}
+        onPointerDown={(e) => {
+          props.onPointerDown();
+          onTabPointerDown(e, item, section);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           openMenu(item, e.clientX, e.clientY);
@@ -243,9 +370,9 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
             if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) scrollRef.current.scrollLeft += e.deltaY;
           }}
         >
-          {view.pinned.map((item) => renderTab(item, true))}
+          {ordered('pinned', view.pinned).map((item) => renderTab(item, true))}
           {view.pinned.length > 0 && view.today.length > 0 && <div className="ttab-divider small" aria-hidden="true" />}
-          {view.today.map((item) => renderTab(item, false))}
+          {ordered('today', view.today).map((item) => renderTab(item, false))}
           <button type="button" className="ttab-new" onClick={onNewTab} title="New tab (Ctrl+T)" aria-label="New tab">
             <Plus size={15} />
           </button>
