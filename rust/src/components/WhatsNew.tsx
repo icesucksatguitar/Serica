@@ -5,6 +5,24 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.5.1': [
+    {
+      title: 'Smoother with many tabs',
+      text: 'The sidebar, top bar and dock open at once, even while pages load or memory runs low, and switching tabs no longer hitches. Background tabs sleep sooner when memory gets tight.',
+    },
+    {
+      title: 'A mini player that keeps up',
+      text: 'Leaving a playing video moves it to picture-in-picture every time, on YouTube, YouTube Music and players embedded in course sites.',
+    },
+    {
+      title: 'Drag downloads anywhere, and reminders to update',
+      text: 'Drag a finished download to a folder, the desktop or a web page. A popup tells you when an update is ready, and can remind you later. The new tab can greet you again (Customize › Greeting).',
+    },
+    {
+      title: 'Back to your last chat',
+      text: 'The AI panel returns to your last chat when you switch assistants or reopen it. Small fixes can now arrive without reinstalling.',
+    },
+  ],
   '0.5.0': [
     {
       title: 'Focus Mode, with statistics',
