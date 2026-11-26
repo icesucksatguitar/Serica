@@ -1,0 +1,438 @@
+/* ==========================================================================
+   AI panel (McpModal.tsx): docked on the right, under the top bar.
+   Same language as Settings: hairlines, one segmented control, quiet type.
+   ========================================================================== */
+
+.mcp-drawer-overlay.ai-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10090;
+  background: transparent !important;
+}
+
+.mcp-drawer.ai-panel {
+  position: fixed;
+  top: calc(var(--topbar-h, 35px) + 8px);
+  right: 8px;
+  bottom: 8px;
+  left: auto;
+  z-index: 10100;
+  display: flex;
+  flex-direction: column;
+  min-width: 360px;
+  max-width: calc(100vw - 80px);
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sheet);
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  box-shadow: var(--shadow-sheet);
+  overflow: hidden;
+  resize: none;
+  font-size: var(--fs-13);
+  letter-spacing: var(--tr-13);
+}
+
+.mcp-drawer.ai-panel::after,
+.mcp-drawer.ai-panel::before {
+  content: none;
+}
+
+.ai-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  z-index: 3;
+  cursor: col-resize;
+}
+
+.ai-edge::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 2px;
+  background: var(--hairline-strong);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.ai-edge:hover::after,
+.ai-panel.is-resizing .ai-edge::after {
+  opacity: 1;
+}
+
+.ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ai-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.ai-spacer {
+  flex: 1;
+}
+
+.ai-logos {
+  display: flex;
+  gap: 4px;
+}
+
+.ai-logo {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.62;
+  filter: saturate(0.7);
+  transition: opacity var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap), background-color var(--dur-fast) var(--ease-out);
+}
+
+.ai-logo img {
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.ai-logo:hover {
+  opacity: 1;
+  filter: none;
+  transform: translateY(-1px);
+}
+
+.ai-logo.on {
+  opacity: 1;
+  filter: none;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+
+.ai-frame {
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  background: var(--card);
+}
+
+.ai-frame-slot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.ai-frame-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.ai-frame-loading img {
+  border-radius: 7px;
+  opacity: 0.55;
+  animation: ai-breathe 1.6s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes ai-breathe {
+  to {
+    opacity: 0.25;
+    transform: scale(0.94);
+  }
+}
+
+/* ---- Local models ---------------------------------------------------------- */
+
+.ai-runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--ui-fg-faint);
+  font-size: var(--fs-12);
+}
+
+.ai-runtime.on {
+  color: var(--ui-fg);
+}
+
+.ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.ai-runtime.on .ai-dot {
+  background: var(--ui-success);
+  opacity: 1;
+}
+
+.ai-model {
+  max-width: 180px;
+  height: 28px;
+}
+
+.ai-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 32px 48px;
+  text-align: center;
+  color: var(--ui-fg-faint);
+}
+
+.ai-empty h3 {
+  margin: 6px 0 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--ui-fg);
+}
+
+.ai-empty p {
+  margin: 0;
+  max-width: 300px;
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  color: var(--ui-fg-muted);
+}
+
+.ai-chat {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 16px 12px;
+}
+
+.ai-chat-hint {
+  margin: 0;
+  color: var(--ui-fg-faint);
+  font-size: var(--fs-12);
+}
+
+.ai-msg {
+  max-width: 92%;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  animation: ai-msg-in var(--dur-base) var(--ease-out) both;
+}
+
+.ai-msg.user {
+  align-self: flex-end;
+  padding: 8px 12px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.ai-msg.assistant {
+  align-self: flex-start;
+  color: var(--ui-fg);
+}
+
+@keyframes ai-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.ai-typing {
+  display: inline-block;
+  width: 28px;
+  height: 8px;
+  background:
+    radial-gradient(circle, currentColor 2.5px, transparent 3px) 0 50% / 9px 8px repeat-x;
+  opacity: 0.5;
+  animation: ai-breathe 0.9s var(--ease-in-out) infinite alternate;
+}
+
+.ai-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.ai-composer:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-fg) 36%, transparent);
+}
+
+.ai-input {
+  flex: 1;
+  min-height: 22px;
+  max-height: 140px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-fg);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  field-sizing: content;
+}
+
+.ai-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ui-fg);
+  color: var(--ui-bg);
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+.ai-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.ai-send:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+/* ---- Agents ------------------------------------------------------------------ */
+
+.ai-tools {
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+  gap: 0;
+}
+
+.ai-tools > .s2-group:first-of-type {
+  margin-top: 18px;
+}
+
+.ai-tool {
+  min-height: 46px;
+}
+
+.ai-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: 0;
+}
+
+.ai-pre {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-log {
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.ai-log .ai-chat-hint {
+  padding: 12px;
+}
+
+.ai-log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: var(--fs-11);
+}
+
+.ai-log-row + .ai-log-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.ai-dir {
+  flex: none;
+  width: 26px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ui-fg-faint);
+}
+
+.ai-dir.in {
+  color: var(--ui-fg-muted);
+}
+
+.ai-log-data {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--ui-fg-faint);
+}
+
+/* The connect card from Settings › AI, in the panel's language. */
+.ai-tools .mcp-connect-card {
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}

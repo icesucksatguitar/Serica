@@ -51,6 +51,7 @@ import './styles/features.css';
 import './styles/chrome.css';
 import './styles/home.css';
 import './styles/settings2.css';
+import './styles/ai.css';
 import './styles/motion.css';
 
 const ArchiveList = lazy(() =>
@@ -1543,7 +1544,7 @@ return (
     <Presence open={isMcpModalOpen} exitMs={PANEL_EXIT_MS}>
       <Suspense fallback={null}>
         <McpModal
-          isOpen
+          isOpen={isMcpModalOpen}
           onClose={() => setIsMcpModalOpen(false)}
           activeTab={activeTab}
           onNavigate={navigate}
