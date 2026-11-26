@@ -1035,13 +1035,20 @@ useLayoutEffect(() => {
     const shift = Math.max(0, pill.offsetWidth - 28);
     cluster.style.setProperty('--pill-shift', `${shift}px`);
     const left = cluster.offsetLeft + (cluster.offsetParent as HTMLElement | null ?? cluster).offsetLeft;
-    setAbsorbCompact(left + cluster.scrollWidth - shift + 6 > sidebarWidth);
+    const compact = left + cluster.scrollWidth - shift + 6 > sidebarWidth;
+    setAbsorbCompact(compact);
+    // Spread the six controls across the sidebar's toolbar row: the room left
+    // up to the sidebar's right padding, shared out over the five gaps.
+    const room = sidebarWidth - 8 - (left + cluster.scrollWidth - shift);
+    const gap = compact ? 0 : Math.max(0, Math.floor(room / 5));
+    cluster.style.setProperty('--absorb-gap', `${gap}px`);
   };
   measure();
   const ro = new ResizeObserver(measure);
   ro.observe(pill);
+  ro.observe(cluster);
   return () => ro.disconnect();
-}, [sidebarWidth, topTabs]);
+}, [sidebarWidth, topTabs, isWebpage]);
 
 // Native page views paint above HTML; freeze the page while any of these cover it.
 useViewportOverlay(

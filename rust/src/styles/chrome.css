@@ -177,3 +177,68 @@ html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluste
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* ---- Sharp sidebar text ---------------------------------------------------
+   Chromium (WebView2) only draws ClearType (subpixel) text when the text sits
+   in a layer it knows is opaque, with no will-change: transform. The sidebar
+   had will-change on both its panel and its pane track, so its text was
+   drawn with greyscale anti-aliasing on a transparent layer and looked soft
+   next to Edge or Zen. The panel keeps its own layer (translate3d) so the
+   slide stays smooth, but without will-change; the track has no layer at rest
+   (useSpaceSwipe sets a translate3d inline only while a swipe is moving).
+   The UI font in the sidebar follows Windows (Segoe UI Variable), which is
+   hinted for ClearType at small sizes, as in Zen. */
+
+.nsb.autohide.autohide {
+  will-change: auto;
+}
+
+.nsb .nsb-track.nsb-track {
+  will-change: auto;
+}
+
+.nsb.nsb {
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', var(--font-ui);
+  font-feature-settings: normal;
+  letter-spacing: 0;
+}
+
+/* ---- The sidebar's toolbar row fills the sidebar's width ------------------
+   App.tsx measures the room left in the row and sets --absorb-gap: the extra
+   space between each of the six controls (sidebar toggle, back, forward,
+   reload, home, new tab), so they spread out to the sidebar's right edge. */
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster > .site-nav-controls {
+  transform: translate3d(calc(var(--absorb-gap, 0px) - var(--pill-shift)), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster > .topbar-new-tab-btn {
+  transform: translate3d(calc(5 * var(--absorb-gap, 0px) - var(--pill-shift)), 0, 0);
+}
+
+.floating-top-chrome-capsule .site-nav-controls .site-nav-btn {
+  transition: transform var(--absorb-out);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn {
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(2) {
+  transform: translate3d(var(--absorb-gap, 0px), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(3) {
+  transform: translate3d(calc(2 * var(--absorb-gap, 0px)), 0, 0);
+}
+
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls .site-nav-btn:nth-child(4) {
+  transform: translate3d(calc(3 * var(--absorb-gap, 0px)), 0, 0);
+}
+
+/* The buttons spread past the group's own capsule, so it has none here. */
+html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
