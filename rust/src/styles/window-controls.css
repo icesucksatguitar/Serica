@@ -88,6 +88,23 @@
   stroke-linecap: round;
 }
 
+/* Fitts's corner: with the window maximized, the top-right pixel of the
+   screen is the close button. Its hit area runs up and right to the window
+   edges (the app shell clips the overhang), so flinging the pointer into
+   the corner and clicking closes Serica, as on any Windows window. */
+.wctl-zone.close {
+  position: relative;
+}
+
+.wctl-zone.close::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  right: -40px;
+  bottom: 0;
+  left: 0;
+}
+
 .wctl-zone:active svg {
   transform: scale(0.86);
 }
