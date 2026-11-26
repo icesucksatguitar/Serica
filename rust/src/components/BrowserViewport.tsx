@@ -593,6 +593,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           background={homeBackground}
           uiScale={uiScale}
           dockVisible={dockVisible}
+          userName={userName}
         />
       )}
     </div>

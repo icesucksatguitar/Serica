@@ -24,6 +24,8 @@ interface HomescreenProps {
   uiScale?: UiScale;
   /** The website dock is on the right edge: keep widgets clear of it. */
   dockVisible?: boolean;
+  /** The name the greeting uses. */
+  userName?: string;
 }
 
 /** The bundled Serica Special artworks (oil-pastel re-paintings of 1789-1794 scenes). */
@@ -137,9 +139,17 @@ function clockParts(now: Date, hour12: boolean) {
   };
 }
 
+function greetingFor(now: Date, name: string | undefined): string {
+  const h = now.getHours();
+  const part = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const who = name?.trim();
+  return who ? `${part}, ${who}` : part;
+}
+
 /** The clock, fixed in the bottom-left corner. Updates text in place once a second. */
-const HomeClock: React.FC<{ hour12: boolean; seconds: boolean }> = ({ hour12, seconds }) => {
+const HomeClock: React.FC<{ hour12: boolean; seconds: boolean; greeting: boolean; userName?: string }> = ({ hour12, seconds, greeting, userName }) => {
   const initial = useRef(clockParts(new Date(), hour12)).current;
+  const greetRef = useRef<HTMLDivElement>(null);
   const hmRef = useRef<HTMLSpanElement>(null);
   const secRef = useRef<HTMLSpanElement>(null);
   const sufRef = useRef<HTMLSpanElement>(null);
@@ -156,6 +166,10 @@ const HomeClock: React.FC<{ hour12: boolean; seconds: boolean }> = ({ hour12, se
         dateRef.current.textContent = p.date;
         last = p.date;
       }
+      if (greetRef.current) {
+        const g = greetingFor(new Date(), userName);
+        if (greetRef.current.textContent !== g) greetRef.current.textContent = g;
+      }
     };
     tick();
     // Aligned to the second so the digits change with the system clock.
@@ -171,9 +185,14 @@ const HomeClock: React.FC<{ hour12: boolean; seconds: boolean }> = ({ hour12, se
       window.clearTimeout(t);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [hour12]);
+  }, [hour12, userName, greeting]);
   return (
     <div className="home-clock" aria-live="off">
+      {greeting && (
+        <div className="home-clock-greeting" ref={greetRef}>
+          {greetingFor(new Date(), userName)}
+        </div>
+      )}
       <div className="home-clock-time">
         <span className="home-clock-hm" ref={hmRef}>
           {initial.hm}
@@ -208,6 +227,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   background = DEFAULT_HOME_BACKGROUND,
   uiScale = DEFAULT_UI_SCALE,
   dockVisible = false,
+  userName,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -271,7 +291,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
         </button>
       )}
 
-      <HomeClock hour12={widgets.clock.hour12} seconds={widgets.clock.seconds} />
+      <HomeClock hour12={widgets.clock.hour12} seconds={widgets.clock.seconds} greeting={widgets.clock.greeting} userName={userName} />
 
       {onUpdateWidgets && !editing && (
         <div className="home-customize2">
@@ -299,6 +319,10 @@ export const Homescreen: React.FC<HomescreenProps> = ({
                   <span>Background…</span>
                 </button>
                 <div className="app-context-menu-sep" role="separator" />
+                <div className="home-customize-row">
+                  <span>Greeting</span>
+                  <Switch checked={widgets.clock.greeting} label="Greeting" onChange={(greeting) => setClock({ greeting })} />
+                </div>
                 <div className="home-customize-row">
                   <span>24-hour clock</span>
                   <Switch checked={!widgets.clock.hour12} label="24-hour clock" onChange={(on) => setClock({ hour12: !on })} />

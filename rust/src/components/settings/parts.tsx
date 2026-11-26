@@ -85,6 +85,7 @@ export const SETTINGS_INDEX: IndexEntry[] = [
 
   { id: 'home.background', page: 'home', group: 'Background', title: 'New tab background', detail: 'Colour, gradient, your picture, or Serica Special', words: ['wallpaper', 'image', 'picture', 'gradient', 'colour', 'color', 'special', 'art', 'slideshow'] },
   { id: 'home.clock', page: 'home', group: 'Clock', title: 'Clock', detail: '24-hour time and seconds', words: ['clock', 'time', '24', 'seconds'] },
+  { id: 'home.clock.greeting', page: 'home', group: 'Clock', title: 'Greeting', detail: 'Good morning, good evening, with your name', words: ['greeting', 'hello', 'good morning', 'name', 'welcome'] },
   { id: 'home.widgets', page: 'home', group: 'Widgets', title: 'Widgets', detail: 'Add, move and resize from the new tab', words: ['widgets', 'weather', 'notes', 'calendar'] },
 
   { id: 'tabs.memory', page: 'tabs', group: 'Memory', title: 'Memory saver', detail: 'Frees memory from background tabs you haven’t used for a while', words: ['sleep', 'ram', 'memory', 'hibernate'] },

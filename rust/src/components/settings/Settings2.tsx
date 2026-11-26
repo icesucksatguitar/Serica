@@ -403,6 +403,9 @@ export const Settings2: React.FC<Settings2Props> = ({ onClose, settings, onUpdat
               </div>
             </Group>
             <Group title="Clock" icon={Clock} note="The clock sits in a bottom corner of every new tab.">
+              <Row id="home.clock.greeting" icon={Clock} title="Greeting" detail="“Good evening” and your name, above the clock.">
+                <Switch checked={widgets.clock.greeting} label="Greeting" onChange={(greeting) => onUpdateSettings({ homeWidgets: { ...widgets, clock: { ...widgets.clock, greeting } } })} />
+              </Row>
               <Row id="home.clock" icon={Clock} title="24-hour clock">
                 <Switch checked={!widgets.clock.hour12} label="24-hour clock" onChange={(on) => onUpdateSettings({ homeWidgets: { ...widgets, clock: { ...widgets.clock, hour12: !on } } })} />
               </Row>
