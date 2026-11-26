@@ -979,6 +979,11 @@ const topTabs = settings.tabLayout === 'top';
 const showTopTabs = topTabs && !isHtmlFullscreen;
 // Sidebar placement: docked (not auto-hide) pushes the web canvas right; hidden in HTML fullscreen.
 const showSidebar = !isHtmlFullscreen && !topTabs;
+  // The page's insets from the window edges: the strip the sidebar slides
+  // out of, and the one the dock waits in on websites. The top bar on a
+  // website takes the same width as the page.
+  const pageInsetLeft = showSidebar ? 8 : 0;
+  const pageInsetRight = settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0;
 // The top bar on web pages: 30px, and (by default) hidden until the pointer
 // reaches the top edge. The tab strip of top-tabs mode keeps it shown.
 const TOP_TAB_STRIP_HEIGHT = 38;
@@ -1110,7 +1115,12 @@ return (
     {/* Top Chrome Header Bar (Solid dedicated header on web pages, floating on newtab) */}
     <div
       className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}${toolsOpen ? ' tools-open' : ''} topbar-style-${settings.topBarStyle === 'pill' ? 'pill' : 'flat'}${topBarAutoHideOn ? ` topbar-autohide${topBar.shown ? ' topbar-shown' : ''}` : ''}`}
-      style={isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : undefined}
+      style={
+        {
+          ...(isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : {}),
+          ...(isWebpage ? { left: pageInsetLeft, right: pageInsetRight, '--bar-inset-l': `${pageInsetLeft}px` } : {}),
+        } as React.CSSProperties
+      }
       data-topbar-tint={isTopBarTinted && topBarTint ? topBarTint.source : 'default'}
     >
       {/* Top left: sidebar toggle, site navigation and new tab */}
@@ -1347,8 +1357,8 @@ return (
           onPageColor={handlePageColor}
           defaultZoom={settings.textScale}
           contentTop={contentTop}
-          insetLeft={showSidebar ? 8 : 0}
-          insetRight={settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0}
+          insetLeft={pageInsetLeft}
+          insetRight={pageInsetRight}
           homeWidgets={settings.homeWidgets}
           homeBackground={settings.homeBackground}
           dockVisible={settings.rightPinsDockVisible}

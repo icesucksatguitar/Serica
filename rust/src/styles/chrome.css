@@ -86,7 +86,9 @@ html.sidebar-covering .floating-top-chrome-capsule {
 }
 
 html.sidebar-covering .floating-top-chrome-capsule.on-webpage::before {
-  clip-path: inset(0 0 0 var(--sidebar-cover, 0px));
+  /* The sidebar's width is measured from the window's edge; the bar starts
+     where the page does. */
+  clip-path: inset(0 0 0 max(0px, calc(var(--sidebar-cover, 0px) - var(--bar-inset-l, 0px))));
   transition: clip-path var(--absorb-in), background-color 200ms ease, border-color 200ms ease;
 }
 
