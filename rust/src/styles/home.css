@@ -312,7 +312,10 @@
   bottom: var(--clock-band);
 }
 
+/* The dock's room is kept on both sides, so the grid stays centred on the
+   window, under the address bar. */
 .home2.with-dock .home2-board {
+  left: calc(var(--home-pad) + 64px);
   right: calc(var(--home-pad) + 64px);
 }
 
