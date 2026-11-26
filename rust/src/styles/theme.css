@@ -10025,11 +10025,6 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   opacity: 0.8;
 }
 
-.macos-traffic-lights.window-controls-right {
-  gap: 9px;
-  padding: 4px 2px 4px 4px;
-}
-
 .topbar-new-tab-btn {
   -webkit-app-region: no-drag !important;
   pointer-events: auto !important;
@@ -10479,11 +10474,6 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   transform: none;
 }
 
-.floating-top-chrome-capsule.on-webpage .macos-traffic-lights.window-controls-right {
-  gap: 8px;
-  padding: 0 4px 0 2px;
-}
-
 .floating-top-chrome-capsule.on-webpage .window-controls-divider {
   height: 12px;
 }
@@ -10799,30 +10789,6 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 /* Right side: no box around the group, no divider before the window dots. */
 .topbar-style-flat .window-controls-divider {
   display: none;
-}
-
-.topbar-style-flat .macos-traffic-lights.window-controls-right {
-  margin-left: 6px;
-}
-
-.topbar-style-flat .traffic-light {
-  width: 11px;
-  height: 11px;
-  background-color: color-mix(in srgb, var(--theme-fg) 22%, transparent);
-  box-shadow: none;
-  transition: background-color 0.16s ease, transform 0.1s ease;
-}
-
-.topbar-style-flat .macos-traffic-lights:hover .traffic-light.close {
-  background-color: #ff5f57;
-}
-
-.topbar-style-flat .macos-traffic-lights:hover .traffic-light.minimize {
-  background-color: #febc2e;
-}
-
-.topbar-style-flat .macos-traffic-lights:hover .traffic-light.maximize {
-  background-color: #28c840;
 }
 
 /* The "⋯" tools button keeps still; the tray still grows out of it. */

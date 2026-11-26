@@ -1,0 +1,111 @@
+/* ==========================================================================
+   Window controls: one straight line, in three parts. Each part is a button;
+   hovering a part turns only that part into its symbol: the right third into
+   a cross (close), the middle into a square (maximize); the left third is
+   already a line (minimize) and only brightens. The shapes morph by
+   interpolating the path itself, with the same spring as the rest of the UI.
+   ========================================================================== */
+
+.wctl {
+  /* Solid colours (the ink mixed into the surface), not opacity: the
+     parts overlap by half a pixel where they meet, and see-through
+     strokes would show those overlaps as dots. */
+  --wctl-rest: color-mix(in srgb, var(--theme-fg, var(--ui-fg)) 58%, var(--ui-bg));
+  --wctl-dim: color-mix(in srgb, var(--theme-fg, var(--ui-fg)) 34%, var(--ui-bg));
+  --wctl-on: var(--theme-fg, var(--ui-fg));
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 28px;
+  margin-left: 2px;
+  padding: 0 4px;
+  -webkit-app-region: no-drag;
+}
+
+.wctl-zone {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--theme-fg, var(--ui-fg));
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.wctl-zone svg {
+  overflow: visible;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.wctl-zone path {
+  fill: none;
+  stroke: var(--wctl-rest);
+  stroke-width: 1.6;
+  stroke-linecap: butt;
+  stroke-linejoin: round;
+  transition:
+    d 260ms var(--spring-snap),
+    stroke var(--dur-fast) var(--ease-out);
+}
+
+/* At rest every part is the same stretch of line, end to end. */
+.wctl-zone.minimize path {
+  d: path('M-0.5 8 L20.5 8');
+}
+
+.wctl-zone.maximize path {
+  d: path('M-0.5 8 L20.5 8 L20.5 8 L-0.5 8 Z');
+  /* Square corners; and the line's turn-arounds stay flat instead of
+     bulging into the neighbours. */
+  stroke-linejoin: miter;
+}
+
+.wctl-zone.close path {
+  d: path('M-0.5 8 L20.5 8 M-0.5 8 L20.5 8');
+}
+
+/* The part under the pointer comes forward; the rest steps back. */
+.wctl:hover .wctl-zone path {
+  stroke: var(--wctl-dim);
+}
+
+.wctl .wctl-zone:hover path,
+.wctl .wctl-zone:focus-visible path {
+  stroke: var(--wctl-on);
+}
+
+.wctl-zone.maximize:hover path,
+.wctl-zone.maximize:focus-visible path {
+  d: path('M5 3 L15 3 L15 13 L5 13 Z');
+}
+
+.wctl-zone.close:hover path,
+.wctl-zone.close:focus-visible path {
+  d: path('M5 3 L15 13 M5 13 L15 3');
+  stroke-linecap: round;
+}
+
+.wctl-zone:active svg {
+  transform: scale(0.86);
+}
+
+.wctl-zone:focus-visible {
+  outline: none;
+}
+
+.wctl-zone:focus-visible svg {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor 55%, transparent));
+}
+
+.floating-top-chrome-capsule.on-webpage .wctl {
+  padding: 0 2px 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wctl-zone path {
+    transition: stroke var(--dur-fast) linear;
+  }
+}

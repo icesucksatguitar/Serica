@@ -57,6 +57,7 @@ import './styles/settings2.css';
 import './styles/ai.css';
 import './styles/setup.css';
 import './styles/focus-stats.css';
+import './styles/window-controls.css';
 import './styles/motion.css';
 
 const ArchiveList = lazy(() =>
@@ -1300,31 +1301,20 @@ return (
         />
 
         <div className="window-controls-divider" aria-hidden="true" />
-        <div className="macos-traffic-lights window-controls-right" aria-label="Window controls">
-          <button
-            className="traffic-light minimize"
-            onClick={() => window.serica?.windowControl('minimize')}
-            title="Minimize"
-            aria-label="Minimize"
-          >
-            <span className="traffic-glyph">−</span>
-          </button>
-          <button
-            className="traffic-light maximize"
-            onClick={() => window.serica?.windowControl('maximize')}
-            title="Maximize"
-            aria-label="Maximize"
-          >
-            <span className="traffic-glyph">+</span>
-          </button>
-          <button
-            className="traffic-light close"
-            onClick={() => window.serica?.windowControl('close')}
-            title="Close"
-            aria-label="Close window"
-          >
-            <span className="traffic-glyph">✕</span>
-          </button>
+        <div className="wctl window-controls-right" role="group" aria-label="Window controls">
+          {(
+            [
+              ['minimize', 'Minimize', 'Minimize'],
+              ['maximize', 'Maximize', 'Maximize'],
+              ['close', 'Close', 'Close window'],
+            ] as const
+          ).map(([action, title, label]) => (
+            <button key={action} type="button" className={`wctl-zone ${action}`} onClick={() => window.serica?.windowControl(action)} title={title} aria-label={label}>
+              <svg viewBox="0 0 20 16" width="20" height="16" aria-hidden="true">
+                <path />
+              </svg>
+            </button>
+          ))}
         </div>
       </div>
     </div>
