@@ -1,3 +1,4 @@
+import { SpaceEditor } from './SpaceEditor';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRightLeft,
@@ -283,7 +284,7 @@ const SIDEBAR_GUIDE: GuideStep[] = [
   {
     target: '.nsb-header',
     title: 'Space actions',
-    body: 'Double-click the name to rename. The ⋯ button (or a right-click on a space) changes its icon and color, moves it, adds a folder or deletes it.',
+    body: 'Double-click the name to edit the space: its name, icon, color and theme. The ⋯ button (or a right-click on a space) also moves it, adds a folder or deletes it.',
   },
   {
     target: '.nsb-pinned-section-header',
@@ -824,6 +825,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setSpaceMenu({ spaceId, ...clampMenu(x, y, MENU_WIDTH, 320) });
   };
 
+  // The space being edited in its window (double-click the space's name).
+  const [editingSpaceId, setEditingSpaceId] = useState<string | null>(null);
+  const editingSpace = editingSpaceId ? state.spaces.find((s) => s.id === editingSpaceId) : undefined;
+
   const startRenameSpace = (space: Space) => {
     setSpaceNameDraft(space.name);
     setRenamingSpaceId(space.id);
@@ -1300,8 +1305,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {activeSpace && (
             <div
               className="nsb-space-title"
-              title={renamingSpaceId === activeSpace.id ? undefined : `${activeSpace.name} (double-click to rename)`}
-              onDoubleClick={() => startRenameSpace(activeSpace)}
+              title={renamingSpaceId === activeSpace.id ? undefined : `${activeSpace.name} (double-click to edit)`}
+              onDoubleClick={() => renamingSpaceId !== activeSpace.id && setEditingSpaceId(activeSpace.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 openSpaceMenu(activeSpace.id, e.clientX, e.clientY);
@@ -1644,6 +1649,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           );
         })()}
+      {editingSpace && (
+        <SpaceEditor
+          key={editingSpace.id}
+          space={editingSpace}
+          icons={SPACE_ICON_NAMES}
+          renderIcon={(icon, color) => <SpaceIcon space={{ icon, color, name: editingSpace.name }} size={16} />}
+          onUpdate={(patch) => actions.updateSpace?.(editingSpace.id, patch)}
+          onOpenTheme={() => window.dispatchEvent(new CustomEvent('serica:open-theme-studio'))}
+          onClose={() => setEditingSpaceId(null)}
+        />
+      )}
     </>
   );
 };

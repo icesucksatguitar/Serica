@@ -424,6 +424,13 @@ export function App() {
     [settings.spaceThemes, state.spaces, updateSettings],
   );
 
+  // The space editor (and others) can ask for Theme Studio.
+  useEffect(() => {
+    const open = () => setIsThemeModalOpen(true);
+    window.addEventListener('serica:open-theme-studio', open);
+    return () => window.removeEventListener('serica:open-theme-studio', open);
+  }, []);
+
   /** Setup's colour choice: the whole space-theme map, and the one shown now. */
   const applySetupThemes = useCallback(
     (themes: Record<string, unknown>, shown: SpaceTheme) => {

@@ -192,3 +192,87 @@
   font-weight: 500;
   letter-spacing: var(--tr-20);
 }
+
+/* ---- Space editor (SpaceEditor.tsx) ---------------------------------------- */
+
+.space-editor-overlay {
+  z-index: 12000;
+}
+
+.space-editor.sheet {
+  width: min(440px, calc(100vw - 48px));
+}
+
+.space-editor-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 4px;
+}
+
+.space-editor-icon {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ui-fg-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+.space-editor-icon:hover {
+  background: var(--wash);
+  transform: translateY(-1px);
+}
+
+.space-editor-icon.on {
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ui-fg) 45%, transparent);
+  color: var(--ui-fg);
+}
+
+.space-editor-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.space-editor-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--swatch);
+  cursor: pointer;
+  transition: transform var(--dur-base) var(--spring-snap), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.space-editor-swatch:hover {
+  transform: scale(1.1);
+}
+
+.space-editor-swatch.on {
+  box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--swatch);
+}
+
+.space-editor-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.space-editor-theme > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.space-editor-theme-title {
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
