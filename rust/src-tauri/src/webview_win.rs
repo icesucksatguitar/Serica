@@ -1021,7 +1021,7 @@ pub fn media_eval(wv: &Webview, tab_id: String, js: String, follow: bool, done: 
             watch_frames(&core, &tab_id);
         }
         let sessions = Rc::new(FRAME_SESSIONS.with(|m| m.borrow().get(&tab_id).cloned().unwrap_or_default()));
-        let params = Rc::new(serde_json::json!({ "expression": js, "userGesture": true, "returnByValue": true, "awaitPromise": false }).to_string());
+        let params = Rc::new(serde_json::json!({ "expression": js, "userGesture": true, "returnByValue": true, "awaitPromise": true }).to_string());
         media_eval_at(core.clone(), core.cast::<ICoreWebView2_11>().ok(), sessions, 0, params, finish);
     });
 }

@@ -75,12 +75,13 @@ const MEDIA_FIND_JS: &str = r#"const __sericaMedia = () => {
 };"#;
 
 /// Moves the largest playing video into a picture-in-picture window (the
-/// mini player that keeps playing when its tab is left). True when this
-/// document shows one now. Sites that set `disablePictureInPicture` are
-/// overridden: the user asked for the mini player.
+/// mini player that keeps playing when its tab is left). Resolves true once
+/// this document shows one (false when it has no such video, or the browser
+/// refused). Sites that set `disablePictureInPicture` are overridden: the
+/// user asked for the mini player.
 pub fn pip_enter_js() -> String {
     format!(
-        r#"(() => {{
+        r#"(async () => {{
   {MEDIA_FIND_JS}
   if (document.pictureInPictureElement) return true;
   if (!document.pictureInPictureEnabled) return false;
@@ -90,8 +91,7 @@ pub fn pip_enter_js() -> String {
   const v = vs[0];
   if (v.clientWidth * v.clientHeight < 200 * 112) return false;
   if (v.disablePictureInPicture) v.disablePictureInPicture = false;
-  v.requestPictureInPicture().catch(() => {{}});
-  return true;
+  try {{ await v.requestPictureInPicture(); return true; }} catch (e) {{ return false; }}
 }})()"#
     )
 }
@@ -633,7 +633,7 @@ impl TabHost {
             // the page for a moment: the tab is still the one in use.
             #[cfg(windows)]
             if auto_pip && previous.as_ref() == Some(id) && active.as_ref() != Some(id) && wants.get(id).map(|w| w.media).unwrap_or(false) {
-                crate::webview_win::media_eval(&v.webview, id.clone(), pip_enter_js(), true, |_| {});
+                Self::pip_on_leave(app, id.clone(), v.webview.clone());
             }
             if should_show {
                 if let Some(b) = bounds {
@@ -713,6 +713,25 @@ impl TabHost {
         }
     }
 
+    /// Puts a playing video of a tab just left into the mini player. The
+    /// browser now and then refuses while the page is being hidden: then it
+    /// tries once more, if the tab is still in the background.
+    #[cfg(windows)]
+    fn pip_on_leave(app: &Shared, id: String, wv: Webview) {
+        let app = app.clone();
+        crate::webview_win::media_eval(&wv.clone(), id.clone(), pip_enter_js(), true, move |ok| {
+            if ok == Some(serde_json::Value::Bool(true)) {
+                return;
+            }
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                if app.store.lock().active_tab_id.as_deref() != Some(id.as_str()) {
+                    crate::webview_win::media_eval(&wv, id, pip_enter_js(), true, |_| {});
+                }
+            });
+        });
+    }
+
     /// Builds the active tab's webview, then reconciles again to show it. The
     /// host lock is released while it is built, so another reconcile may be
     /// building it already.
@@ -746,6 +765,12 @@ impl TabHost {
         };
         host.create_failures = 0;
         let _ = wv.hide();
+        // Test runs (SERICA_TEST_MUTE=1) never play sound; pages still
+        // report that they play audio, so media features work as usual.
+        #[cfg(windows)]
+        if std::env::var_os("SERICA_TEST_MUTE").is_some() {
+            crate::webview_win::set_muted(&wv, true);
+        }
         #[cfg(windows)]
         if (zoom - 1.0).abs() > 0.001 {
             crate::webview_win::set_zoom(&wv, zoom);
