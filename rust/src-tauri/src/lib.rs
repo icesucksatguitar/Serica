@@ -1,10 +1,15 @@
 //! Serica browser backend (Rust + Tauri v2 + WebView2).
 
 mod app;
+mod backgrounds;
+mod bookmarks;
+mod browser_import;
+mod default_browser;
 mod commands;
 mod downloads;
 mod extensions;
 mod files;
+mod focus;
 mod history;
 mod importer;
 mod mcp;
@@ -71,6 +76,8 @@ pub fn run() {
         // `on_new_window`.
         .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Pictures chosen for the new-tab background.
+        .register_uri_scheme_protocol("sericabg", |ctx, request| backgrounds::serve(ctx.app_handle(), &request))
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -199,6 +206,19 @@ pub fn run() {
             commands::get_update_status,
             commands::check_for_update,
             commands::install_update,
+            focus::focus_get,
+            focus::focus_save_block,
+            focus::focus_delete_block,
+            focus::focus_start,
+            focus::focus_stop,
+            focus::focus_challenge,
+            focus::focus_check,
+            backgrounds::pick_background_image,
+            default_browser::default_browser_status,
+            default_browser::make_default_browser,
+            browser_import::import_sources,
+            browser_import::import_from_browser,
+            browser_import::import_passwords_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building serica browser");
@@ -208,6 +228,7 @@ pub fn run() {
             if let Some(shared) = handle.try_state::<app::Shared>() {
                 shared.notify(app::Notice::Quit);
                 shared.save_now();
+                shared.focus.save(true);
                 tabhost::TabHost::close_all(&shared);
             }
         }

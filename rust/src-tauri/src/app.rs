@@ -73,11 +73,13 @@ pub struct App {
     pub handle: AppHandle,
     pub store: Mutex<Store>,
     pub history: Mutex<History>,
+    pub bookmarks: Mutex<crate::bookmarks::Bookmarks>,
     pub shields: Arc<Shields>,
     pub vpn: Arc<Vpn>,
     pub extensions: Extensions,
     pub downloads: Downloads,
     pub mcp_http: crate::mcp_http::McpHttp,
+    pub focus: crate::focus::Focus,
     pub host: Mutex<TabHost>,
     pub mcp_logs: Mutex<VecDeque<Value>>,
     blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
@@ -226,11 +228,13 @@ impl App {
             handle,
             store: Mutex::new(store),
             history: Mutex::new(history),
+            bookmarks: Mutex::new(crate::bookmarks::Bookmarks::load(data_dir.join("bookmarks.json"))),
             shields,
             vpn,
             extensions: Extensions::new(data_dir.join("extensions")),
             downloads: Downloads::new(data_dir.join("downloads.json")),
             mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
+            focus: crate::focus::Focus::load(data_dir.join("focus.json")),
             host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net, block_3pc)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
@@ -377,6 +381,38 @@ impl App {
 
     fn start_background_jobs(self: &Arc<Self>) {
         crate::mcp_http::sync(self);
+        // Focus Mode: count time down every second; check the clock against
+        // the network at start and every half hour.
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            let mut n: u64 = 0;
+            loop {
+                tick.tick().await;
+                n += 1;
+                let before = app.focus.snapshot();
+                if app.focus.tick() {
+                    crate::focus::after_change(&app, before);
+                } else if n % 15 == 0 && app.focus.is_active() {
+                    app.focus.save(false);
+                }
+            }
+        });
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                if let Some(t) = crate::focus::network_time_ms().await {
+                    let before = app.focus.snapshot();
+                    app.focus.apply_network_time(t);
+                    crate::focus::after_change(&app, before);
+                    tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+                } else {
+                    // Offline: try again soon (a locked session waits for it
+                    // before counting the time Serica was closed).
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+            }
+        });
         // Zen auto-sleep and Today-tab archiving, twice a minute.
         let app = self.clone();
         tauri::async_runtime::spawn(async move {

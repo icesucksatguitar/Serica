@@ -197,12 +197,24 @@ unsafe fn install(
     {
         let (app, id, ctx) = (app.clone(), tab_id.clone(), ctx.clone());
         core.add_SourceChanged(
-            &SourceChangedEventHandler::create(Box::new(move |sender, _| {
+            &SourceChangedEventHandler::create(Box::new(move |sender, args| {
                 let Some(sender) = sender else { return Ok(()) };
+                let mut new_doc = Default::default();
+                if let Some(a) = args.as_ref() {
+                    let _ = a.IsNewDocument(&mut new_doc);
+                }
+                let same_document = !new_doc.as_bool();
                 let mut uri = PWSTR::null();
                 sender.Source(&mut uri)?;
                 let uri = take(uri);
                 ctx.borrow_mut().top_url = uri.clone();
+                // A single-page app moving to a blocked path makes no request:
+                // load it for real so the request pipeline answers it.
+                if same_document {
+                    if let Some(hit) = app.focus.check(&uri) {
+                        focus_recheck(&sender, &uri, &hit, false);
+                    }
+                }
                 app.tab_event(&id, TabEvent::UrlChanged(uri));
                 Ok(())
             })),
@@ -260,6 +272,9 @@ unsafe fn install(
                     if args.WebErrorStatus(&mut status).is_ok() {
                         show_error_page(&sender, status, &url);
                     }
+                }
+                if let Some(hit) = app.focus.check(&url) {
+                    focus_recheck(&sender, &url, &hit, true);
                 }
                 app.tab_event(&id, TabEvent::Loaded { url, success: ok.as_bool() });
                 read_theme_color(&app, &id, &sender);
@@ -411,6 +426,19 @@ unsafe fn install(
                 }
                 let mut rc = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
                 args.ResourceContext(&mut rc)?;
+                // Focus Mode: a blocked page is answered with the block page
+                // before anything is sent to the site; whole blocked sites
+                // also lose the requests other pages make to them.
+                if let Some(hit) = app.focus.check(&uri) {
+                    if rc == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
+                        args.SetResponse(&focus_response(&env, &hit, &uri)?)?;
+                        return Ok(());
+                    }
+                    if hit.whole_site {
+                        args.SetResponse(&env.CreateWebResourceResponse(None, 403, &HSTRING::from("Blocked by Focus Mode"), &HSTRING::from(""))?)?;
+                        return Ok(());
+                    }
+                }
                 let source = ctx.borrow().top_url.clone();
                 let rtype = request_type(rc, uri == source);
                 if rtype == "document" {
@@ -577,6 +605,43 @@ unsafe fn install(
         }
     }
     Ok(())
+}
+
+/// The block page as a response to a document request.
+unsafe fn focus_response(env: &ICoreWebView2Environment, hit: &crate::focus::Hit, uri: &str) -> windows::core::Result<ICoreWebView2WebResourceResponse> {
+    let html = crate::focus::block_page(hit, uri);
+    let stream = windows::Win32::UI::Shell::SHCreateMemStream(Some(html.as_bytes()));
+    env.CreateWebResourceResponse(
+        stream.as_ref(),
+        200,
+        &HSTRING::from("OK"),
+        &HSTRING::from("Content-Type: text/html; charset=utf-8
+
+Cache-Control: no-store"),
+    )
+}
+
+/// A blocked URL is on screen: unless it already shows the block page, load
+/// it again through the request pipeline (`hard`: replace the document with
+/// the block page directly, for content that never makes a request, like
+/// pages from the back/forward cache or a service worker).
+unsafe fn focus_recheck(core: &ICoreWebView2, url: &str, hit: &crate::focus::Hit, hard: bool) {
+    let (core2, url) = (core.clone(), url.to_string());
+    let page = hard.then(|| crate::focus::block_page(hit, &url));
+    let _ = core.ExecuteScript(
+        &HSTRING::from("window.__sericaFocusBlock === true"),
+        &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+            if hr.is_ok() && result.trim() == "true" {
+                return Ok(());
+            }
+            if let Some(page) = &page {
+                let _ = core2.NavigateToString(&HSTRING::from(page.as_str()));
+            } else {
+                let _ = core2.Navigate(&HSTRING::from(url.as_str()));
+            }
+            Ok(())
+        })),
+    );
 }
 
 /// Registers this navigation's cosmetic CSS and scriptlets to run at document
@@ -1504,15 +1569,34 @@ pub fn answer_permission(app: &Shared, id: u64, decision: &str) {
     }
 }
 
-/// Permission handling for a webview that isn't a tab (the assistant drawer).
+/// Permissions and Focus Mode for a webview that isn't a tab (the assistant drawer).
 pub fn attach_permissions(app: &Shared, owner: &str, wv: &Webview) {
     let (app, owner) = (app.clone(), owner.to_string());
     let _ = wv.with_webview(move |pw| unsafe {
-        if let Ok(core) = pw.controller().CoreWebView2() {
-            if let Err(e) = install_permissions(&app, &owner, &core) {
-                tracing::warn!("permission hook install failed: {e}");
-            }
+        let env = pw.environment();
+        let Ok(core) = pw.controller().CoreWebView2() else { return };
+        if let Err(e) = install_permissions(&app, &owner, &core) {
+            tracing::warn!("permission hook install failed: {e}");
         }
+        let filter = HSTRING::from("*");
+        if core.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT).is_err() {
+            return;
+        }
+        let mut token = Default::default();
+        let app2 = app.clone();
+        let _ = core.add_WebResourceRequested(
+            &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut uri = PWSTR::null();
+                args.Request()?.Uri(&mut uri)?;
+                let uri = take(uri);
+                if let Some(hit) = app2.focus.check(&uri) {
+                    args.SetResponse(&focus_response(&env, &hit, &uri)?)?;
+                }
+                Ok(())
+            })),
+            &mut token,
+        );
     });
 }
 

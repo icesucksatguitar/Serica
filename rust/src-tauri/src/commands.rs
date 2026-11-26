@@ -1072,7 +1072,15 @@ pub async fn get_history(options: Option<HistoryQuery>, app: State<'_, Shared>) 
 
 #[tauri::command]
 pub async fn history_suggest(text: String, limit: Option<usize>, app: State<'_, Shared>) -> R<Vec<HistoryEntry>> {
-    Ok(app.history.lock().suggest(&text, limit.unwrap_or(6).min(20)))
+    let limit = limit.unwrap_or(6).min(20);
+    let mut out = app.history.lock().suggest(&text, limit);
+    // Bookmarks brought over from other browsers fill in after history.
+    if out.len() < limit {
+        let have: std::collections::HashSet<String> = out.iter().map(|e| e.url.clone()).collect();
+        let extra: Vec<HistoryEntry> = app.bookmarks.lock().suggest(&text, limit).into_iter().filter(|b| !have.contains(&b.url)).collect();
+        out.extend(extra.into_iter().take(limit - out.len()));
+    }
+    Ok(out)
 }
 
 #[tauri::command]

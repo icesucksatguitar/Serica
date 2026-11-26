@@ -122,6 +122,55 @@ impl History {
         self.dirty = true;
     }
 
+    /// Merges history brought over from another browser: `(url, title,
+    /// last visit ms, visit count)`. A URL already here keeps its newest
+    /// visit and adds the counts. Returns how many entries were added or
+    /// updated. The newest `MAX_ENTRIES` of everything are kept.
+    pub fn import(&mut self, items: Vec<(String, String, i64, i64)>) -> usize {
+        let mut by_url: std::collections::HashMap<String, usize> = self.entries.iter().enumerate().map(|(i, e)| (e.url.clone(), i)).collect();
+        let mut n = 0;
+        for (url, title, ts, visits) in items {
+            if !recordable(&url) || ts <= 0 {
+                continue;
+            }
+            match by_url.get(&url) {
+                Some(&i) => {
+                    let e = &mut self.entries[i];
+                    e.visit_count += visits.max(1);
+                    if ts > e.timestamp {
+                        e.timestamp = ts;
+                    }
+                    if e.title.is_empty() || e.title == e.url {
+                        if !title.is_empty() {
+                            e.title = title;
+                        }
+                    }
+                }
+                None => {
+                    by_url.insert(url.clone(), self.entries.len());
+                    self.entries.push(HistoryEntry {
+                        id: new_id("hist"),
+                        title: if title.is_empty() { url.clone() } else { title },
+                        url,
+                        timestamp: ts,
+                        visit_count: visits.max(1),
+                        space_id: None,
+                        favicon: None,
+                    });
+                }
+            }
+            n += 1;
+        }
+        // Oldest first, as recorded visits keep it.
+        self.entries.sort_by_key(|e| e.timestamp);
+        if self.entries.len() > MAX_ENTRIES {
+            let extra = self.entries.len() - MAX_ENTRIES;
+            self.entries.drain(0..extra);
+        }
+        self.dirty = n > 0 || self.dirty;
+        n
+    }
+
     /// Updates title/favicon of the latest entry for `url` (they arrive after the visit).
     pub fn update_meta(&mut self, url: &str, title: Option<&str>, favicon: Option<&str>) {
         if let Some(e) = self.entries.iter_mut().rev().find(|e| e.url == url) {

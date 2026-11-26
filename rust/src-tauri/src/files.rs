@@ -61,7 +61,34 @@ pub fn pick_and_open(_app: &Shared) {}
 
 #[cfg(windows)]
 unsafe fn pick(owner: isize) -> Vec<String> {
-    use windows::core::{w, PWSTR};
+    pick_with(
+        owner,
+        &[
+            ("PDF documents", "*.pdf"),
+            ("Web pages and images", "*.html;*.htm;*.svg;*.txt;*.png;*.jpg;*.jpeg;*.gif;*.webp"),
+            ("All files", "*.*"),
+        ],
+        true,
+        "Open file",
+    )
+}
+
+/// One picture (new-tab background).
+#[cfg(windows)]
+pub unsafe fn pick_one_image(owner: isize) -> Option<String> {
+    pick_with(owner, &[("Pictures", "*.jpg;*.jpeg;*.png;*.webp;*.avif;*.gif;*.bmp")], false, "Choose a background picture").into_iter().next()
+}
+
+/// One file of the given kinds (password exports and the like).
+#[cfg(windows)]
+pub unsafe fn pick_one_file(owner: isize, filters: &[(&str, &str)], title: &str) -> Option<String> {
+    pick_with(owner, filters, false, title).into_iter().next()
+}
+
+/// The system "Open" dialog, modal to `owner`.
+#[cfg(windows)]
+unsafe fn pick_with(owner: isize, filters: &[(&str, &str)], multi: bool, title: &str) -> Vec<String> {
+    use windows::core::{HSTRING, PCWSTR, PWSTR};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
@@ -70,15 +97,13 @@ unsafe fn pick(owner: isize) -> Vec<String> {
     let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     let mut out = Vec::new();
     if let Ok(dialog) = CoCreateInstance::<_, IFileOpenDialog>(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) {
-        let filters = [
-            COMDLG_FILTERSPEC { pszName: w!("PDF documents"), pszSpec: w!("*.pdf") },
-            COMDLG_FILTERSPEC { pszName: w!("Web pages and images"), pszSpec: w!("*.html;*.htm;*.svg;*.txt;*.png;*.jpg;*.jpeg;*.gif;*.webp") },
-            COMDLG_FILTERSPEC { pszName: w!("All files"), pszSpec: w!("*.*") },
-        ];
-        let _ = dialog.SetFileTypes(&filters);
-        let _ = dialog.SetTitle(w!("Open file"));
+        // The strings must outlive the call that reads them.
+        let held: Vec<(HSTRING, HSTRING)> = filters.iter().map(|(n, s)| (HSTRING::from(*n), HSTRING::from(*s))).collect();
+        let specs: Vec<COMDLG_FILTERSPEC> = held.iter().map(|(n, s)| COMDLG_FILTERSPEC { pszName: PCWSTR(n.as_ptr()), pszSpec: PCWSTR(s.as_ptr()) }).collect();
+        let _ = dialog.SetFileTypes(&specs);
+        let _ = dialog.SetTitle(&HSTRING::from(title));
         if let Ok(opts) = dialog.GetOptions() {
-            let _ = dialog.SetOptions(opts | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST);
+            let _ = dialog.SetOptions(opts | FOS_FILEMUSTEXIST | if multi { FOS_ALLOWMULTISELECT } else { Default::default() });
         }
         let owner = (owner != 0).then_some(HWND(owner as _));
         if dialog.Show(owner).is_ok() {

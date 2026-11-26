@@ -33,6 +33,15 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 tauri-plugin-updater = "2"
 tauri-plugin-single-instance = "2"
+# Importing from other browsers: their SQLite databases and password stores.
+rusqlite = { version = "0.37", features = ["bundled"] }
+aes-gcm = "0.10"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+des = "0.8"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+hmac = "0.12"
+sha1 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

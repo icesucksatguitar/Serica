@@ -140,6 +140,9 @@ pub struct TabHost {
     create_failures: u32,
     /// Tabs whose webview is being built right now (outside the lock).
     creating: std::collections::HashSet<String>,
+    /// Profiles whose pages are kept closed for now (their password store is
+    /// being written by an import).
+    paused: std::collections::HashSet<String>,
 }
 
 /// Two-finger horizontal touchpad swipe over a page goes back/forward, when
@@ -347,6 +350,7 @@ impl TabHost {
             block_3pc,
             create_failures: 0,
             creating: std::collections::HashSet::new(),
+            paused: std::collections::HashSet::new(),
         }
     }
 
@@ -510,7 +514,7 @@ impl TabHost {
         let stale: Vec<String> = host
             .views
             .iter()
-            .filter(|(id, v)| wants.get(*id).map(|w| !w.live || w.profile != v.profile).unwrap_or(true))
+            .filter(|(id, v)| host.paused.contains(&v.profile) || wants.get(*id).map(|w| !w.live || w.profile != v.profile).unwrap_or(true))
             .map(|(id, _)| id.clone())
             .collect();
         for id in stale {
@@ -611,7 +615,7 @@ impl TabHost {
         // page must not stay on screen under the new tab's address meanwhile.
         if let Some(id) = &active {
             if let Some(w) = wants.get(id) {
-                if w.live && !is_internal_url(&w.url) {
+                if w.live && !is_internal_url(&w.url) && !app.host.lock().paused.contains(&w.profile) {
                     Self::create_active(app, id, w.url.clone(), w.profile.clone(), w.zoom);
                 }
             }
@@ -822,6 +826,42 @@ impl TabHost {
                 finish(&app);
             }
         });
+    }
+
+    /// Keeps a profile's pages closed (`true`) or lets them back (`false`).
+    /// Closing every page of a profile ends its browser process, which
+    /// releases files like its password store.
+    pub fn pause_profile(app: &Shared, profile: &str, pause: bool) {
+        {
+            let mut host = app.host.lock();
+            if pause {
+                host.paused.insert(profile.to_string());
+                if app.store.lock().active_profile_id() == profile {
+                    if let Some((wv, _)) = host.assistant.take() {
+                        let _ = wv.close();
+                    }
+                }
+            } else {
+                host.paused.remove(profile);
+            }
+        }
+        Self::reconcile(app);
+    }
+
+    /// Opens a profile once, hidden, so WebView2 creates its data (password
+    /// store, cookies). The caller closes the returned webview.
+    pub fn probe_profile(app: &Shared, profile: &str) -> Option<Webview> {
+        let (window, builder) = {
+            let host = app.host.lock();
+            let window = app.handle.get_window("main")?;
+            let label = format!("probe-{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed));
+            let builder = host.builder(app, label, url::Url::parse("about:blank").ok()?, profile, None);
+            (window, builder)
+        };
+        // Never hold the host lock across `add_child` (see `TabHost::build`).
+        let wv = window.add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0)).ok()?;
+        let _ = wv.hide();
+        Some(wv)
     }
 
     /// Recreates page webviews when third-party cookie blocking is switched:
