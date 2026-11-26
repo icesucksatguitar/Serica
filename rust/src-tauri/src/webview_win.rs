@@ -335,6 +335,11 @@ unsafe fn install(
                 if let Ok(c) = sender.cast::<ICoreWebView2_8>() {
                     let mut playing = Default::default();
                     c.IsDocumentPlayingAudio(&mut playing)?;
+                    // The mini player may need to reach a player embedded
+                    // from another site: follow the page's frames from now on.
+                    if playing.as_bool() {
+                        watch_frames(&sender, &id);
+                    }
                     app.tab_event(&id, TabEvent::Audio(playing.as_bool()));
                 }
                 Ok(())
@@ -915,35 +920,151 @@ pub fn find(wv: &Webview, query: Option<String>, forward: bool, next: bool) {
     });
 }
 
-/// Runs `js` in the page and passes the JSON-encoded result to `done`.
-pub fn eval(wv: &Webview, js: String, done: impl FnOnce(Option<serde_json::Value>) + Send + 'static) {
-    let done = std::sync::Mutex::new(Some(done));
-    let _ = wv.with_webview(move |pw| unsafe {
-        let finish = move |v| {
-            if let Some(f) = done.lock().ok().and_then(|mut d| d.take()) {
-                f(v);
-            }
-        };
-        let Ok(core) = pw.controller().CoreWebView2() else { return finish(None) };
-        let finish = Rc::new(RefCell::new(Some(finish)));
-        let f2 = finish.clone();
-        let r = core.ExecuteScript(
-            &HSTRING::from(js),
-            &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
-                let _perf = crate::perf::span("wv.ExecuteScript");
-                let v = if hr.is_ok() { serde_json::from_str(&result).ok() } else { None };
-                if let Some(f) = f2.borrow_mut().take() {
-                    f(v);
+// ------------------------------------------------------------ media in frames
+
+thread_local! {
+    /// DevTools sessions of each tab's out-of-process frames (players embedded
+    /// from another site), by tab id. Main thread only, like the COM objects.
+    static FRAME_SESSIONS: RefCell<HashMap<String, Vec<String>>> = RefCell::new(HashMap::new());
+    /// Tabs whose frames are being followed.
+    static FRAMES_WATCHED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+const AUTO_ATTACH: &str = r#"{"autoAttach":true,"waitForDebuggerOnStart":false,"flatten":true}"#;
+
+/// Starts following a tab's frames from other sites (once, when it first plays
+/// media), so the mini player can reach players embedded in them.
+unsafe fn watch_frames(core: &ICoreWebView2, tab_id: &str) {
+    if !FRAMES_WATCHED.with(|w| w.borrow_mut().insert(tab_id.to_string())) {
+        return;
+    }
+    let Ok(c11) = core.cast::<ICoreWebView2_11>() else { return };
+    let mut token = Default::default();
+    if let Ok(rx) = core.GetDevToolsProtocolEventReceiver(&HSTRING::from("Target.attachedToTarget")) {
+        let (id, c11) = (tab_id.to_string(), c11.clone());
+        let _ = rx.add_DevToolsProtocolEventReceived(
+            &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut p = PWSTR::null();
+                args.ParameterObjectAsJson(&mut p)?;
+                let v: serde_json::Value = serde_json::from_str(&take(p)).unwrap_or_default();
+                let (Some(session), Some("iframe")) = (v["sessionId"].as_str(), v["targetInfo"]["type"].as_str()) else { return Ok(()) };
+                FRAME_SESSIONS.with(|m| m.borrow_mut().entry(id.clone()).or_default().push(session.to_string()));
+                // Frames inside that frame, from yet another site.
+                let _ = c11.CallDevToolsProtocolMethodForSession(
+                    &HSTRING::from(session),
+                    &HSTRING::from("Target.setAutoAttach"),
+                    &HSTRING::from(AUTO_ATTACH),
+                    None,
+                );
+                Ok(())
+            })),
+            &mut token,
+        );
+    }
+    if let Ok(rx) = core.GetDevToolsProtocolEventReceiver(&HSTRING::from("Target.detachedFromTarget")) {
+        let id = tab_id.to_string();
+        let _ = rx.add_DevToolsProtocolEventReceived(
+            &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut p = PWSTR::null();
+                args.ParameterObjectAsJson(&mut p)?;
+                let v: serde_json::Value = serde_json::from_str(&take(p)).unwrap_or_default();
+                if let Some(session) = v["sessionId"].as_str() {
+                    FRAME_SESSIONS.with(|m| {
+                        if let Some(list) = m.borrow_mut().get_mut(&id) {
+                            list.retain(|s| s != session);
+                        }
+                    });
                 }
                 Ok(())
             })),
+            &mut token,
         );
-        if r.is_err() {
+    }
+    let _ = core.CallDevToolsProtocolMethod(
+        &HSTRING::from("Target.setAutoAttach"),
+        &HSTRING::from(AUTO_ATTACH),
+        &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|hr, result| {
+            if hr.is_err() {
+                tracing::warn!("following frames failed: {hr:?} {result}");
+            }
+            Ok(())
+        })),
+    );
+}
+
+/// Runs a media script (see `tabhost::pip_enter_js`, `media_state_js`,
+/// `media_action_js`) in the tab's page, then in each frame from another site
+/// until one returns something other than null/false, and passes that on.
+/// Scripts run as if the user had just clicked (`userGesture`): browsers
+/// only allow picture-in-picture right after a click in the page, so the
+/// mini player used to work only when the page had been clicked moments
+/// before the tab was left.
+/// `follow`: start following the tab's frames (a tab playing media); without
+/// it only frames already followed are tried.
+pub fn media_eval(wv: &Webview, tab_id: String, js: String, follow: bool, done: impl FnOnce(Option<serde_json::Value>) + Send + 'static) {
+    let done = std::sync::Mutex::new(Some(done));
+    let _ = wv.with_webview(move |pw| unsafe {
+        let finish: Rc<RefCell<Option<Box<dyn FnOnce(Option<serde_json::Value>)>>>> = Rc::new(RefCell::new(Some(Box::new(move |v| {
+            if let Some(f) = done.lock().ok().and_then(|mut d| d.take()) {
+                f(v);
+            }
+        }))));
+        let Ok(core) = pw.controller().CoreWebView2() else {
             if let Some(f) = finish.borrow_mut().take() {
                 f(None);
             }
+            return;
+        };
+        if follow {
+            watch_frames(&core, &tab_id);
         }
+        let sessions = Rc::new(FRAME_SESSIONS.with(|m| m.borrow().get(&tab_id).cloned().unwrap_or_default()));
+        let params = Rc::new(serde_json::json!({ "expression": js, "userGesture": true, "returnByValue": true, "awaitPromise": false }).to_string());
+        media_eval_at(core.clone(), core.cast::<ICoreWebView2_11>().ok(), sessions, 0, params, finish);
     });
+}
+
+type MediaDone = Rc<RefCell<Option<Box<dyn FnOnce(Option<serde_json::Value>)>>>>;
+
+/// Step `i` of `media_eval`: 0 is the page itself, then each frame session.
+unsafe fn media_eval_at(core: ICoreWebView2, c11: Option<ICoreWebView2_11>, sessions: Rc<Vec<String>>, i: usize, params: Rc<String>, finish: MediaDone) {
+    let next = (core.clone(), c11.clone(), sessions.clone(), params.clone(), finish.clone());
+    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |hr, result| {
+        let ok = hr.is_ok();
+        let value = ok
+            .then(|| serde_json::from_str::<serde_json::Value>(&result).ok())
+            .flatten()
+            .and_then(|r| r["result"].get("value").cloned());
+        let found = value.as_ref().is_some_and(|v| !v.is_null() && v != &serde_json::Value::Bool(false));
+        let (core, c11, sessions, params, finish) = next.clone();
+        if found || i >= sessions.len() {
+            if let Some(f) = finish.borrow_mut().take() {
+                f(value);
+            }
+        } else {
+            media_eval_at(core, c11, sessions, i + 1, params, finish);
+        }
+        Ok(())
+    }));
+    let method = HSTRING::from("Runtime.evaluate");
+    let args = HSTRING::from(params.as_str());
+    let started = if i == 0 {
+        core.CallDevToolsProtocolMethod(&method, &args, &handler)
+    } else {
+        match &c11 {
+            Some(c11) => c11.CallDevToolsProtocolMethodForSession(&HSTRING::from(sessions[i - 1].as_str()), &method, &args, &handler),
+            None => Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE)),
+        }
+    };
+    if started.is_err() {
+        if i < sessions.len() {
+            media_eval_at(core, c11, sessions, i + 1, params, finish);
+        } else if let Some(f) = finish.borrow_mut().take() {
+            f(None);
+        }
+    }
 }
 
 /// Navigation helpers that need the native object.

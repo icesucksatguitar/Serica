@@ -51,30 +51,99 @@ const TRIM_AFTER_LOW: std::time::Duration = std::time::Duration::from_secs(30);
 const SUSPEND_AFTER_LOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 const LOW_MEMORY_LOAD: u32 = 75;
 
-/// Puts the largest playing video into native picture-in-picture.
-pub const PIP_ENTER_JS: &str = r#"(() => {
-  if (document.pictureInPictureElement || !document.pictureInPictureEnabled) return false;
-  const vs = Array.from(document.querySelectorAll('video')).filter((v) => !v.paused && !v.ended && v.readyState >= 2 && !v.disablePictureInPicture);
+/// Finds the page's media elements: in the document, in open shadow roots
+/// (players built as web components) and in same-origin frames. Players in
+/// frames from another site are reached through their own DevTools session
+/// (see `webview_win::media_eval`), where this runs again.
+const MEDIA_FIND_JS: &str = r#"const __sericaMedia = () => {
+  const quick = Array.from(document.querySelectorAll('video, audio'));
+  if (quick.length) return quick;
+  const out = [], seen = new Set();
+  const walk = (root, depth) => {
+    if (!root || depth > 5 || seen.has(root)) return;
+    seen.add(root);
+    let all;
+    try { all = root.querySelectorAll('*'); } catch (e) { return; }
+    for (const n of all) {
+      if (n.tagName === 'VIDEO' || n.tagName === 'AUDIO') out.push(n);
+      if (n.shadowRoot) walk(n.shadowRoot, depth + 1);
+      if (n.tagName === 'IFRAME' || n.tagName === 'FRAME') { try { if (n.contentDocument) walk(n.contentDocument, depth + 1); } catch (e) {} }
+    }
+  };
+  walk(document, 0);
+  return out;
+};"#;
+
+/// Moves the largest playing video into a picture-in-picture window (the
+/// mini player that keeps playing when its tab is left). True when this
+/// document shows one now. Sites that set `disablePictureInPicture` are
+/// overridden: the user asked for the mini player.
+pub fn pip_enter_js() -> String {
+    format!(
+        r#"(() => {{
+  {MEDIA_FIND_JS}
+  if (document.pictureInPictureElement) return true;
+  if (!document.pictureInPictureEnabled) return false;
+  const vs = __sericaMedia().filter((v) => v.tagName === 'VIDEO' && !v.paused && !v.ended && v.readyState >= 2);
   if (!vs.length) return false;
   vs.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
   const v = vs[0];
   if (v.clientWidth * v.clientHeight < 200 * 112) return false;
-  v.requestPictureInPicture().catch(() => {});
+  if (v.disablePictureInPicture) v.disablePictureInPicture = false;
+  v.requestPictureInPicture().catch(() => {{}});
   return true;
-})()"#;
+}})()"#
+    )
+}
 
 /// Brings a picture-in-picture video back into its page. Runs right as the tab
-/// is shown, so it waits until the document is actually visible.
+/// is shown, so it waits until the document is actually visible. True when
+/// this document had one.
 pub const PIP_EXIT_JS: &str = r#"(() => {
+  if (!document.pictureInPictureElement) return false;
   const exit = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); };
-  if (document.visibilityState === 'visible') { exit(); return; }
+  if (document.visibilityState === 'visible') { exit(); return true; }
   const onVisible = () => {
     if (document.visibilityState !== 'visible') return;
     document.removeEventListener('visibilitychange', onVisible);
     exit();
   };
   document.addEventListener('visibilitychange', onVisible);
+  return true;
 })()"#;
+
+/// The playing (or last played) media element's state for the mini player
+/// bar, or null when this document has none.
+pub fn media_state_js() -> String {
+    format!(
+        r#"(() => {{
+  {MEDIA_FIND_JS}
+  const els = __sericaMedia();
+  const m = els.find((e) => !e.paused && !e.ended) || els.find((e) => e.currentTime > 0) || null;
+  if (!m) return null;
+  const d = m.duration;
+  const live = d === Infinity || isNaN(d);
+  return {{ hasVideo: m.tagName === 'VIDEO', isPlaying: !m.paused && !m.ended, currentTime: m.currentTime || 0,
+           duration: live ? 0 : (d || 0), volume: m.muted ? 0 : (m.volume ?? 1), tabTitle: (window.top === window ? document.title : '') || 'Media',
+           inPip: !!document.pictureInPictureElement }};
+}})()"#
+    )
+}
+
+/// Runs `body` (which uses `m`) on the playing media element; true when this
+/// document had one.
+pub fn media_action_js(body: &str) -> String {
+    format!(
+        r#"(() => {{
+  {MEDIA_FIND_JS}
+  const els = __sericaMedia();
+  const m = els.find((e) => !e.paused) || els.find((e) => e.currentTime > 0) || els[0];
+  if (!m) return false;
+  {body}
+  return true;
+}})()"#
+    )
+}
 
 /// A rectangle of UI (CSS px, window coordinates) that shows through the page.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -558,6 +627,14 @@ impl TabHost {
         let active_shown_before = active.as_ref().and_then(|id| host.views.get(id)).is_some_and(|v| v.shown);
         for (id, v) in host.views.iter_mut() {
             let should_show = visible && Some(id) == active.as_ref();
+            // Leaving a playing video for another tab: keep watching it in a
+            // mini player (also when the page was under a dialog at the time,
+            // e.g. switching from the command bar). Not when UI only covers
+            // the page for a moment: the tab is still the one in use.
+            #[cfg(windows)]
+            if auto_pip && previous.as_ref() == Some(id) && active.as_ref() != Some(id) && wants.get(id).map(|w| w.media).unwrap_or(false) {
+                crate::webview_win::media_eval(&v.webview, id.clone(), pip_enter_js(), true, |_| {});
+            }
             if should_show {
                 if let Some(b) = bounds {
                     Self::apply_bounds(&v.webview, b);
@@ -575,16 +652,13 @@ impl TabHost {
                     v.shown = true;
                     v.hidden_at = None;
                     // Returning to a tab brings its mini-player video back into the page.
-                    let _ = v.webview.eval(PIP_EXIT_JS);
+                    #[cfg(windows)]
+                    crate::webview_win::media_eval(&v.webview, id.clone(), PIP_EXIT_JS.to_string(), false, |_| {});
                 }
             } else if v.shown {
                 // Snapshot the page we're leaving for hover previews.
                 if previous.as_ref() == Some(id) {
                     previews_to_capture.push((id.clone(), v.webview.clone()));
-                    // Leaving a playing video: keep watching it in a mini player.
-                    if auto_pip && wants.get(id).map(|w| w.media).unwrap_or(false) {
-                        let _ = v.webview.eval(PIP_ENTER_JS);
-                    }
                 }
                 let _ = v.webview.hide();
                 v.shown = false;

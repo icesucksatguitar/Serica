@@ -593,47 +593,33 @@ pub async fn open_devtools(app: State<'_, Shared>) -> R<()> {
 
 // ------------------------------------------------------------------ media
 
-const MEDIA_STATE_JS: &str = r#"(() => {
-  const els = Array.from(document.querySelectorAll('video, audio'));
-  const m = els.find((e) => !e.paused && !e.ended) || els.find((e) => e.currentTime > 0) || null;
-  if (!m) return null;
-  const d = m.duration;
-  const live = d === Infinity || isNaN(d);
-  return { hasVideo: m.tagName === 'VIDEO', isPlaying: !m.paused && !m.ended, currentTime: m.currentTime || 0,
-           duration: live ? 0 : (d || 0), volume: m.muted ? 0 : (m.volume ?? 1), tabTitle: document.title || 'Media',
-           inPip: !!document.pictureInPictureElement };
-})()"#;
-
 #[tauri::command]
 pub async fn get_media_state(tab_id: String, app: State<'_, Shared>) -> R<Option<Value>> {
     #[cfg(windows)]
     if let Some(wv) = TabHost::webview(app.inner(), &tab_id) {
-        let v = await_cb(|done| crate::webview_win::eval(&wv, MEDIA_STATE_JS.into(), done)).await.flatten();
-        return Ok(v.filter(|v| !v.is_null()));
+        let js = crate::tabhost::media_state_js();
+        let v = await_cb(|done| crate::webview_win::media_eval(&wv, tab_id, js, true, done)).await.flatten();
+        return Ok(v.filter(|v| v.is_object()));
     }
     #[cfg(not(windows))]
     let _ = (tab_id, app);
     Ok(None)
 }
 
+/// Mini player controls. They act on the playing media element wherever it
+/// is: in the page, in a web component, or in a player embedded from another
+/// site (see `webview_win::media_eval`).
 #[tauri::command]
 pub async fn media_control(tab_id: String, action: String, value: Option<f64>, app: State<'_, Shared>) -> R<()> {
     let Some(wv) = TabHost::webview(app.inner(), &tab_id) else { return Ok(()) };
-    let pick = "const m = Array.from(document.querySelectorAll('video, audio')).find((e) => !e.paused) || document.querySelector('video, audio'); if (!m) return;";
-    let body = match (action.as_str(), value) {
-        ("play", _) => "m.play();".to_string(),
-        ("pause", _) => "m.pause();".to_string(),
-        ("toggle", _) => "if (m.paused) m.play(); else m.pause();".to_string(),
-        ("pip", _) => {
-            let _ = wv.eval(crate::tabhost::PIP_ENTER_JS);
-            return Ok(());
-        }
-        ("exit-pip", _) => {
-            let _ = wv.eval(crate::tabhost::PIP_EXIT_JS);
-            return Ok(());
-        }
-        ("seek", Some(v)) if v.is_finite() => format!("m.currentTime = {};", v.max(0.0)),
-        ("volume", Some(v)) if v.is_finite() => format!("m.muted = false; m.volume = {};", v.clamp(0.0, 1.0)),
+    let js = match (action.as_str(), value) {
+        ("play", _) => crate::tabhost::media_action_js("m.play();"),
+        ("pause", _) => crate::tabhost::media_action_js("m.pause();"),
+        ("toggle", _) => crate::tabhost::media_action_js("if (m.paused) m.play(); else m.pause();"),
+        ("pip", _) => crate::tabhost::pip_enter_js(),
+        ("exit-pip", _) => crate::tabhost::PIP_EXIT_JS.to_string(),
+        ("seek", Some(v)) if v.is_finite() => crate::tabhost::media_action_js(&format!("m.currentTime = {};", v.max(0.0))),
+        ("volume", Some(v)) if v.is_finite() => crate::tabhost::media_action_js(&format!("m.muted = false; m.volume = {};", v.clamp(0.0, 1.0))),
         ("mute", _) => {
             #[cfg(windows)]
             crate::webview_win::set_muted(&wv, true);
@@ -646,7 +632,10 @@ pub async fn media_control(tab_id: String, action: String, value: Option<f64>, a
         }
         _ => return Err("unknown media action".into()),
     };
-    let _ = wv.eval(format!("(() => {{ {pick} {body} }})()"));
+    #[cfg(windows)]
+    crate::webview_win::media_eval(&wv, tab_id, js, true, |_| {});
+    #[cfg(not(windows))]
+    let _ = (wv.eval(js), tab_id);
     Ok(())
 }
 
