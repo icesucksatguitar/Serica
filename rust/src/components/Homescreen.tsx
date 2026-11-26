@@ -174,8 +174,10 @@ const HomeClock: React.FC<{ hour12: boolean; seconds: boolean }> = ({ hour12, se
   }, [hour12]);
   return (
     <div className="home-clock" aria-live="off">
-      <div className="home-clock-time tnum">
-        <span ref={hmRef}>{initial.hm}</span>
+      <div className="home-clock-time">
+        <span className="home-clock-hm" ref={hmRef}>
+          {initial.hm}
+        </span>
         {seconds && (
           <span className="home-clock-sec" ref={secRef}>
             {initial.seconds}
@@ -244,7 +246,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   const setClock = (patch: Partial<HomeWidgets['clock']>) => onUpdateWidgets?.({ ...widgets, clock: { ...widgets.clock, ...patch } });
 
   return (
-    <div className={`home2${editing ? ' editing' : ''}${dockVisible ? ' with-dock' : ''}`} data-ink={lightInk ? 'light' : 'dark'} data-bg={background.mode}>
+    <div className={`home2${editing ? ' editing' : ''}${dockVisible ? ' with-dock' : ''}`} data-ink={lightInk ? 'light' : 'dark'} data-bg={background.mode} data-clock={widgets.clock.side}>
       <HomeBackdrop bg={background} />
 
       {onUpdateWidgets && (
@@ -304,6 +306,16 @@ export const Homescreen: React.FC<HomescreenProps> = ({
                 <div className="home-customize-row">
                   <span>Seconds</span>
                   <Switch checked={widgets.clock.seconds} label="Seconds" onChange={(seconds) => setClock({ seconds })} />
+                </div>
+                <div className="home-customize-row">
+                  <span>Clock</span>
+                  <div className="seg home-clock-side" role="radiogroup" aria-label="Clock corner">
+                    {(['left', 'right'] as const).map((side) => (
+                      <button key={side} type="button" role="radio" aria-checked={widgets.clock.side === side} className={widgets.clock.side === side ? 'on' : ''} onClick={() => setClock({ side })}>
+                        {side === 'left' ? 'Left' : 'Right'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="app-context-menu-sep" role="separator" />
                 <button type="button" role="menuitem" className="nsb-menu-item" onClick={() => { setMenuOpen(false); startGuide('widgets'); }}>

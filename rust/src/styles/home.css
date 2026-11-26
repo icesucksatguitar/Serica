@@ -131,7 +131,10 @@
   }
 }
 
-/* ---- Clock (bottom-left) ------------------------------------------------ */
+/* ---- Clock (a bottom corner) ---------------------------------------------
+   Inter at its display optical size, semibold and set tight, the way a
+   lock-screen clock is: hours and minutes in proportional figures (they
+   change once a minute), seconds in tabular ones so they never jitter. */
 
 .home-clock {
   position: absolute;
@@ -140,10 +143,31 @@
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   color: var(--ink);
   pointer-events: none;
   user-select: none;
+}
+
+/* Right: above Customize, right-aligned with it. */
+.home2[data-clock='right'] .home-clock {
+  left: auto;
+  right: var(--home-pad);
+  bottom: 76px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.home2.with-dock[data-clock='right'] .home-clock {
+  right: calc(var(--home-pad) + 64px);
+}
+
+/* The painting's caption takes the other corner. */
+.home2[data-clock='right'] .home-art-credit,
+.home2.with-dock[data-clock='right'] .home-art-credit {
+  right: auto;
+  left: var(--home-pad);
+  align-items: flex-start;
 }
 
 .home2[data-ink='light'] .home-clock {
@@ -153,26 +177,35 @@
 .home-clock-time {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--font-display);
-  font-size: calc(var(--fs-56) * var(--hero-scale, 1));
-  font-weight: 300;
-  letter-spacing: var(--tr-56);
+  font-size: calc(42px * var(--hero-scale, 1));
+  font-weight: 600;
+  font-variation-settings: 'opsz' 32;
+  font-feature-settings: 'calt', 'ss01';
+  letter-spacing: -0.045em;
   line-height: 1;
+}
+
+.home-clock-hm {
+  font-variant-numeric: proportional-nums;
 }
 
 .home-clock-sec,
 .home-clock-suffix {
-  font-size: var(--fs-20);
-  font-weight: 400;
+  font-size: calc(17px * var(--hero-scale, 1));
+  font-weight: 500;
+  font-variation-settings: 'opsz' 20;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   color: var(--ink-3);
 }
 
 .home-clock-date {
-  padding-left: 2px;
-  font-size: var(--fs-14);
-  letter-spacing: var(--tr-14);
+  padding: 0 1px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--ink-2);
 }
 
@@ -333,20 +366,80 @@
   will-change: transform;
 }
 
+/* Liquid glass: each widget blurs and saturates what is behind it, so it
+   takes on the colours of the painting, picture or theme underneath; a
+   tint (dark under light ink, light under dark ink) and a dimmed backdrop
+   keep the text legible; a bright rim catches light along the top-left
+   edge and a soft sheen falls from the top. */
+.home2 {
+  --glass-tint: rgba(255, 255, 255, 0.46);
+  --glass-filter: blur(24px) saturate(1.8) brightness(1.06);
+  --glass-rim-a: rgba(255, 255, 255, 0.85);
+  --glass-rim-b: rgba(255, 255, 255, 0.18);
+  --glass-sheen: rgba(255, 255, 255, 0.5);
+  --glass-shade: rgba(0, 0, 0, 0.16);
+}
+
+.home2[data-ink='light'] {
+  --glass-tint: rgba(14, 16, 20, 0.4);
+  --glass-filter: blur(24px) saturate(1.8) brightness(0.74);
+  --glass-rim-a: rgba(255, 255, 255, 0.42);
+  --glass-rim-b: rgba(255, 255, 255, 0.07);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-shade: rgba(0, 0, 0, 0.32);
+}
+
 .wtile-face {
   position: relative;
   width: 100%;
   height: 100%;
   border-radius: inherit;
   overflow: hidden;
-  background: color-mix(in srgb, var(--ui-surface) 84%, transparent);
-  box-shadow: inset 0 0 0 1px var(--hairline);
-  color: var(--ui-fg);
+  background:
+    radial-gradient(130% 70% at 18% -10%, var(--glass-sheen), transparent 58%),
+    var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-rim-a) 60%, transparent),
+    0 12px 32px -14px var(--glass-shade);
+  color: var(--ink, var(--ui-fg));
 }
 
-.home2[data-bg='image'] .wtile-face,
-.home2[data-bg='special'] .wtile-face {
-  background: color-mix(in srgb, var(--ui-surface) 90%, transparent);
+/* The rim: a 1px ring, brightest where light would hit (top-left, bottom-right). */
+.wtile-face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--glass-rim-a), var(--glass-rim-b) 34%, transparent 52%, var(--glass-rim-b) 76%, color-mix(in srgb, var(--glass-rim-a) 70%, transparent));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.home2[data-ink='light'] .wtile-face {
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.22);
+}
+
+/* Reduced effects (setting or Windows): solid, no blur. */
+:root[data-reduced-effects='on'] .wtile-face {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .wtile-face {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  }
 }
 
 .wboard2.editing .wtile {
@@ -380,7 +473,7 @@
 
 .wtile.selected .wtile-face,
 .wtile:focus-visible .wtile-face {
-  box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 2px color-mix(in srgb, var(--ink) 55%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-rim-a) 60%, transparent), 0 0 0 2px color-mix(in srgb, var(--ink) 55%, transparent);
 }
 
 .wtile.dragging {
@@ -390,7 +483,7 @@
 }
 
 .wtile.dragging .wtile-face {
-  box-shadow: inset 0 0 0 1px var(--hairline), 0 18px 40px rgba(0, 0, 0, 0.32);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-rim-a) 60%, transparent), 0 22px 44px -10px rgba(0, 0, 0, 0.38);
 }
 
 .wtile-chrome {
@@ -745,4 +838,10 @@
   .wboard2.editing .wtile-face {
     animation: none !important;
   }
+}
+
+.home-clock-side button {
+  height: 22px;
+  padding: 0 9px;
+  font-size: var(--fs-12);
 }

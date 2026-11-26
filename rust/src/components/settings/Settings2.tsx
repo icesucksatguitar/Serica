@@ -399,12 +399,21 @@ export const Settings2: React.FC<Settings2Props> = ({ onClose, settings, onUpdat
                 <HomeBackgroundSettings value={settings.homeBackground ?? DEFAULT_HOME_BACKGROUND} onChange={(homeBackground) => onUpdateSettings({ homeBackground })} />
               </div>
             </Group>
-            <Group title="Clock" icon={Clock} note="The clock sits in the bottom-left corner of every new tab.">
+            <Group title="Clock" icon={Clock} note="The clock sits in a bottom corner of every new tab.">
               <Row id="home.clock" icon={Clock} title="24-hour clock">
                 <Switch checked={!widgets.clock.hour12} label="24-hour clock" onChange={(on) => onUpdateSettings({ homeWidgets: { ...widgets, clock: { ...widgets.clock, hour12: !on } } })} />
               </Row>
               <Row id="home.clock.seconds" icon={Clock} title="Seconds">
                 <Switch checked={widgets.clock.seconds} label="Seconds" onChange={(seconds) => onUpdateSettings({ homeWidgets: { ...widgets, clock: { ...widgets.clock, seconds } } })} />
+              </Row>
+              <Row id="home.clock.side" icon={Clock} title="Corner">
+                <div className="seg" role="radiogroup" aria-label="Clock corner">
+                  {(['left', 'right'] as const).map((side) => (
+                    <button key={side} type="button" role="radio" aria-checked={widgets.clock.side === side} className={widgets.clock.side === side ? 'on' : ''} onClick={() => onUpdateSettings({ homeWidgets: { ...widgets, clock: { ...widgets.clock, side } } })}>
+                      {side === 'left' ? 'Bottom left' : 'Bottom right'}
+                    </button>
+                  ))}
+                </div>
               </Row>
             </Group>
             <Group title="Widgets" icon={LayoutGrid}>

@@ -177,14 +177,15 @@ export interface HomeWidgets {
   notes: Record<string, string>;
   /** The widget guide was shown (it can be replayed from the edit bar). */
   guideSeen: boolean;
-  clock: { hour12: boolean; seconds: boolean };
+  /** `side`: the bottom corner the clock sits in. */
+  clock: { hour12: boolean; seconds: boolean; side: 'left' | 'right' };
 }
 
 export const DEFAULT_HOME_WIDGETS: Readonly<HomeWidgets> = Object.freeze({
   items: [],
   notes: {},
   guideSeen: false,
-  clock: { hour12: false, seconds: true },
+  clock: { hour12: false, seconds: true, side: 'right' as const },
 });
 
 const WIDGET_SIZES: readonly WidgetSize[] = ['s', 'm', 'l', 'w'];
@@ -278,7 +279,7 @@ function normalizeHomeWidgets(raw: unknown): HomeWidgets {
     items,
     notes,
     guideSeen: o.guideSeen === true,
-    clock: { hour12: c.hour12 === true, seconds: c.seconds !== false },
+    clock: { hour12: c.hour12 === true, seconds: c.seconds !== false, side: c.side === 'left' ? 'left' : 'right' },
   };
 }
 
