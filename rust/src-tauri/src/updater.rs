@@ -1,7 +1,7 @@
 //! Automatic updates from GitHub releases.
 //!
 //! A release build checks the `latest.json` published with the newest GitHub
-//! release shortly after launch and then every few hours. A newer version is
+//! release shortly after launch and then every two hours. A newer version is
 //! downloaded in the background and verified against the public key in
 //! tauri.conf.json (the plugin rejects packages not signed with our key); the
 //! UI then offers "Restart to update", which saves the session and runs the
@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
-const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(2 * 60 * 60);
 const EVENT: &str = "serica:update-status";
 
 #[derive(Debug, Clone, Serialize, Default)]

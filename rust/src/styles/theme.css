@@ -10038,26 +10038,49 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 /* "Update ready" notice (UpdateNotice.tsx) */
 .update-notice {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 12px 12px 14px;
+  top: calc(var(--app-content-top, 44px) + 14px);
+  /* Centered by layout, not a transform: the page is cut out around the
+     element's layout box (see useElementHole). */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(400px, calc(100vw - 32px));
+  padding: 14px 14px 12px;
   border-radius: 14px;
-  background: rgba(24, 24, 27, 0.96);
+  background: rgba(24, 24, 27, 0.97);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
   display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #F2F2F3;
-  font-size: 12px;
-  z-index: 10400;
-  animation: floatIn 0.25s ease-out;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12.5px;
+  z-index: 10050;
+  transition: transform var(--dur-slow, 260ms) var(--spring-snap, cubic-bezier(0.22, 1, 0.36, 1)), opacity var(--dur-base, 180ms) var(--ease-out, ease-out);
+}
+
+.presence[data-state='closed'] > .update-notice {
+  /* Scale only: it stays inside the area cut out of the page for it. */
+  transform: scale(0.97);
+  opacity: 0;
+  transition: transform var(--dur-exit, 140ms) var(--ease-in, ease-in), opacity var(--dur-exit, 140ms) var(--ease-in, ease-in);
+}
+
+.update-notice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
 }
 
 .update-notice-icon {
   flex-shrink: 0;
-  color: #A1A1AA;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--theme-accent, #a1a1aa) 18%, transparent);
+  color: var(--theme-accent, #d4d4d8);
 }
 
 .update-notice-body {
@@ -10068,40 +10091,57 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 .update-notice-title {
   margin: 0;
   font-weight: 600;
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 13.5px;
+  line-height: 1.35;
 }
 
 .update-notice-text {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   color: #A1A1AA;
   line-height: 1.45;
 }
 
+.update-notice-notes {
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #c4c4cc;
+  line-height: 1.5;
+  max-height: 120px;
+  overflow: auto;
+}
+
 .update-notice-actions {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 6px;
 }
 
 .update-notice-primary,
+.update-notice-secondary,
 .update-notice-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 28px;
+  height: 30px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
   border: 1px solid transparent;
+  transition: background-color var(--dur-fast, 120ms) ease, opacity var(--dur-fast, 120ms) ease;
 }
 
 .update-notice-primary {
-  padding: 0 12px;
+  padding: 0 14px;
   background: #FFFFFF;
   color: #0A0A0B;
   font-weight: 600;
+}
+
+.update-notice-primary:hover:not(:disabled) {
+  background: #e8e8ea;
 }
 
 .update-notice-primary:disabled {
@@ -10109,8 +10149,21 @@ html[data-reduced-effects="on"] .pinned-notification-card {
   cursor: default;
 }
 
+.update-notice-secondary {
+  padding: 0 12px;
+  background: transparent;
+  color: var(--ui-fg, #e4e4e7);
+  border-color: var(--border-strong);
+}
+
+.update-notice-secondary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .update-notice-close {
   width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
   background: transparent;
   color: #A1A1AA;
 }
@@ -10120,9 +10173,30 @@ html[data-reduced-effects="on"] .pinned-notification-card {
 }
 
 .update-notice-primary:focus-visible,
+.update-notice-secondary:focus-visible,
 .update-notice-close:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
+}
+
+[data-theme="light"] .update-notice-text,
+[data-theme="light"] .update-notice-close {
+  color: #52525b;
+}
+
+[data-theme="light"] .update-notice-notes {
+  background: rgba(0, 0, 0, 0.04);
+  color: #3f3f46;
+}
+
+[data-theme="light"] .update-notice-primary {
+  background: #18181b;
+  color: #fafafa;
+}
+
+[data-theme="light"] .update-notice-secondary:hover,
+[data-theme="light"] .update-notice-close:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 
 /* "What's new" card after an update (WhatsNew.tsx) */
