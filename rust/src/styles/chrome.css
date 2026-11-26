@@ -179,23 +179,12 @@ html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluste
 }
 
 /* ---- Sharp sidebar text ---------------------------------------------------
-   Chromium (WebView2) only draws ClearType (subpixel) text when the text sits
-   in a layer it knows is opaque, with no will-change: transform. The sidebar
-   had will-change on both its panel and its pane track, so its text was
-   drawn with greyscale anti-aliasing on a transparent layer and looked soft
-   next to Edge or Zen. The panel keeps its own layer (translate3d) so the
-   slide stays smooth, but without will-change; the track has no layer at rest
-   (useSpaceSwipe sets a translate3d inline only while a swipe is moving).
-   The UI font in the sidebar follows Windows (Segoe UI Variable), which is
-   hinted for ClearType at small sizes, as in Zen. */
-
-.nsb.autohide.autohide {
-  will-change: auto;
-}
-
-.nsb .nsb-track.nsb-track {
-  will-change: auto;
-}
+   The window is transparent, so WebView2 draws all interface text with
+   greyscale anti-aliasing (no ClearType); Zen does the same. What made the
+   sidebar look soft next to Zen was the font: Inter has no hinting, so at
+   12-13px on a 100% scale display its stems fall between pixels and blur.
+   Segoe UI Variable is hinted for Windows and snaps to the pixel grid, which
+   is what Zen uses. */
 
 .nsb.nsb {
   font-family: 'Segoe UI Variable Text', 'Segoe UI', var(--font-ui);
