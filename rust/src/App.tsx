@@ -1369,7 +1369,7 @@ return (
     <UpdateNotice />
     <AppContextMenu />
     <PageContextMenu />
-    <WhatsNew onboarded={!isWelcomeOpen} />
+    <WhatsNew onboarded={!settingsLoaded ? null : !isWelcomeOpen && (settings.setupVersion ?? 0) >= SETUP_VERSION} />
 
     {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
     <PasswordPrompt />

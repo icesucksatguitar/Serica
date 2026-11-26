@@ -67,9 +67,21 @@
   background: #000;
 }
 
-/* Keeps the clock and the controls legible on pictures. */
+/* Keeps the clock and the controls legible on pictures. The top band is
+   the theme's own surface colour (dark ink gets a light band in light
+   themes), eased over ~140px so it never shows an edge. */
 .home-bg-scrim {
   background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ui-bg) 80%, transparent) 0,
+      color-mix(in srgb, var(--ui-bg) 70%, transparent) 20px,
+      color-mix(in srgb, var(--ui-bg) 54%, transparent) 44px,
+      color-mix(in srgb, var(--ui-bg) 36%, transparent) 70px,
+      color-mix(in srgb, var(--ui-bg) 19%, transparent) 98px,
+      color-mix(in srgb, var(--ui-bg) 7%, transparent) 124px,
+      transparent 148px
+    ),
     radial-gradient(120% 70% at 0% 100%, rgba(0, 0, 0, 0.42), transparent 55%),
     linear-gradient(to top, rgba(0, 0, 0, 0.22), transparent 30%);
 }

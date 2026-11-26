@@ -131,13 +131,16 @@ function writeSeen(v: string) {
 
 /**
  * A card listing what's new, shown once on the first launch after an update.
- * A fresh install (onboarding not finished) only records the version.
+ * A fresh install, or an update that shows the setup screen (which already
+ * says what's new, and is followed by the tour), only records the version.
  */
-export const WhatsNew: React.FC<{ onboarded: boolean }> = ({ onboarded }) => {
+export const WhatsNew: React.FC<{ onboarded: boolean | null }> = ({ onboarded }) => {
   const [version, setVersion] = useState<string | null>(null);
   const [el, setEl] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    // Not known yet (settings loading): decide once it is.
+    if (onboarded === null) return;
     let alive = true;
     void tauriBridge
       .getUpdateStatus()
