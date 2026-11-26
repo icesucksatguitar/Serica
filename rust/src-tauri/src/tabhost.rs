@@ -88,7 +88,7 @@ pub struct Hole {
 }
 
 impl Hole {
-    fn lerp(a: Hole, b: Hole, p: f64) -> Hole {
+    pub(crate) fn lerp(a: Hole, b: Hole, p: f64) -> Hole {
         let l = |x: f64, y: f64| x + (y - x) * p;
         Hole { x: l(a.x, b.x), y: l(a.y, b.y), w: l(a.w, b.w), h: l(a.h, b.h), r: l(a.r, b.r) }
     }
@@ -119,13 +119,13 @@ pub fn cubic_bezier(e: [f64; 4], x: f64) -> f64 {
 pub struct TabHost {
     pub views: HashMap<String, TabView>,
     /// UI regions cut out of the page (sidebar, dock, menus), by owner id.
-    pub holes: HashMap<String, Hole>,
-    hole_gen: HashMap<String, u64>,
+    /// Applies the holes to the page windows (off the main thread).
+    #[cfg(windows)]
+    pub clipper: std::sync::Arc<crate::clip_win::Clipper>,
     pub bounds: Option<Bounds>,
     /// False while a UI overlay covers the viewport.
     pub visible: bool,
     pub active: Option<String>,
-    pub previews: HashMap<String, String>,
     pub assistant: Option<(Webview, Bounds)>,
     data_root: PathBuf,
     proxy_port: Option<u16>,
@@ -213,6 +213,13 @@ pub const PAGE_SCRIPT: &str = r#"(() => {
   if (window.top !== window || window.__sericaPage) return;
   Object.defineProperty(window, '__sericaPage', { value: true });
   const post = (m) => { try { window.chrome.webview.postMessage(JSON.stringify(Object.assign({ __serica: 1 }, m))); } catch (e) {} };
+  // Scrolling settled: the app refreshes its capture of the page, which it
+  // draws under panels (sidebar, top bar) sliding over the page.
+  let settle = 0;
+  addEventListener('scroll', () => {
+    clearTimeout(settle);
+    settle = setTimeout(() => { if (document.visibilityState === 'visible') post({ t: 'settled' }); }, 300);
+  }, { passive: true, capture: true });
   const seenC = new Set(), seenI = new Set();
   let pendC = [], pendI = [], timer = 0;
   const flush = () => { timer = 0; if (pendC.length || pendI.length) { post({ t: 'cosmetic', classes: pendC, ids: pendI }); pendC = []; pendI = []; } };
@@ -337,12 +344,11 @@ impl TabHost {
     pub fn new(data_root: PathBuf, proxy_port: Option<u16>, net: (bool, bool), block_3pc: bool) -> Self {
         Self {
             views: HashMap::new(),
-            holes: HashMap::new(),
-            hole_gen: HashMap::new(),
+            #[cfg(windows)]
+            clipper: crate::clip_win::Clipper::new(),
             bounds: None,
             visible: true,
             active: None,
-            previews: HashMap::new(),
             assistant: None,
             data_root,
             proxy_port,
@@ -460,6 +466,7 @@ impl TabHost {
     /// the host lock held, or both threads wait on each other forever.
     fn build(app: &Shared, tab_id: &str, profile: &str, p: PendingView) -> Option<Webview> {
         let PendingView { window, builder, bounds, url: parsed } = p;
+        let _perf = crate::perf::span("build_webview(any thread)");
         match window.add_child(builder, LogicalPosition::new(bounds.x, bounds.y), LogicalSize::new(bounds.w.max(1.0), bounds.h.max(1.0))) {
             Ok(wv) => {
                 #[cfg(windows)]
@@ -484,6 +491,7 @@ impl TabHost {
 
     /// Brings native webviews in line with the store.
     pub fn reconcile(app: &Shared) {
+        let _perf = crate::perf::span("reconcile");
         struct Want {
             url: String,
             live: bool,
@@ -528,19 +536,17 @@ impl TabHost {
             .collect();
         for id in stale {
             if let Some(v) = host.views.remove(&id) {
+                #[cfg(windows)]
+                host.clipper.forget(v.webview.label());
                 let _ = v.webview.close();
             }
             if !wants.contains_key(&id) {
-                host.previews.remove(&id);
+                app.previews.remove(&id);
             }
         }
 
         let previous = host.active.clone();
         host.active = active.clone();
-        #[cfg(windows)]
-        let clip = Self::clip_rects(&host, text_scale);
-        #[cfg(not(windows))]
-        let _ = text_scale;
         let visible = host.visible;
         let bounds = host.bounds;
         let mut previews_to_capture = Vec::new();
@@ -563,8 +569,6 @@ impl TabHost {
                     if previous.as_ref() != Some(id) || v.hidden_at.is_none() {
                         focus_page = Some(v.webview.clone());
                     }
-                    #[cfg(windows)]
-                    crate::webview_win::set_clip(&v.webview, clip.clone());
                     #[cfg(windows)]
                     crate::webview_win::set_background(&v.webview, false);
                     let _ = v.webview.show();
@@ -593,6 +597,10 @@ impl TabHost {
         // Switched to a tab without a page on screen (new tab page, or a page
         // still being built): the UI takes focus so its shortcuts work.
         let focus_ui = visible && focus_page.is_none() && !active_shown_before && previous != active;
+        #[cfg(windows)]
+        Self::sync_clip_pages(&host, text_scale);
+        #[cfg(not(windows))]
+        let _ = text_scale;
         drop(host);
         if let Some(wv) = focus_page {
             let _ = wv.set_focus();
@@ -612,7 +620,7 @@ impl TabHost {
             let app = app.clone();
             crate::webview_win::capture(&wv, move |img| {
                 if let Some(img) = img {
-                    app.host.lock().previews.insert(id, img);
+                    app.previews.put(&id, img);
                 }
             });
         }
@@ -670,6 +678,8 @@ impl TabHost {
         }
         #[cfg(not(windows))]
         let _ = zoom;
+        #[cfg(windows)]
+        crate::webview_win::register_clip_window(&wv, host.clipper.clone());
         if let Some(old) = host.views.insert(id.to_string(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
             let _ = old.webview.close();
         }
@@ -752,19 +762,13 @@ impl TabHost {
         }
     }
 
-    /// Holes in logical px relative to the page view, plus the page's
-    /// logical width (the UI thread derives the pixel scale from it). Pure:
-    /// callers read the text size `z` before taking the host lock, and nothing
-    /// here locks or waits on anything else.
-    fn clip_rects(host: &TabHost, z: f64) -> crate::webview_win::Clip {
-        let Some(b) = host.bounds else { return crate::webview_win::Clip::default() };
-        let holes = host
-            .holes
-            .values()
-            .filter(|h| h.w > 0.5 && h.h > 0.5)
-            .map(|h| (h.x * z - b.x, h.y * z - b.y, (h.x + h.w) * z - b.x, (h.y + h.h) * z - b.y, h.r * z))
-            .collect();
-        crate::webview_win::Clip { holes, page_width: b.w }
+    /// Tells the clip worker which page windows are on screen and where the
+    /// page area is (holes are in window coordinates).
+    #[cfg(windows)]
+    fn sync_clip_pages(host: &TabHost, z: f64) -> u64 {
+        let pages = host.views.values().filter(|v| v.shown).map(|v| v.webview.label().to_string()).collect();
+        let origin = host.bounds.map(|b| (b.x, b.y)).unwrap_or((0.0, 0.0));
+        host.clipper.set_pages(pages, origin, z)
     }
 
     /// Applies the current holes to every page view on screen.
@@ -773,10 +777,7 @@ impl TabHost {
         {
             let z = app.store.lock().settings.text_scale;
             let host = app.host.lock();
-            let clip = Self::clip_rects(&host, z);
-            for v in host.views.values().filter(|v| v.shown) {
-                crate::webview_win::set_clip(&v.webview, clip.clone());
-            }
+            Self::sync_clip_pages(&host, z);
         }
         #[cfg(not(windows))]
         let _ = app;
@@ -788,53 +789,30 @@ impl TabHost {
     /// drops it once there.
     /// `lead_ms` runs the hole ahead of (or, negative, behind) the UI's own
     /// animation so the page never covers the moving edge.
+    /// Returns a sequence number to wait for with `wait_clip` (0 off Windows).
     #[allow(clippy::too_many_arguments)]
-    pub fn set_hole(app: &Shared, id: String, rect: Hole, from: Option<Hole>, ms: u32, ease: [f64; 4], remove: bool, lead_ms: f64) {
-        let (gen, current) = {
-            let mut host = app.host.lock();
-            let g = host.hole_gen.entry(id.clone()).or_insert(0);
-            *g += 1;
-            (*g, host.holes.get(&id).copied())
-        };
-        // A change mid-animation continues from where the hole is now.
-        let from = from.map(|f| current.unwrap_or(f));
-        let hole_id = id.clone();
-        let finish = move |app: &Shared| {
-            let mut host = app.host.lock();
-            if remove {
-                host.holes.remove(&id);
-            } else {
-                host.holes.insert(id.clone(), rect);
-            }
-            drop(host);
-            Self::apply_clips(app);
-        };
-        let Some(from) = from.filter(|_| ms > 0) else {
-            finish(app);
-            return;
-        };
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let start = std::time::Instant::now();
-            loop {
-                let t = ((start.elapsed().as_secs_f64() * 1000.0 + lead_ms) / ms as f64).max(0.0);
-                {
-                    let mut host = app.host.lock();
-                    if host.hole_gen.get(&hole_id) != Some(&gen) {
-                        return; // superseded
-                    }
-                    if t >= 1.0 {
-                        break;
-                    }
-                    host.holes.insert(hole_id.clone(), Hole::lerp(from, rect, cubic_bezier(ease, t)));
-                }
-                Self::apply_clips(&app);
-                tokio::time::sleep(std::time::Duration::from_millis(7)).await;
-            }
-            if app.host.lock().hole_gen.get(&hole_id) == Some(&gen) {
-                finish(&app);
-            }
-        });
+    pub fn set_hole(app: &Shared, id: String, rect: Hole, from: Option<Hole>, ms: u32, ease: [f64; 4], remove: bool, lead_ms: f64) -> u64 {
+        #[cfg(windows)]
+        {
+            let clipper = app.host.lock().clipper.clone();
+            clipper.set_hole(id, rect, from, ms, ease, remove, lead_ms)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (app, id, rect, from, ms, ease, remove, lead_ms);
+            0
+        }
+    }
+
+    /// Blocks until hole change `seq` is on screen (or `timeout` passes).
+    pub fn wait_clip(app: &Shared, seq: u64, timeout: std::time::Duration) {
+        #[cfg(windows)]
+        {
+            let clipper = app.host.lock().clipper.clone();
+            clipper.wait_applied(seq, timeout);
+        }
+        #[cfg(not(windows))]
+        let _ = (app, seq, timeout);
     }
 
     /// Keeps a profile's pages closed (`true`) or lets them back (`false`).
@@ -946,7 +924,7 @@ impl TabHost {
             let app2 = app.clone();
             crate::webview_win::capture(&wv, move |img| {
                 if let Some(img) = img {
-                    app2.host.lock().previews.insert(tab_id, img);
+                    app2.previews.put(&tab_id, img);
                 }
             });
         });

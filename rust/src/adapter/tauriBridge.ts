@@ -221,6 +221,10 @@ export const tauriBridge = {
   onZoomUpdated: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => on('serica:zoom-updated', cb),
   onFindResult: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => on('serica:find-result', cb),
   onPageColor: (cb: (r: { tabId: string; themeColor: string | null }) => void) => on('serica:page-color', cb),
+  /** The pointer is nearing a window edge over a live page (`left`, `top` or `right`). */
+  onEdgeApproach: (cb: (edge: 'left' | 'top' | 'right') => void) => on('serica:edge-approach', cb),
+  /** The page on screen settled after scrolling (tab id). */
+  onPageSettled: (cb: (tabId: string) => void) => on('serica:page-settled', cb),
   widgetGithub: (user: string) => invoke<GithubContributions>('widget_github', { user }),
   widgetGeocode: (query: string) => invoke<GeoPlace>('widget_geocode', { query }),
   widgetWeather: (lat: number, lon: number, fahrenheit: boolean) =>

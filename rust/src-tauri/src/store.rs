@@ -1015,12 +1015,17 @@ impl Store {
     /// (manual Zen); otherwise only tabs idle at least that long. Pinned tabs,
     /// tabs playing media and the active tab are never slept.
     pub fn sleep_inactive(&mut self, min_idle_ms: i64) -> usize {
-        self.sleep_least_recent(min_idle_ms, usize::MAX)
+        self.sleep_lru(min_idle_ms, usize::MAX, None)
     }
 
     /// Sleeps up to `limit` eligible tabs idle at least `min_idle_ms`, least
     /// recently used first (used when the system runs low on memory).
-    pub fn sleep_least_recent(&mut self, min_idle_ms: i64, limit: usize) -> usize {
+    /// Only tabs in `live` (with a page loaded) are considered.
+    pub fn sleep_least_recent(&mut self, min_idle_ms: i64, limit: usize, live: &std::collections::HashSet<String>) -> usize {
+        self.sleep_lru(min_idle_ms, limit, Some(live))
+    }
+
+    fn sleep_lru(&mut self, min_idle_ms: i64, limit: usize, live: Option<&std::collections::HashSet<String>>) -> usize {
         let now = now_ms();
         let active = self.active_tab_id.clone();
         let mut eligible: Vec<(i64, usize)> = self
@@ -1029,6 +1034,7 @@ impl Store {
             .enumerate()
             .filter(|(_, t)| {
                 Some(&t.id) != active.as_ref()
+                    && live.is_none_or(|l| l.contains(&t.id))
                     && !t.is_sleeping
                     && !t.unloaded
                     && !t.has_active_media
@@ -1362,7 +1368,8 @@ mod tests {
         assert_eq!(s.sleep_inactive(60 * 60_000), 0);
         assert!(!s.tab(&study).unwrap().is_sleeping);
         s.activate_space("space-study");
-        assert_eq!(s.sleep_least_recent(60_000, 5), 0);
+        let live = s.tabs.iter().map(|t| t.id.clone()).collect();
+        assert_eq!(s.sleep_least_recent(60_000, 5, &live), 0);
         assert!(!s.tab(&work).unwrap().is_sleeping);
     }
 
@@ -1377,15 +1384,22 @@ mod tests {
         s.tab_mut(&older).unwrap().last_active_at = Some(now_ms() - 40 * 60_000);
         s.tab_mut(&fresh).unwrap().last_active_at = Some(now_ms() - 60_000);
         s.tab_mut(&active).unwrap().last_active_at = Some(now_ms() - 90 * 60_000);
+        // Only tabs with a page loaded count.
+        let only_old: std::collections::HashSet<String> = [old.clone()].into();
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 5, &only_old), 1);
+        assert!(s.tab(&old).unwrap().is_sleeping);
+        assert!(!s.tab(&older).unwrap().is_sleeping);
+        s.tab_mut(&old).unwrap().is_sleeping = false;
+        let live: std::collections::HashSet<String> = s.tabs.iter().map(|t| t.id.clone()).collect();
         // One at a time, oldest first; the active tab and recent tabs are spared.
-        assert_eq!(s.sleep_least_recent(5 * 60_000, 1), 1);
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 1, &live), 1);
         assert!(s.tab(&older).unwrap().is_sleeping);
         assert!(!s.tab(&old).unwrap().is_sleeping);
-        assert_eq!(s.sleep_least_recent(5 * 60_000, 5), 1);
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 5, &live), 1);
         assert!(s.tab(&old).unwrap().is_sleeping);
         assert!(!s.tab(&fresh).unwrap().is_sleeping);
         assert!(!s.tab(&active).unwrap().is_sleeping);
-        assert_eq!(s.sleep_least_recent(5 * 60_000, 5), 0);
+        assert_eq!(s.sleep_least_recent(5 * 60_000, 5, &live), 0);
     }
 
     #[test]

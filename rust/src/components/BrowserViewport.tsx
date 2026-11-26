@@ -4,7 +4,7 @@ import { Homescreen } from './Homescreen';
 import { FindBar } from './FindBar';
 import type { PageColorReport } from '../utils/topBarTint';
 import type { HomeBackground, HomeWidgets, UiScale } from '../shared/settings';
-import { acquireViewportOverlay, setViewportCovered, setViewportPrewarmHandler, usePageUnderlay, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { acquireViewportOverlay, prewarmPageUnderlay, refreshPageCapture, setUnderlayPage, setViewportCovered, setViewportPrewarmHandler, type Underlay, usePageUnderlays, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -36,6 +36,8 @@ interface BrowserViewportProps {
   homeBackground?: HomeBackground;
   dockVisible?: boolean;
   uiScale?: UiScale;
+  /** Panels slide over the live page (auto-hide sidebar or top bar): keep a capture of it ready. */
+  captureAhead?: boolean;
 }
 
 /** Height reserved above the page while the find bar is open (bar + margins). */
@@ -62,6 +64,28 @@ function nextPaint(): Promise<void> {
 function isWebUrl(url: string | undefined): url is string {
   return !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
 }
+
+/** A capture of part of the page, drawn where that part is (page-area coordinates). */
+const UnderlayCanvas: React.FC<{ underlay: Underlay; left: number; top: number }> = ({ underlay, left, top }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const b = underlay.bitmap;
+    c.width = b.width;
+    c.height = b.height;
+    c.getContext('2d')?.drawImage(b, 0, 0);
+  }, [underlay.bitmap]);
+  const [x, y, w, h] = underlay.rect;
+  return (
+    <canvas
+      ref={ref}
+      className="native-page-snapshot"
+      aria-hidden="true"
+      style={{ position: 'absolute', left: x - left, top: y - top, width: w, height: h, pointerEvents: 'none' }}
+    />
+  );
+};
 
 /**
  * The web page area. Pages are native WebView2 views owned by the Rust tab
@@ -90,6 +114,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   homeBackground,
   dockVisible,
   uiScale,
+  captureAhead = false,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
@@ -103,8 +128,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [frozenImage, setFrozenImage] = useState<string | null>(null);
   const frozenImageRef = useRef<string | null>(null);
   frozenImageRef.current = frozenImage;
-  // The page's snapshot beneath it while UI slides over it (see setPageUnderlay).
-  const underlayImage = usePageUnderlay();
+  // Captures of the page beneath panels sliding over it (see preparePageUnderlay).
+  const underlays = usePageUnderlays();
 
   const isWebPage = Boolean(activeTab && isWebUrl(activeTab.url) && !activeTab.isSleeping && !activeTab.unloaded);
   const findVisible = isFindOpen && isWebPage;
@@ -136,6 +161,44 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   useLayoutEffect(() => {
     reportBounds();
   }, [reportBounds, insetLeft, insetRight, pageTop, reservedBottom]);
+
+  // Where captures drawn under sliding panels go, and which page they show.
+  const underlayKey = isWebPage && activeTab ? `${activeTab.id}|${activeTab.url}` : '';
+  useLayoutEffect(() => {
+    const update = () =>
+      setUnderlayPage({
+        key: underlayKey,
+        left: insetLeft,
+        top: pageTop,
+        width: Math.max(0, window.innerWidth - insetLeft - insetRight),
+        height: Math.max(0, window.innerHeight - pageTop - reservedBottom),
+      });
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [underlayKey, insetLeft, insetRight, pageTop, reservedBottom]);
+
+  // The pointer is heading for an edge over the page: capture it now, so a
+  // panel opening there has a capture to slide over without waiting.
+  useEffect(() => {
+    if (!underlayKey) return;
+    return window.serica?.onEdgeApproach?.(() => prewarmPageUnderlay());
+  }, [underlayKey]);
+  // Keep a current capture ready: after the page shows up or finishes
+  // loading, and after each scroll settles.
+  const pageLoading = Boolean(activeTab?.isLoading);
+  useEffect(() => {
+    if (!underlayKey || !captureAhead || pageLoading) return;
+    const t = window.setTimeout(refreshPageCapture, 700);
+    return () => window.clearTimeout(t);
+  }, [underlayKey, captureAhead, pageLoading]);
+  useEffect(() => {
+    if (!underlayKey || !captureAhead) return;
+    const tabId = activeTab?.id;
+    return window.serica?.onPageSettled?.((id) => {
+      if (id === tabId) refreshPageCapture();
+    });
+  }, [underlayKey, captureAhead, activeTab?.id]);
 
   useEffect(() => {
     window.addEventListener('resize', reportBounds);
@@ -507,10 +570,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
-        {(isWebPage || (isAsleep && !isNewTab)) && (frozenImage || underlayImage || placeholder) && (
+        {isWebPage &&
+          !frozenImage &&
+          underlays.map((u) => <UnderlayCanvas key={u.id} underlay={u} left={insetLeft} top={pageTop} />)}
+        {(isWebPage || (isAsleep && !isNewTab)) && (frozenImage || placeholder) && (
           <img
             className="native-page-snapshot"
-            src={(frozenImage || underlayImage || placeholder)!}
+            src={(frozenImage || placeholder)!}
             alt=""
             draggable={false}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}

@@ -133,77 +133,229 @@ export function useReservedPageBottom(): number {
 // page view gets a window region with these rectangles cut out, so it keeps
 // running and stays clickable everywhere else, and nothing waits on a capture.
 
-// Underlay: a snapshot of the live page drawn beneath it (in the page's own
-// place). Cutting a hole then changes nothing on screen, and UI can slide in
-// over the snapshot smoothly, however busy the app's main thread is.
-let underlay: string | null = null;
+// Underlay: a capture of the live page drawn beneath it, in the page's own
+// place, for the part a panel is about to cover. Cutting a hole there then
+// changes nothing on screen, and the panel slides in over the capture
+// smoothly, however busy the app's main thread is.
+//
+// Opening must not wait for a capture: one takes 100-300 ms (more on a busy
+// page). So the page is captured ahead of time: once it has loaded, after
+// each scroll settles (`serica:page-settled`), after a tab switch, and when
+// the pointer heads for an edge (`serica:edge-approach`). Opening uses the
+// latest capture of the page as it is; if the page changed since, a fresher
+// capture replaces it should one arrive during the slide. Only the strip under the panel is drawn (a
+// small cropped bitmap), not the whole page, so showing it costs little.
+
+/** Where the page area is (window CSS px) and which page it shows. */
+interface PageGeometry {
+  key: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+let page: PageGeometry = { key: '', left: 0, top: 0, width: 0, height: 0 };
+
+/** BrowserViewport reports the page on screen and its rectangle. */
+export function setUnderlayPage(next: PageGeometry): void {
+  if (next.key !== page.key) {
+    dropCapture();
+    pageChangedAt = performance.now();
+  }
+  page = next;
+}
+
+/** When the page last changed (scrolled, loaded): older captures are stale. */
+let pageChangedAt = 0;
+
+/** The page on screen changed (scroll settled, load finished): capture it again. */
+export function refreshPageCapture(): void {
+  pageChangedAt = performance.now();
+  void capturePage();
+}
+
+export interface Underlay {
+  id: string;
+  /** Window CSS px. */
+  rect: HoleRect;
+  bitmap: ImageBitmap;
+}
+
+let underlays: readonly Underlay[] = [];
 const underlayListeners = new Set<() => void>();
 
-export function setPageUnderlay(img: string | null): void {
-  if (underlay === img) return;
-  underlay = img;
+function publish(next: readonly Underlay[]) {
+  underlays = next;
   underlayListeners.forEach((l) => l());
 }
 
-export function usePageUnderlay(): string | null {
+/** Removes the capture drawn under one panel (`null` id: all of them). */
+export function setPageUnderlay(id: string | null): void {
+  const keep = id === null ? [] : underlays.filter((u) => u.id !== id);
+  if (keep.length !== underlays.length) publish(keep);
+}
+
+export function usePageUnderlays(): readonly Underlay[] {
   return useSyncExternalStore(
     (cb) => {
       underlayListeners.add(cb);
       return () => underlayListeners.delete(cb);
     },
-    () => underlay,
+    () => underlays,
   );
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const twoFrames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
-// One page capture at a time, shared; the latest is kept for reuse.
-let inflight: Promise<string | null> | null = null;
-let lastCapture: { img: string; at: number } | null = null;
+interface Capture {
+  key: string;
+  at: number;
+  /** When the capture was asked for (it shows the page as it was then). */
+  startedAt: number;
+  /** Decoded once; panels crop their strip from it. */
+  bitmap: ImageBitmap;
+}
 
-function capturePage(): Promise<string | null> {
-  if (inflight) return inflight;
+// One page capture at a time, shared; the latest is kept for reuse.
+let inflight: Promise<Capture | null> | null = null;
+let inflightAt = 0;
+let lastCapture: Capture | null = null;
+let releaseTimer = 0;
+
+function dropCapture() {
+  lastCapture?.bitmap.close();
+  lastCapture = null;
+}
+
+async function decodeCapture(dataUrl: string): Promise<ImageBitmap | null> {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    return await createImageBitmap(blob);
+  } catch {
+    return null;
+  }
+}
+
+function capturePage(): Promise<Capture | null> {
+  // One in flight that started after the page last changed will do. A stuck
+  // one (a capture can stall while the page is hidden) is given up on.
+  if (inflight && inflightAt >= pageChangedAt && performance.now() - inflightAt < 3000) return inflight;
   const p = window.serica?.captureViewport?.();
   if (!p) return Promise.resolve(null);
+  const key = page.key;
+  const startedAt = performance.now();
+  inflightAt = startedAt;
   inflight = p
     .catch(() => null)
-    .then((img) => {
-      if (img) lastCapture = { img, at: performance.now() };
-      return img;
+    .then(async (img): Promise<Capture | null> => {
+      if (!img || key !== page.key) return null;
+      const bitmap = await decodeCapture(img);
+      if (!bitmap) return null;
+      if (key !== page.key) {
+        bitmap.close();
+        return null;
+      }
+      // A later capture may have finished first.
+      if (lastCapture && lastCapture.key === key && lastCapture.startedAt > startedAt) {
+        bitmap.close();
+        return lastCapture;
+      }
+      lastCapture?.bitmap.close();
+      lastCapture = { key, at: performance.now(), startedAt, bitmap };
+      // The decoded page is large: let it go once it is too old to use.
+      window.clearTimeout(releaseTimer);
+      releaseTimer = window.setTimeout(dropCapture, STALE_MS);
+      return lastCapture;
     })
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
+  const mine = inflight;
+  void mine.finally(() => {
+    if (inflight === mine) inflight = null;
+  });
+  return mine;
+}
+
+/** A capture this recent is used as is, even if the page changed since. */
+const FRESH_MS = 400;
+/** Older ones (same page) are used while a fresh one is taken. */
+const STALE_MS = 60000;
+
+function captureAge(): number {
+  return lastCapture && lastCapture.key === page.key ? performance.now() - lastCapture.at : Infinity;
+}
+
+/** A capture of the page as it is now (taken after its last change). */
+function currentCapture(): Capture | null {
+  if (!lastCapture || lastCapture.key !== page.key) return null;
+  return lastCapture.startedAt >= pageChangedAt || captureAge() < FRESH_MS ? lastCapture : null;
 }
 
 /** Starts a page capture ahead of UI that is about to slide over the page. */
 export function prewarmPageUnderlay(): void {
-  if (lastCapture && performance.now() - lastCapture.at < 150) return;
+  if (currentCapture()) return;
   void capturePage();
 }
 
-/** A capture this recent is reused as is (it is seen only for one slide). */
-const FRESH_MS = 600;
+async function crop(cap: Capture, rect: HoleRect): Promise<ImageBitmap | null> {
+  const g = page;
+  if (g.width <= 0 || g.height <= 0) return null;
+  const kx = cap.bitmap.width / g.width;
+  const ky = cap.bitmap.height / g.height;
+  const x = Math.max(0, rect[0] - g.left);
+  const y = Math.max(0, rect[1] - g.top);
+  const w = Math.min(g.width - x, rect[2] - Math.max(0, g.left - rect[0]));
+  const h = Math.min(g.height - y, rect[3] - Math.max(0, g.top - rect[1]));
+  if (w <= 0 || h <= 0) return null;
+  try {
+    return await createImageBitmap(cap.bitmap, Math.round(x * kx), Math.round(y * ky), Math.max(1, Math.round(w * kx)), Math.max(1, Math.round(h * ky)));
+  } catch {
+    return null;
+  }
+}
+
+async function show(id: string, rect: HoleRect, cap: Capture): Promise<boolean> {
+  const bitmap = await crop(cap, rect);
+  if (!bitmap) return false;
+  const g = page;
+  // In window px: clamp to the page area.
+  const x = Math.max(rect[0], g.left);
+  const y = Math.max(rect[1], g.top);
+  const placed: HoleRect = [x, y, Math.min(rect[0] + rect[2], g.left + g.width) - x, Math.min(rect[1] + rect[3], g.top + g.height) - y];
+  underlays.find((u) => u.id === id)?.bitmap.close();
+  publish([...underlays.filter((u) => u.id !== id), { id, rect: placed, bitmap }]);
+  return true;
+}
 
 /**
- * Captures the live page and draws it beneath the page. Resolves true once
- * painted. A capture from moments ago (FRESH_MS) is reused; when a busy page does not
- * deliver one within `timeoutMs`, the latest from the last few seconds is
- * used instead; false when there is none at all.
+ * Draws a capture of the live page beneath the part of it `rect` (window CSS
+ * px) is about to cover, for the panel `id`. Resolves true once painted, false
+ * when there is no capture of this page to show (the panel then slides over
+ * the page area's plain background). Never waits long for a capture.
  */
-export async function preparePageUnderlay(timeoutMs = 160): Promise<boolean> {
-  const age = () => (lastCapture ? performance.now() - lastCapture.at : Infinity);
-  let img: string | null = age() < FRESH_MS ? lastCapture!.img : null;
-  if (!img) img = await Promise.race([capturePage(), wait(timeoutMs).then(() => null)]);
-  if (!img && age() < 4000) img = lastCapture!.img;
-  if (!img) return false;
-  const el = new Image();
-  el.src = img;
-  await el.decode().catch(() => undefined);
-  setPageUnderlay(img);
+export async function preparePageUnderlay(id: string, rect: HoleRect): Promise<boolean> {
+  const key = page.key;
+  let cap: Capture | null = currentCapture();
+  let stale = false;
+  if (!cap) {
+    // One in flight for a while (the pointer neared the edge) is nearly done.
+    const pending = inflight !== null && inflightAt >= pageChangedAt && performance.now() - inflightAt > 60;
+    const p = capturePage();
+    const limit = captureAge() < STALE_MS ? (pending ? 70 : 30) : 140;
+    cap = await Promise.race([p, wait(limit).then(() => null)]);
+    if (!cap && captureAge() < STALE_MS) {
+      cap = lastCapture;
+      stale = true;
+    }
+  }
+  if (!cap || key !== page.key) return false;
+  if (!(await show(id, rect, cap))) return false;
   await twoFrames();
+  if (stale) {
+    // A fresher one, if it comes while the panel is still sliding.
+    void capturePage().then((fresh) => {
+      if (fresh && fresh.key === page.key && underlays.some((u) => u.id === id)) void show(id, rect, fresh);
+    });
+  }
   return true;
 }
 

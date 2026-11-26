@@ -107,24 +107,24 @@ export function useTopBarAutoHide(enabled: boolean, pinned: boolean): TopBarAuto
     if (want && !holeShown.current) {
       holeShown.current = true;
       void (async () => {
-        await preparePageUnderlay();
+        await preparePageUnderlay('topbar', rect);
         if (!current()) return;
         await setViewportHole('topbar', rect);
         if (!current()) return;
         setShownState(true); // slides in over the capture
         await sleepMs(SLIDE_MS + 40);
-        if (current()) setPageUnderlay(null);
+        if (current()) setPageUnderlay('topbar');
       })();
     } else if (!want && holeShown.current) {
       holeShown.current = false;
       void (async () => {
-        await preparePageUnderlay();
+        await preparePageUnderlay('topbar', rect);
         if (!current()) return;
         setShownState(false); // slides out over the capture
         await sleepMs(SLIDE_MS + 20);
         if (!current()) return;
         await setViewportHole('topbar', [0, 0, 0, 0], { remove: true });
-        if (current()) setPageUnderlay(null);
+        if (current()) setPageUnderlay('topbar');
       })();
     }
   }, [enabled, want]);

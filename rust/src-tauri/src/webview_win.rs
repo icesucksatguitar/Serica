@@ -180,6 +180,7 @@ unsafe fn install(
         let (app, id, ctx, core2) = (app.clone(), tab_id.clone(), ctx.clone(), core.clone());
         core.add_NavigationStarting(
             &NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.NavigationStarting");
                 let Some(args) = args else { return Ok(()) };
                 let mut uri = PWSTR::null();
                 args.Uri(&mut uri)?;
@@ -199,6 +200,7 @@ unsafe fn install(
         let (app, id, ctx) = (app.clone(), tab_id.clone(), ctx.clone());
         core.add_SourceChanged(
             &SourceChangedEventHandler::create(Box::new(move |sender, args| {
+                let _perf = crate::perf::span("wv.SourceChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 let mut new_doc = Default::default();
                 if let Some(a) = args.as_ref() {
@@ -226,6 +228,7 @@ unsafe fn install(
         let (app, id) = (app.clone(), tab_id.clone());
         core.add_HistoryChanged(
             &HistoryChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.HistoryChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 let (mut back, mut fwd) = (Default::default(), Default::default());
                 sender.CanGoBack(&mut back)?;
@@ -240,6 +243,7 @@ unsafe fn install(
         let (ctx, app, id) = (ctx.clone(), app.clone(), tab_id.clone());
         core.add_ContentLoading(
             &ContentLoadingEventHandler::create(Box::new(move |sender, args| {
+                let _perf = crate::perf::span("wv.ContentLoading");
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
                 let mut error_page = Default::default();
                 args.IsErrorPage(&mut error_page)?;
@@ -259,6 +263,7 @@ unsafe fn install(
         let (app, id, boot_ctx) = (app.clone(), tab_id.clone(), ctx.clone());
         core.add_NavigationCompleted(
             &NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+                let _perf = crate::perf::span("wv.NavigationCompleted");
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
                 let mut ok = Default::default();
                 args.IsSuccess(&mut ok)?;
@@ -289,6 +294,7 @@ unsafe fn install(
         let (app, id) = (app.clone(), tab_id.clone());
         core.add_DocumentTitleChanged(
             &DocumentTitleChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.DocumentTitleChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 let mut t = PWSTR::null();
                 sender.DocumentTitle(&mut t)?;
@@ -305,6 +311,7 @@ unsafe fn install(
         let (app, id) = (app.clone(), tab_id.clone());
         core15.add_FaviconChanged(
             &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.FaviconChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 if let Ok(c) = sender.cast::<ICoreWebView2_15>() {
                     let mut f = PWSTR::null();
@@ -323,6 +330,7 @@ unsafe fn install(
         let (app, id) = (app.clone(), tab_id.clone());
         core8.add_IsDocumentPlayingAudioChanged(
             &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.IsDocumentPlayingAudioChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 if let Ok(c) = sender.cast::<ICoreWebView2_8>() {
                     let mut playing = Default::default();
@@ -342,6 +350,7 @@ unsafe fn install(
         let app = app.clone();
         core.add_ContainsFullScreenElementChanged(
             &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.ContainsFullScreenElementChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 let mut fs = Default::default();
                 sender.ContainsFullScreenElement(&mut fs)?;
@@ -362,6 +371,7 @@ unsafe fn install(
         let app = app.clone();
         controller.add_AcceleratorKeyPressed(
             &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.AcceleratorKeyPressed");
                 let Some(args) = args else { return Ok(()) };
                 let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
                 args.KeyEventKind(&mut kind)?;
@@ -392,6 +402,7 @@ unsafe fn install(
         let (app, id) = (app.clone(), tab_id.clone());
         controller.add_ZoomFactorChanged(
             &ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+                let _perf = crate::perf::span("wv.ZoomFactorChanged");
                 let Some(sender) = sender else { return Ok(()) };
                 let mut z = 1.0f64;
                 sender.ZoomFactor(&mut z)?;
@@ -416,6 +427,7 @@ unsafe fn install(
         let (app, id, ctx, env) = (app.clone(), tab_id.clone(), ctx.clone(), env.clone());
         core.add_WebResourceRequested(
             &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.WebResourceRequested");
                 let Some(args) = args else { return Ok(()) };
                 let req = args.Request()?;
                 let mut uri = PWSTR::null();
@@ -468,6 +480,7 @@ unsafe fn install(
         let (app, ctx, id) = (app.clone(), ctx.clone(), tab_id.clone());
         core.add_WebMessageReceived(
             &WebMessageReceivedEventHandler::create(Box::new(move |sender, args| {
+                let _perf = crate::perf::span("wv.WebMessageReceived");
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
                 let mut msg = PWSTR::null();
                 if args.TryGetWebMessageAsString(&mut msg).is_err() {
@@ -476,6 +489,13 @@ unsafe fn install(
                 let msg = take(msg);
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) else { return Ok(()) };
                 if v.get("__serica").is_none() {
+                    return Ok(());
+                }
+                if v["t"] == "settled" {
+                    // Only the page on screen matters (the UI captures it).
+                    if app.store.lock().active_tab_id.as_deref() == Some(id.as_str()) {
+                        crate::app::ui_emit(&app.handle, "serica:page-settled", id.as_str());
+                    }
                     return Ok(());
                 }
                 if v["t"] == "swipe-nav" {
@@ -552,6 +572,7 @@ unsafe fn install(
             let r1 = report.clone();
             find.add_MatchCountChanged(
                 &FindMatchCountChangedEventHandler::create(Box::new(move |f, _| {
+                    let _perf = crate::perf::span("wv.FindMatchCountChanged");
                     if let Some(f) = f {
                         r1(&f);
                     }
@@ -561,6 +582,7 @@ unsafe fn install(
             )?;
             find.add_ActiveMatchIndexChanged(
                 &FindActiveMatchIndexChangedEventHandler::create(Box::new(move |f, _| {
+                    let _perf = crate::perf::span("wv.FindActiveMatchIndexChanged");
                     if let Some(f) = f {
                         report(&f);
                     }
@@ -633,6 +655,7 @@ unsafe fn focus_recheck(core: &ICoreWebView2, url: &str, hit: &crate::focus::Hit
     let _ = core.ExecuteScript(
         &HSTRING::from("window.__sericaFocusBlock === true"),
         &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+            let _perf = crate::perf::span("wv.ExecuteScript");
             if hr.is_ok() && result.trim() == "true" {
                 return Ok(());
             }
@@ -719,6 +742,7 @@ unsafe fn install_cosmetics(
     let added = core.AddScriptToExecuteOnDocumentCreated(
         &HSTRING::from(script),
         &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |hr, id| {
+            let _perf = crate::perf::span("wv.AddScriptToExecuteOnDocumentCreated");
             {
                 let mut c = ctx2.borrow_mut();
                 if hr.is_ok() {
@@ -768,6 +792,7 @@ unsafe fn verify_scriptlets(core: &ICoreWebView2, ctx: &Rc<RefCell<Ctx>>) {
     let _ = core.ExecuteScript(
         &HSTRING::from(check),
         &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+            let _perf = crate::perf::span("wv.ExecuteScript");
             if hr.is_ok() && result.trim() == "false" && ctx2.borrow_mut().reloaded_for.insert(host.clone()) {
                 tracing::info!("scriptlets missed the first load of {host}; reloading once");
                 let _ = core2.Reload();
@@ -783,6 +808,7 @@ unsafe fn read_theme_color(app: &Shared, tab_id: &str, core: &ICoreWebView2) {
     let _ = core.ExecuteScript(
         &HSTRING::from(JS),
         &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+            let _perf = crate::perf::span("wv.ExecuteScript");
             if hr.is_ok() {
                 let color = serde_json::from_str::<serde_json::Value>(&result).ok().and_then(|v| v.as_str().map(str::to_string));
                 ui_emit(&app.handle, "serica:page-color", serde_json::json!({ "tabId": id, "themeColor": color }));
@@ -819,11 +845,12 @@ unsafe fn read_stream(stream: &IStream) -> Vec<u8> {
     out
 }
 
-/// Captures the webview's current frame as a JPEG data URL.
-pub fn capture(wv: &Webview, done: impl FnOnce(Option<String>) + Send + 'static) {
+/// Captures the webview's current frame as JPEG bytes.
+pub fn capture(wv: &Webview, done: impl FnOnce(Option<Vec<u8>>) + Send + 'static) {
     let done = std::sync::Mutex::new(Some(done));
     let r = wv.with_webview(move |pw| unsafe {
-        let finish = move |v: Option<String>| {
+        let _perf = crate::perf::span("main.capture_start");
+        let finish = move |v: Option<Vec<u8>>| {
             if let Some(f) = done.lock().ok().and_then(|mut d| d.take()) {
                 f(v);
             }
@@ -839,9 +866,10 @@ pub fn capture(wv: &Webview, done: impl FnOnce(Option<String>) + Send + 'static)
             COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG,
             &stream,
             &CapturePreviewCompletedHandler::create(Box::new(move |hr| {
+                let _perf = crate::perf::span("wv.CapturePreview");
                 let out = if hr.is_ok() {
                     let bytes = read_stream(&s2);
-                    (!bytes.is_empty()).then(|| format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+                    (!bytes.is_empty()).then_some(bytes)
                 } else {
                     None
                 };
@@ -902,6 +930,7 @@ pub fn eval(wv: &Webview, js: String, done: impl FnOnce(Option<serde_json::Value
         let r = core.ExecuteScript(
             &HSTRING::from(js),
             &ExecuteScriptCompletedHandler::create(Box::new(move |hr, result| {
+                let _perf = crate::perf::span("wv.ExecuteScript");
                 let v = if hr.is_ok() { serde_json::from_str(&result).ok() } else { None };
                 if let Some(f) = f2.borrow_mut().take() {
                     f(v);
@@ -1063,6 +1092,7 @@ unsafe fn install_context_menu(
     let mut token = Default::default();
     c11.add_ContextMenuRequested(
         &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+            let _perf = crate::perf::span("wv.ContextMenuRequested");
             let Some(args) = args else { return Ok(()) };
             let items = args.MenuItems()?;
             let target = args.ContextMenuTarget()?;
@@ -1390,6 +1420,7 @@ unsafe fn install_dialogs(app: &Shared, tab_id: &str, core: &ICoreWebView2) -> w
         let (app, id) = (app.clone(), tab_id.to_string());
         core.add_ScriptDialogOpening(
             &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.ScriptDialogOpening");
                 let Some(args) = args else { return Ok(()) };
                 let mut kind = COREWEBVIEW2_SCRIPT_DIALOG_KIND::default();
                 args.Kind(&mut kind)?;
@@ -1426,6 +1457,7 @@ unsafe fn install_dialogs(app: &Shared, tab_id: &str, core: &ICoreWebView2) -> w
         let (app, id) = (app.clone(), tab_id.to_string());
         core18.add_LaunchingExternalUriScheme(
             &LaunchingExternalUriSchemeEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.LaunchingExternalUriScheme");
                 let Some(args) = args else { return Ok(()) };
                 // Serica asks (and launches) itself; WebView2's own prompt never shows.
                 args.SetCancel(true)?;
@@ -1509,6 +1541,7 @@ unsafe fn install_permissions(app: &Shared, tab_id: &str, core: &ICoreWebView2) 
     let (app, id) = (app.clone(), tab_id.to_string());
     core.add_PermissionRequested(
         &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+            let _perf = crate::perf::span("wv.PermissionRequested");
             let Some(args) = args else { return Ok(()) };
             let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
             args.PermissionKind(&mut kind)?;
@@ -1588,6 +1621,7 @@ pub fn attach_permissions(app: &Shared, owner: &str, wv: &Webview) {
         let app2 = app.clone();
         let _ = core.add_WebResourceRequested(
             &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                let _perf = crate::perf::span("wv.WebResourceRequested");
                 let Some(args) = args else { return Ok(()) };
                 let mut uri = PWSTR::null();
                 args.Request()?.Uri(&mut uri)?;
@@ -1759,22 +1793,12 @@ mod tests {
     }
 }
 
-/// UI rectangles to cut out of a page view: logical px relative to the page,
-/// as (left, top, right, bottom), and the page's logical width.
-#[derive(Clone, Default)]
-pub struct Clip {
-    /// (left, top, right, bottom, corner radius)
-    pub holes: Vec<(f64, f64, f64, f64, f64)>,
-    pub page_width: f64,
-}
-
-/// Cuts the clip's holes out of a page webview's window region. The page keeps
-/// its size and position (no reflow); the UI underneath shows through the
-/// holes and gets their clicks. No holes removes the region.
-pub fn set_clip(wv: &Webview, clip: Clip) {
-    use windows::Win32::Foundation::{HWND, RECT};
-    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, HGDIOBJ, RGN_DIFF};
-    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetClientRect};
+/// Finds the container window of a page webview (on the main thread, once)
+/// and hands it to the clip worker, which cuts holes in it from then on.
+pub fn register_clip_window(wv: &Webview, clipper: std::sync::Arc<crate::clip_win::Clipper>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let label = wv.label().to_string();
     let _ = wv.with_webview(move |pw| unsafe {
         let mut host = HWND::default();
         if pw.controller().ParentWindow(&mut host).is_err() || host.0.is_null() {
@@ -1786,29 +1810,6 @@ pub fn set_clip(wv: &Webview, clip: Clip) {
         if String::from_utf16_lossy(&class[..n]) != "WRY_WEBVIEW" {
             return;
         }
-        if clip.holes.is_empty() {
-            let _ = SetWindowRgn(host, None, true);
-            return;
-        }
-        let mut rc = RECT::default();
-        if GetClientRect(host, &mut rc).is_err() || rc.right <= 0 || clip.page_width <= 0.0 {
-            return;
-        }
-        // Physical px per logical px, from the page window's own size.
-        let sf = rc.right as f64 / clip.page_width;
-        let full = CreateRectRgn(0, 0, rc.right, rc.bottom);
-        for (l, t, r, b, radius) in clip.holes {
-            let (l, t, r, b) = ((l * sf).floor() as i32, (t * sf).floor() as i32, (r * sf).ceil() as i32, (b * sf).ceil() as i32);
-            if r <= l || b <= t {
-                continue;
-            }
-            let d = (radius * sf * 2.0).round() as i32;
-            // Round-rect regions exclude their right and bottom edges.
-            let hole = if d > 1 { CreateRoundRectRgn(l, t, r + 1, b + 1, d, d) } else { CreateRectRgn(l, t, r, b) };
-            CombineRgn(Some(full), Some(full), Some(hole), RGN_DIFF);
-            let _ = DeleteObject(HGDIOBJ(hole.0));
-        }
-        // The system owns the region from here on.
-        let _ = SetWindowRgn(host, Some(full), true);
+        clipper.register(label, host.0 as isize);
     });
 }

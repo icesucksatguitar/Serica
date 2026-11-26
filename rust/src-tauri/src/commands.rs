@@ -404,7 +404,7 @@ pub async fn set_viewport_hole(
     if !rect.iter().all(|v| v.is_finite()) || id.len() > 64 {
         return Err("bad hole".into());
     }
-    TabHost::set_hole(
+    let seq = TabHost::set_hole(
         app.inner(),
         id,
         h(rect),
@@ -414,16 +414,10 @@ pub async fn set_viewport_hole(
         remove.unwrap_or(false),
         lead.filter(|l| l.is_finite()).unwrap_or(0.0).clamp(-100.0, 100.0),
     );
-    // Window regions are set on the main thread, in order: resolve only once
-    // everything queued so far has run, so "ready" means the page really is
-    // cut (it can be busy for tens of ms, e.g. while a page loads).
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    if app.handle.run_on_main_thread(move || {
-        let _ = tx.send(());
-    }).is_ok()
-    {
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx).await;
-    }
+    // Resolve once the page really is cut (the clip worker applied it), so
+    // "ready" means UI under the hole is visible.
+    let app = app.inner().clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || TabHost::wait_clip(&app, seq, std::time::Duration::from_millis(500))).await;
     Ok(())
 }
 
@@ -483,6 +477,8 @@ pub fn ui_cursor(app: State<'_, Shared>) -> Option<[f64; 3]> {
 #[tauri::command]
 pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
     let app = app.inner().clone();
+    // The tab being captured (read before: a switch may happen meanwhile).
+    let active_id = app.store.lock().active_tab_id.clone();
     let mut image = None;
     #[cfg(windows)]
     if let Some(wv) = TabHost::active_webview(&app) {
@@ -490,12 +486,10 @@ pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
             image = await_cb(|done| crate::webview_win::capture(&wv, done)).await.flatten();
         }
     }
-    // Read the id first: never hold the store lock while taking the host lock.
-    let active_id = app.store.lock().active_tab_id.clone();
-    if let (Some(img), Some(id)) = (&image, active_id) {
-        app.host.lock().previews.insert(id, img.clone());
-    }
-    Ok(image)
+    Ok(match (image, active_id) {
+        (Some(img), Some(id)) => Some(app.previews.put(&id, img)),
+        _ => None,
+    })
 }
 
 /// Hides the native webview so UI overlays can cover the page. With `capture`
@@ -504,6 +498,7 @@ pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
 #[tauri::command]
 pub async fn viewport_freeze(capture: Option<bool>, app: State<'_, Shared>) -> R<Option<String>> {
     let app = app.inner().clone();
+    let active_id = app.store.lock().active_tab_id.clone();
     let mut image = None;
     #[cfg(windows)]
     if capture.unwrap_or(true) {
@@ -515,12 +510,10 @@ pub async fn viewport_freeze(capture: Option<bool>, app: State<'_, Shared>) -> R
     }
     let a2 = app.clone();
     tauri::async_runtime::spawn_blocking(move || TabHost::set_visible(&a2, false)).await.map_err(|e| e.to_string())?;
-    // Read the id first: never hold the store lock while taking the host lock.
-    let active_id = app.store.lock().active_tab_id.clone();
-    if let (Some(img), Some(id)) = (&image, active_id) {
-        app.host.lock().previews.insert(id, img.clone());
-    }
-    Ok(image)
+    Ok(match (image, active_id) {
+        (Some(img), Some(id)) => Some(app.previews.put(&id, img)),
+        _ => None,
+    })
 }
 
 #[tauri::command]
@@ -577,19 +570,17 @@ pub async fn capture_tab_preview(tab_id: String, app: State<'_, Shared>) -> R<Op
         if visible {
             if let Some(wv) = TabHost::webview(&app, &tab_id) {
                 if let Some(Some(img)) = await_cb(|done| crate::webview_win::capture(&wv, done)).await {
-                    app.host.lock().previews.insert(tab_id.clone(), img.clone());
-                    return Ok(Some(img));
+                    return Ok(Some(app.previews.put(&tab_id, img)));
                 }
             }
         }
     }
-    let preview = app.host.lock().previews.get(&tab_id).cloned();
-    Ok(preview)
+    Ok(app.previews.url(&tab_id))
 }
 
 #[tauri::command]
 pub async fn get_tab_preview(tab_id: String, app: State<'_, Shared>) -> R<Option<String>> {
-    Ok(app.host.lock().previews.get(&tab_id).cloned())
+    Ok(app.previews.url(&tab_id))
 }
 
 #[tauri::command]

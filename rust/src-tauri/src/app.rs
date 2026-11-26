@@ -83,6 +83,8 @@ pub struct App {
     pub focus: crate::focus::Focus,
     pub focus_stats: crate::focus_stats::Stats,
     pub host: Mutex<TabHost>,
+    /// Page captures served to the UI over `sericacap` (see previews.rs).
+    pub previews: crate::previews::Previews,
     pub mcp_logs: Mutex<VecDeque<Value>>,
     blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
     tx: Mutex<mpsc::Sender<Notice>>,
@@ -103,6 +105,9 @@ pub struct App {
 
 /// Emits to the app UI only, never to web pages in tab webviews.
 pub fn ui_emit<S: serde::Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
+    if let Some(n) = crate::perf::span("emit").map(|_| serde_json::to_string(&payload).map(|j| j.len()).unwrap_or(0)) {
+        crate::perf::count(if event == "serica:state-update" { "emit.state.bytes" } else { "emit.other.bytes" }, n as u64);
+    }
     let _ = handle.emit_to("main", event, payload);
 }
 
@@ -123,13 +128,21 @@ pub fn memory_load_percent() -> Option<u32> {
 /// at least `.0` ms right now, or `None` while memory is plentiful. Every
 /// awake background tab holds its renderer plus GPU memory, and the GPU
 /// process only gives memory back once the pages using it are closed.
+/// Checked every `PRESSURE_CHECK`. Near the limit Windows starts paging, and
+/// everything stalls for seconds (measured: building a tab's webview took up
+/// to a minute at 98-99%), so the closer to it, the sooner tabs sleep.
 pub fn pressure_sleep_plan(load: u32) -> Option<(i64, usize)> {
     match load {
-        90.. => Some((60_000, 3)),
-        80..=89 => Some((5 * 60_000, 1)),
+        95.. => Some((10_000, 3)),
+        90..=94 => Some((30_000, 2)),
+        85..=89 => Some((2 * 60_000, 1)),
+        80..=84 => Some((5 * 60_000, 1)),
         _ => None,
     }
 }
+
+/// How often memory pressure is checked.
+const PRESSURE_CHECK: Duration = Duration::from_secs(5);
 
 /// Turns omnibox input into a URL: keeps real URLs, adds https:// to
 /// host-like input, searches everything else. `javascript:` is refused.
@@ -238,6 +251,7 @@ impl App {
             mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
             focus: crate::focus::Focus::load(data_dir.join("focus.json")),
             focus_stats: crate::focus_stats::Stats::load(data_dir.join("focus-stats.json")),
+            previews: Default::default(),
             host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net, block_3pc)),
             mcp_logs: Mutex::new(VecDeque::new()),
             blocked_queue: Mutex::new(Vec::new()),
@@ -430,24 +444,43 @@ impl App {
                 }
             }
         });
+        // Low on RAM: sleep the least recently used background tabs that
+        // still hold a page, a few at a time, before the idle timer would.
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(PRESSURE_CHECK);
+            loop {
+                tick.tick().await;
+                let Some((min_idle_ms, limit)) = memory_load_percent().and_then(pressure_sleep_plan) else { continue };
+                // Only tabs with a page loaded free anything (host first: never
+                // take the host lock while holding the store lock).
+                let live: std::collections::HashSet<String> = app.host.lock().views.keys().cloned().collect();
+                let slept = {
+                    let mut s = app.store.lock();
+                    if s.settings.zen_sleep_enabled {
+                        s.sleep_least_recent(min_idle_ms, limit, &live)
+                    } else {
+                        0
+                    }
+                };
+                if slept > 0 {
+                    tracing::info!("memory pressure: slept {slept} background tab(s)");
+                    app.notify(Notice::State);
+                }
+            }
+        });
         // Zen auto-sleep and Today-tab archiving, twice a minute.
         let app = self.clone();
         tauri::async_runtime::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(30));
             loop {
                 tick.tick().await;
-                let pressure = memory_load_percent().and_then(pressure_sleep_plan);
                 let (slept, archived) = {
                     let mut s = app.store.lock();
                     let mut slept = 0;
                     if s.settings.zen_sleep_enabled {
                         let idle_ms = i64::from(s.settings.tab_sleep_minutes) * 60_000;
                         slept += s.sleep_inactive(idle_ms);
-                        // Low on RAM: also sleep the least recently used
-                        // background tabs, a few per tick, before the timer.
-                        if let Some((min_idle_ms, limit)) = pressure {
-                            slept += s.sleep_least_recent(min_idle_ms, limit);
-                        }
                     }
                     (slept, s.archive_sweep())
                 };
@@ -656,7 +689,9 @@ mod tests {
         assert_eq!(pressure_sleep_plan(50), None);
         assert_eq!(pressure_sleep_plan(79), None);
         assert_eq!(pressure_sleep_plan(80), Some((5 * 60_000, 1)));
-        assert_eq!(pressure_sleep_plan(95), Some((60_000, 3)));
+        assert_eq!(pressure_sleep_plan(87), Some((2 * 60_000, 1)));
+        assert_eq!(pressure_sleep_plan(92), Some((30_000, 2)));
+        assert_eq!(pressure_sleep_plan(99), Some((10_000, 3)));
     }
 
     #[cfg(windows)]

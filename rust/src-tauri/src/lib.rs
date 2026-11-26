@@ -17,6 +17,8 @@ mod local_ai;
 mod mcp;
 mod mcp_http;
 mod model;
+mod perf;
+mod previews;
 mod settings;
 mod shields;
 mod store;
@@ -25,6 +27,10 @@ mod updater;
 mod vpn;
 mod widgets;
 mod window_state;
+#[cfg(windows)]
+mod clip_win;
+#[cfg(windows)]
+mod edge_watch;
 #[cfg(windows)]
 mod webview_win;
 #[cfg(windows)]
@@ -80,7 +86,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Pictures chosen for the new-tab background.
         .register_uri_scheme_protocol("sericabg", |ctx, request| backgrounds::serve(ctx.app_handle(), &request))
+        // Page captures: only the app's own UI may read them, never a web page.
+        .register_uri_scheme_protocol("sericacap", |ctx, request| match ctx.app_handle().try_state::<app::Shared>() {
+            Some(app) if ctx.webview_label() == "main" => app.previews.serve(&request),
+            _ => tauri::http::Response::builder().status(404).body(Vec::new()).unwrap_or_default(),
+        })
         .setup(|app| {
+            perf::start(app.handle().clone());
             let data_dir = app
                 .path()
                 .app_data_dir()
@@ -89,6 +101,8 @@ pub fn run() {
                 window_state::attach(&window, data_dir.join("window.json"));
             }
             let shared = app::App::new(app.handle().clone(), data_dir);
+            #[cfg(windows)]
+            edge_watch::start(shared.clone());
             let scale = shared.settings().text_scale;
             if (scale - 1.0).abs() > 0.001 {
                 commands::apply_ui_zoom(&shared, scale);

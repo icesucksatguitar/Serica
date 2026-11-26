@@ -157,7 +157,7 @@ export const TabPreviewCard: React.FC<TabPreviewCardProps> = ({ preview, onMouse
 
       {/* Window Preview Frame */}
       <div className="mini-win-preview-frame nsb-preview-image">
-        {image && image.startsWith('data:image/') ? (
+        {image && (image.startsWith('data:image/') || image.startsWith('http://sericacap.localhost/')) ? (
           <img src={image} alt="" draggable={false} className="mini-win-captured-img" />
         ) : (
           <PreviewMockup url={target.url} domain={domainInfo.domain} isNewTab={domainInfo.isNewTab} />

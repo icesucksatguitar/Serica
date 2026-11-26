@@ -523,23 +523,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const closing = !visible && holeShown.current;
     if (instant && opening) {
       void (async () => {
-        await preparePageUnderlay();
+        await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight]);
         if (!current()) return;
         await setViewportHole('sidebar', [0, 0, holeWidth, H]);
         if (!current()) return;
         setHoleReady(true); // slides in over the snapshot
         await sleepMs(SLIDE_IN_MS + 40);
-        if (current()) setPageUnderlay(null); // fully covered by the sidebar now
+        if (current()) setPageUnderlay('sidebar'); // fully covered by the sidebar now
       })();
     } else if (instant && closing) {
       void (async () => {
-        await preparePageUnderlay();
+        await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight]);
         if (!current()) return;
         setHoleReady(false); // slides out over the snapshot
         await sleepMs(SLIDE_OUT_MS + 20);
         if (!current()) return;
         await setViewportHole('sidebar', [0, 0, 0, 0], { remove: true });
-        if (current()) setPageUnderlay(null);
+        if (current()) setPageUnderlay('sidebar');
       })();
     } else if (instant) {
       // A resize while open, or nothing to undo.
@@ -566,7 +566,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   useEffect(
     () => () => {
       removeViewportHole('sidebar');
-      setPageUnderlay(null);
+      setPageUnderlay('sidebar');
     },
     [],
   );

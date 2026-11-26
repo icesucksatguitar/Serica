@@ -1382,6 +1382,7 @@ return (
           homeBackground={settings.homeBackground}
           dockVisible={settings.rightPinsDockVisible}
           uiScale={settings.uiScale}
+          captureAhead={showSidebar || topBarAutoHideOn}
           onUpdateHomeWidgets={(homeWidgets) => void updateSettings({ homeWidgets })}
         />
       </div>
