@@ -255,6 +255,12 @@ export const tauriBridge = {
   focusChallenge: (id: string) => invoke<string>('focus_challenge', { id }),
   focusCheck: (url: string) => invoke<boolean>('focus_check', { url }),
   focusStats: (range: FocusRange) => invoke<FocusStats>('focus_stats', { range }),
+  /** Local models, reached from the backend (no origin for Ollama to refuse). */
+  localAiScan: () => invoke<LocalAiScan>('local_ai_scan'),
+  localAiChat: (id: string, runtime: 'ollama' | 'lmstudio', model: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    invoke<void>('local_ai_chat', { id, runtime, model, messages }),
+  localAiStop: (id: string) => invoke<void>('local_ai_stop', { id }),
+  onLocalAi: (cb: (c: LocalAiChunk) => void) => on('serica:local-ai', cb),
   focusStatsTracking: (on: boolean) => invoke<void>('focus_stats_tracking', { on }),
   focusStatsClear: () => invoke<void>('focus_stats_clear'),
   /** Saves every day as CSV where the user picks; the path, or null if cancelled. */
@@ -303,6 +309,20 @@ export interface FocusView {
   active: FocusActive[];
   categories: { id: string; label: string; sites: string[] }[];
   clockVerified: boolean;
+}
+
+export interface LocalAiScan {
+  ollama: boolean;
+  lmstudio: boolean;
+  models: { name: string; runtime: 'ollama' | 'lmstudio' }[];
+}
+
+/** A piece of a local model's reply; `done` ends it (with `error` if it failed). */
+export interface LocalAiChunk {
+  id: string;
+  delta?: string;
+  done: boolean;
+  error?: string;
 }
 
 export type FocusRange = 'day' | 'week' | 'month' | 'year';

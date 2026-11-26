@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Bot, Cpu, ExternalLink, FileText, Play, RefreshCw, Sparkles, X } from 'lucide-react';
+import { ArrowUp, Bot, Cpu, ExternalLink, FileText, Play, RefreshCw, Sparkles, Square, X } from 'lucide-react';
+import type { LocalAiChunk, LocalAiScan } from '../adapter/tauriBridge';
 import { appIcon } from './home/apps';
 import { McpConnectCard } from './McpConnectCard';
 import { TabState } from '../types';
@@ -187,106 +188,67 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose, activeTab, 
   const [generating, setGenerating] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
 
+  // The backend reaches Ollama and LM Studio: a page's own requests carry
+  // Serica's origin, which Ollama refuses (403) and LM Studio blocks.
   const scan = useCallback(async () => {
     setScanning(true);
-    const found: { name: string; runtime: 'ollama' | 'lmstudio' }[] = [];
     try {
-      const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1800) });
-      setOllama(res.ok);
-      if (res.ok) for (const m of (await res.json()).models ?? []) found.push({ name: m.name || m.model, runtime: 'ollama' });
-    } catch {
-      setOllama(false);
+      const s: LocalAiScan | undefined = await window.serica?.localAiScan?.();
+      setOllama(!!s?.ollama);
+      setLmStudio(!!s?.lmstudio);
+      const found = s?.models ?? [];
+      setModels(found);
+      setModel((cur) => (cur && found.some((m) => m.name === cur) ? cur : found[0]?.name || ''));
+    } finally {
+      setScanning(false);
     }
-    try {
-      const res = await fetch('http://localhost:1234/v1/models', { signal: AbortSignal.timeout(1800) });
-      setLmStudio(res.ok);
-      if (res.ok) for (const m of (await res.json()).data ?? []) found.push({ name: m.id, runtime: 'lmstudio' });
-    } catch {
-      setLmStudio(false);
-    }
-    setModels(found);
-    setModel((cur) => cur || found[0]?.name || '');
-    setScanning(false);
+  }, []);
+
+  // The reply being written arrives in pieces, tagged with its request id.
+  const replyId = useRef<string | null>(null);
+  const base = useRef<ChatMessage[]>([]);
+  const reply = useRef('');
+  useEffect(() => {
+    const off = window.serica?.onLocalAi?.((c: LocalAiChunk) => {
+      if (c.id !== replyId.current) return;
+      if (c.delta) reply.current += c.delta;
+      if (c.done) {
+        if (c.error) reply.current = reply.current ? `${reply.current}\n\n(${c.error})` : c.error;
+        replyId.current = null;
+        setGenerating(false);
+      }
+      setMessages([...base.current, { role: 'assistant', content: reply.current }]);
+      if (c.done) requestAnimationFrame(() => chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }));
+    });
+    return () => off?.();
   }, []);
   useEffect(() => {
     if (isOpen && tab === 'local') void scan();
   }, [isOpen, tab, scan]);
 
-  const send = async () => {
+  const send = () => {
     const text = input.trim();
     if (!text || generating || !model) return;
+    const runtime = models.find((m) => m.name === model)?.runtime ?? 'ollama';
     const next: ChatMessage[] = [...messages, { role: 'user', content: text }];
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    base.current = next;
+    reply.current = '';
+    replyId.current = id;
     setMessages([...next, { role: 'assistant', content: '' }]);
     setInput('');
     setGenerating(true);
-    const runtime = models.find((m) => m.name === model)?.runtime ?? 'ollama';
-    let full = '';
-    const show = () => setMessages([...next, { role: 'assistant', content: full }]);
-    try {
-      if (runtime === 'ollama') {
-        const res = await fetch('http://localhost:11434/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: next, stream: true }),
-        });
-        const reader = res.body!.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
-          for (const line of lines) {
-            try {
-              const p = JSON.parse(line);
-              if (p.message?.content) {
-                full += p.message.content;
-                show();
-              }
-            } catch {
-              // A partial line: the rest comes with the next chunk.
-            }
-          }
-        }
-      } else {
-        const res = await fetch('http://localhost:1234/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: next, stream: true }),
-        });
-        const reader = res.body!.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
-          for (const line of lines) {
-            const data = line.replace(/^data:\s*/, '').trim();
-            if (!data || data === '[DONE]') continue;
-            try {
-              const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-              if (delta) {
-                full += delta;
-                show();
-              }
-            } catch {
-              // A partial line.
-            }
-          }
-        }
-      }
-    } catch (err: any) {
-      full = full || `${runtime === 'ollama' ? 'Ollama' : 'LM Studio'} didn’t answer: ${err?.message ?? 'no connection'}`;
-      show();
-    } finally {
+    requestAnimationFrame(() => chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }));
+    void window.serica?.localAiChat?.(id, runtime, model, next).catch((err: unknown) => {
+      if (replyId.current !== id) return;
+      replyId.current = null;
       setGenerating(false);
-      requestAnimationFrame(() => chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }));
-    }
+      setMessages([...next, { role: 'assistant', content: `Couldn’t start: ${String(err)}` }]);
+    });
+  };
+  const stop = () => {
+    const id = replyId.current;
+    if (id) void window.serica?.localAiStop?.(id);
   };
 
   // ---- Agents (MCP): calls made through the endpoint
@@ -401,8 +363,28 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose, activeTab, 
             {models.length === 0 ? (
               <div className="ai-empty">
                 <Cpu size={22} aria-hidden="true" />
-                <h3>No local models running</h3>
-                <p>Start Ollama, or LM Studio with its local server on, and Serica finds the models. Everything stays on this PC.</p>
+                {ollama || lmStudio ? (
+                  <>
+                    <h3>{ollama ? 'Ollama' : 'LM Studio'} is running, with no models yet</h3>
+                    <p>
+                      {ollama ? (
+                        <>
+                          Get one in a terminal, for example <code className="ai-code">ollama pull llama3.2</code>, then look again.
+                        </>
+                      ) : (
+                        'Download a model in LM Studio and load it, then look again.'
+                      )}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3>No local models running</h3>
+                    <p>Start Ollama, or LM Studio with its local server on, and Serica finds the models. Everything stays on this PC.</p>
+                  </>
+                )}
+                <button type="button" className="btn" disabled={scanning} onClick={() => void scan()}>
+                  <RefreshCw size={13} className={scanning ? 'spin' : ''} aria-hidden="true" /> Look again
+                </button>
               </div>
             ) : (
               <>
@@ -419,7 +401,8 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose, activeTab, 
                   className="ai-composer"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void send();
+                    if (generating) stop();
+                    else send();
                   }}
                 >
                   <textarea
@@ -433,13 +416,19 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose, activeTab, 
                       e.stopPropagation();
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        void send();
+                        send();
                       }
                     }}
                   />
-                  <button type="submit" className="ai-send" disabled={generating || !input.trim()} aria-label="Send">
-                    <ArrowUp size={15} strokeWidth={2.4} />
-                  </button>
+                  {generating ? (
+                    <button type="submit" className="ai-send" aria-label="Stop" title="Stop">
+                      <Square size={11} fill="currentColor" strokeWidth={0} />
+                    </button>
+                  ) : (
+                    <button type="submit" className="ai-send" disabled={!input.trim()} aria-label="Send">
+                      <ArrowUp size={15} strokeWidth={2.4} />
+                    </button>
+                  )}
                 </form>
               </>
             )}

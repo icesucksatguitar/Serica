@@ -13,6 +13,7 @@ mod focus;
 mod focus_stats;
 mod history;
 mod importer;
+mod local_ai;
 mod mcp;
 mod mcp_http;
 mod model;
@@ -215,6 +216,9 @@ pub fn run() {
             focus::focus_challenge,
             focus::focus_check,
             focus_stats::focus_stats,
+            local_ai::local_ai_scan,
+            local_ai::local_ai_chat,
+            local_ai::local_ai_stop,
             focus_stats::focus_stats_tracking,
             focus_stats::focus_stats_clear,
             focus_stats::focus_stats_export,
