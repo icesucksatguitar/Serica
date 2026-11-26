@@ -13,6 +13,8 @@ Usage:
   python build.py --bump [major|minor|patch|none] [--clean] [--run]
   python build.py -b patch
   python build.py -b patch --bundle   <- release: signed MSI + latest.json in release/github
+  python build.py --ui-patch --notes "Fixed X" --publish
+                                      <- UI-only fix: signed in ~30 s, live for users in minutes
 """
 
 import os
@@ -352,9 +354,133 @@ def build_bundle() -> bool:
         lines.append(f"{digest} *{name}")
     (GITHUB_RELEASE_DIR / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    # Lets --ui-patch check the UI still matches the Rust code in this build.
+    manifest = load_manifest()
+    manifest["shipped"] = {"version": version, "commit": _git("rev-parse", "HEAD").stdout.strip()}
+    if _git("status", "--porcelain", "--", "rust/src-tauri/src").stdout.strip():
+        log_warn("Uncommitted Rust changes are in this build: commit them, or --ui-patch will think they're new.")
+    MANIFEST_FILE.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
     log_success(f"Release assets for v{version} staged in {BOLD}{GITHUB_RELEASE_DIR}{RESET}")
     for p in sorted(GITHUB_RELEASE_DIR.iterdir()):
         print(f"   {p.name}")
+    return True
+
+
+# ==============================================================================
+# UI patch: ship a UI-only fix without an installer (see src-tauri/src/ui_patch.rs)
+# ==============================================================================
+
+UI_PATCH_DIR = RELEASE_DIR / "ui-patch"
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(ROOT_DIR), capture_output=True, text=True)
+
+
+def rust_changed_since_release(version: str) -> list[str]:
+    """Rust files changed since the commit that set the current version, i.e.
+    since the binary users run was built. A UI built on top of those changes
+    could call commands the installed binary doesn't have."""
+    shipped = load_manifest().get("shipped", {})
+    if shipped.get("version") == version and shipped.get("commit"):
+        commit = shipped["commit"]  # recorded by --bundle: exactly what users run
+    else:
+        found = _git("log", "-1", "--format=%H", f"-Sversion = \"{version}\"", "--", "rust/src-tauri/Cargo.toml")
+        commit = found.stdout.strip()
+    if not commit:
+        return ["(can't find the commit that set version " + version + " in Cargo.toml)"]
+    paths = ["rust/src-tauri/src", "rust/src-tauri/capabilities", "rust/src-tauri/Cargo.toml", "rust/src-tauri/tauri.conf.json"]
+    changed = _git("diff", "--name-only", commit, "--", *paths).stdout.split()
+    untracked = _git("ls-files", "--others", "--exclude-standard", "--", *paths).stdout.split()
+    # The version bump itself touches Cargo.toml/tauri.conf.json; only real edits count.
+    return [c for c in changed + untracked if not c.endswith(("Cargo.toml", "tauri.conf.json")) or
+            any(l.startswith(("+", "-")) and "version" not in l and not l.startswith(("+++", "---"))
+                for l in _git("diff", commit, "--", c).stdout.splitlines())]
+
+
+def build_ui_patch(notes: str, publish: bool, force: bool) -> bool:
+    log_header("BUILDING UI PATCH")
+    import hashlib, zipfile
+    version = get_rust_version()
+    if not UPDATER_KEY.exists():
+        log_error(f"Signing key not found at {UPDATER_KEY}.")
+        return False
+
+    changed = rust_changed_since_release(version)
+    if changed and not force:
+        log_error("Rust code changed since v" + version + " was released. A UI patch can only carry")
+        log_error("React/CSS changes; these need a normal release (python build.py -b patch --bundle):")
+        for c in changed:
+            print(f"   {c}")
+        log_info("If you're sure the UI doesn't depend on them, pass --force.")
+        return False
+
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+    npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+    if not run_cmd([npx_cmd, "tsc", "--noEmit", "-p", "."], cwd=RUST_DIR):
+        log_error("TypeScript errors: not shipping a broken UI.")
+        return False
+    if not run_cmd([npm_cmd, "run", "build"], cwd=RUST_DIR):
+        return False
+
+    build = int(datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
+    UI_PATCH_DIR.mkdir(parents=True, exist_ok=True)
+    for old in UI_PATCH_DIR.iterdir():
+        old.unlink()
+    zip_name = f"ui-{version}-{build}.zip"
+    zip_path = UI_PATCH_DIR / zip_name
+    dist = RUST_DIR / "dist"
+    meta = {"app_version": version, "build": build, "notes": notes}
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(dist.rglob("*")):
+            if f.is_file():
+                z.write(f, f.relative_to(dist).as_posix())
+        z.writestr("serica-ui.json", json.dumps(meta))
+
+    env = os.environ.copy()
+    env["TAURI_SIGNING_PRIVATE_KEY"] = UPDATER_KEY.read_text(encoding="utf-8").strip()
+    env.setdefault("TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
+    if not run_cmd([npx_cmd, "tauri", "signer", "sign", str(zip_path)], cwd=RUST_DIR, env=env):
+        log_error("Signing failed.")
+        return False
+    sig_path = zip_path.with_name(zip_name + ".sig")
+    signature = sig_path.read_text(encoding="utf-8").strip()
+    sig_path.unlink()
+
+    tag = _git("describe", "--tags", "--abbrev=0").stdout.strip()
+    gh = subprocess.run(["gh", "release", "view", "--repo", GITHUB_REPO, "--json", "tagName", "-q", ".tagName"],
+                        capture_output=True, text=True)
+    if gh.returncode == 0 and gh.stdout.strip():
+        tag = gh.stdout.strip()  # the release marked Latest, which installs poll
+    manifest = {
+        "app_version": version,
+        "build": build,
+        "notes": notes,
+        "url": f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{zip_name}",
+        "signature": signature,
+        "sha256": hashlib.sha256(zip_path.read_bytes()).hexdigest(),
+    }
+    manifest_path = UI_PATCH_DIR / "ui-latest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    size_kb = round(zip_path.stat().st_size / 1024)
+    log_success(f"UI patch {build} for v{version} ({size_kb} KB) staged in {UI_PATCH_DIR}")
+
+    if not publish:
+        log_info(f"Publish with: gh release upload {tag} \"{zip_path}\" \"{manifest_path}\" --clobber --repo {GITHUB_REPO}")
+        log_info("(zip first, ui-latest.json last) or rerun with --publish.")
+        return True
+
+    # Zip before manifest, so no install ever sees a manifest pointing at nothing.
+    for f in (zip_path, manifest_path):
+        if not run_cmd(["gh", "release", "upload", tag, str(f), "--clobber", "--repo", GITHUB_REPO], cwd=ROOT_DIR):
+            return False
+    assets = subprocess.run(["gh", "release", "view", tag, "--repo", GITHUB_REPO, "--json", "assets", "-q", ".assets[].name"],
+                            capture_output=True, text=True).stdout.split()
+    for name in assets:
+        if name.startswith("ui-") and name.endswith(".zip") and name != zip_name:
+            subprocess.run(["gh", "release", "delete-asset", tag, name, "-y", "--repo", GITHUB_REPO])
+    log_success(f"Published on {tag}. Running copies of v{version} pick it up within 30 minutes (or on next launch).")
     return True
 
 
@@ -432,12 +558,23 @@ Examples:
         help="Also build the signed MSI and stage GitHub release assets (with latest.json for auto-update) in release/github"
     )
     parser.add_argument(
+        "--ui-patch",
+        action="store_true",
+        help="Ship only the UI (React/CSS) as a signed patch for the current version. No cargo, no installer."
+    )
+    parser.add_argument("--notes", default="", help="With --ui-patch: one line shown to users, e.g. \"AI tabs keep your chat\"")
+    parser.add_argument("--publish", action="store_true", help="With --ui-patch: upload it to the GitHub release")
+    parser.add_argument("--force", action="store_true", help="With --ui-patch: ship even though Rust code changed")
+    parser.add_argument(
         "--run",
         action="store_true",
         help="Launch the application after a successful build"
     )
 
     args = parser.parse_args()
+
+    if args.ui_patch:
+        return 0 if build_ui_patch(args.notes, args.publish, args.force) else 1
 
     print(f"{BOLD}{MAGENTA}================================================================{RESET}")
     print(f"{BOLD}{MAGENTA}              SERICA BROWSER - BUILD SYSTEM                   {RESET}")

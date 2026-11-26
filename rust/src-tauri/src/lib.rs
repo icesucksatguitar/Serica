@@ -23,6 +23,7 @@ mod settings;
 mod shields;
 mod store;
 mod tabhost;
+mod ui_patch;
 mod updater;
 mod vpn;
 mod widgets;
@@ -65,6 +66,10 @@ pub fn run() {
         .try_init();
     #[cfg(windows)]
     migrate_legacy_data();
+
+    // Serve a downloaded UI fix (see ui_patch.rs) instead of the built-in UI.
+    let mut context = tauri::generate_context!();
+    ui_patch::install(&mut context);
 
     let app = tauri::Builder::default()
         // Must be first: a second launch (e.g. double-clicking a PDF while
@@ -115,10 +120,14 @@ pub fn run() {
             }
             app.manage(shared);
             updater::start(app.handle().clone());
+            ui_patch::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_browser_state,
+            commands::get_ui_patch_status,
+            commands::confirm_ui_patch,
+            commands::apply_ui_patch,
             commands::page_menu_select,
             commands::widget_github,
             commands::widget_geocode,
@@ -245,7 +254,7 @@ pub fn run() {
             browser_import::import_from_browser,
             browser_import::import_passwords_file,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building serica browser");
 
     app.run(|handle, event| {

@@ -1452,6 +1452,23 @@ pub async fn check_for_update(app: State<'_, Shared>) -> R<crate::updater::Updat
 }
 
 #[tauri::command]
+pub fn get_ui_patch_status() -> crate::ui_patch::UiPatchStatus {
+    crate::ui_patch::status()
+}
+
+/// Called once the UI has rendered: the UI patch in use works.
+#[tauri::command]
+pub fn confirm_ui_patch() {
+    crate::ui_patch::confirm()
+}
+
+/// Switches to the downloaded UI fix; the UI reloads right after.
+#[tauri::command]
+pub fn apply_ui_patch() -> R<()> {
+    crate::ui_patch::apply()
+}
+
+#[tauri::command]
 pub fn install_update(app: State<'_, Shared>) -> R<()> {
     crate::updater::install(&app.handle)
 }

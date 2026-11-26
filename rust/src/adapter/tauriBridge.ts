@@ -17,6 +17,14 @@ export interface UpdateStatus {
   lastChecked?: number | null;
 }
 
+export interface UiPatchStatus {
+  /** Build of the UI fix in use (0: the UI built into the app). */
+  activeBuild: number;
+  /** A newer fix, downloaded and waiting for a reload. */
+  readyBuild?: number | null;
+  notes?: string | null;
+}
+
 /** Subscribes to a backend event; safe to unsubscribe before `listen` resolves. */
 function on<T>(event: string, callback: (payload: T) => void): Unsubscribe {
   let unlisten: UnlistenFn | undefined;
@@ -195,6 +203,10 @@ export const tauriBridge = {
   getUpdateStatus: () => invoke<UpdateStatus>('get_update_status'),
   checkForUpdate: () => invoke<UpdateStatus>('check_for_update'),
   installUpdate: () => invoke<void>('install_update'),
+  getUiPatchStatus: () => invoke<UiPatchStatus>('get_ui_patch_status'),
+  confirmUiPatch: () => invoke<void>('confirm_ui_patch'),
+  applyUiPatch: () => invoke<void>('apply_ui_patch'),
+  onUiPatch: (cb: (status: UiPatchStatus) => void) => on('serica:ui-patch', cb),
 
   // Events from the backend
   onStateUpdate: (cb: (state: any) => void) => on('serica:state-update', cb),

@@ -11,6 +11,7 @@ import { TopTabStrip } from './components/TopTabStrip';
 import { ToolsMenu } from './components/ToolsMenu';
 import { AuthHandoffNotice } from './components/AuthHandoffNotice';
 import { UpdateNotice } from './components/UpdateNotice';
+import { UiPatchNotice } from './components/UiPatchNotice';
 import { WhatsNew } from './components/WhatsNew';
 import { PasswordPrompt } from './components/PasswordPrompt';
 import { PageDialog } from './components/PageDialog';
@@ -1393,6 +1394,7 @@ return (
 
     {/* A downloaded update is ready: offer to restart into it */}
     <UpdateNotice />
+    <UiPatchNotice />
     <AppContextMenu />
     <PageContextMenu />
     <WhatsNew onboarded={!settingsLoaded ? null : !isWelcomeOpen && (settings.setupVersion ?? 0) >= SETUP_VERSION} />

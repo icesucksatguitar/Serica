@@ -32,6 +32,8 @@ parking_lot = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 tauri-plugin-updater = "2"
+# Verifies UI patches with the updater key (see ui_patch.rs).
+minisign-verify = "0.3"
 tauri-plugin-single-instance = "2"
 # Importing from other browsers: their SQLite databases and password stores.
 rusqlite = { version = "0.37", features = ["bundled"] }

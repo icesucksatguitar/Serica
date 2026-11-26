@@ -196,6 +196,9 @@ pub struct TabHost {
     pub visible: bool,
     pub active: Option<String>,
     pub assistant: Option<(Webview, Bounds)>,
+    /// Last page of each assistant (by host), so switching assistants or
+    /// closing the panel returns to the same chat instead of its home page.
+    assistant_last: HashMap<String, url::Url>,
     data_root: PathBuf,
     proxy_port: Option<u16>,
     /// Network setup the current page webviews were created with:
@@ -419,6 +422,7 @@ impl TabHost {
             visible: true,
             active: None,
             assistant: None,
+            assistant_last: HashMap::new(),
             data_root,
             proxy_port,
             net,
@@ -1073,18 +1077,30 @@ impl TabHost {
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err("unsupported url".into());
         }
-        let mut host = app.host.lock();
-        if let Some((wv, _)) = &host.assistant {
-            let _ = wv.navigate(parsed);
-            Self::apply_bounds(wv, b);
+        let profile = app.store.lock().active_profile_id();
+        // Read the open view's page outside the host lock: `url()` waits on
+        // the main thread, which may itself be waiting for that lock.
+        let open = app.host.lock().assistant.as_ref().map(|(w, _)| w.clone());
+        if let Some(wv) = open {
+            let current = wv.url().ok();
+            let mut host = app.host.lock();
+            if let Some(u) = &current {
+                host.assistant_remember(&profile, u);
+            }
+            // Reopening the same assistant: leave its page as it is.
+            if current.as_ref().and_then(|u| u.host_str()) != parsed.host_str() {
+                let _ = wv.navigate(host.assistant_resume(&profile, parsed));
+            }
+            Self::apply_bounds(&wv, b);
             let _ = wv.show();
-            host.assistant = Some((wv.clone(), b));
+            host.assistant = Some((wv, b));
             return Ok(());
         }
         let window = app.handle.get_window("main").ok_or("no window")?;
-        let profile = app.store.lock().active_profile_id();
+        let host = app.host.lock();
+        let target = host.assistant_resume(&profile, parsed);
         let label = format!("assistant-{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed));
-        let builder = host.builder(app, label, parsed, &profile, None);
+        let builder = host.builder(app, label, target, &profile, None);
         // Never hold the host lock across `add_child` (see `TabHost::build`).
         drop(host);
         let wv = window
@@ -1107,9 +1123,29 @@ impl TabHost {
     }
 
     pub fn assistant_close(app: &Shared) {
-        if let Some((wv, _)) = app.host.lock().assistant.take() {
-            let _ = wv.close();
+        let Some((wv, _)) = app.host.lock().assistant.take() else { return };
+        if let Ok(u) = wv.url() {
+            let profile = app.store.lock().active_profile_id();
+            app.host.lock().assistant_remember(&profile, &u);
         }
+        let _ = wv.close();
+    }
+
+    /// Notes the page an assistant is on, for `assistant_resume`.
+    fn assistant_remember(&mut self, profile: &str, u: &url::Url) {
+        if matches!(u.scheme(), "http" | "https") {
+            if let Some(h) = u.host_str() {
+                self.assistant_last.insert(format!("{profile} {h}"), u.clone());
+            }
+        }
+    }
+
+    /// The assistant's last page in this profile, else `url` (its home).
+    fn assistant_resume(&self, profile: &str, url: url::Url) -> url::Url {
+        url.host_str()
+            .and_then(|h| self.assistant_last.get(&format!("{profile} {h}")))
+            .cloned()
+            .unwrap_or(url)
     }
 
     pub fn assistant_webview(app: &Shared) -> Option<Webview> {
