@@ -131,6 +131,8 @@ export interface BrowserSettings {
   setupVersion: number;
   /** The first-run tour was played or dismissed. */
   tourDone: boolean;
+  /** Settings and other panels show what is behind them, blurred. */
+  glassPanels: boolean;
   /** Separate sizes for the sidebar, dock and new-tab parts. */
   uiScale: UiScale;
   [unknownKey: string]: unknown; // kept as saved, e.g. the legacy `theme` key
@@ -417,6 +419,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   homeBackground: DEFAULT_HOME_BACKGROUND,
   setupVersion: 0,
   tourDone: false,
+  glassPanels: true,
   uiScale: DEFAULT_UI_SCALE,
 });
 
@@ -560,6 +563,7 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     homeBackground: normalizeHomeBackground(source.homeBackground),
     setupVersion: typeof source.setupVersion === 'number' && Number.isFinite(source.setupVersion) ? Math.max(0, Math.floor(source.setupVersion)) : 0,
     tourDone: source.tourDone === true,
+    glassPanels: source.glassPanels !== false,
     uiScale: normalizeUiScale(source.uiScale),
   };
 }

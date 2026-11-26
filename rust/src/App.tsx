@@ -58,6 +58,7 @@ import './styles/ai.css';
 import './styles/setup.css';
 import './styles/focus-stats.css';
 import './styles/window-controls.css';
+import './styles/glass.css';
 import './styles/motion.css';
 
 const ArchiveList = lazy(() =>
@@ -244,6 +245,11 @@ export function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-reduced-effects', isReducedEffects ? 'on' : 'off');
   }, [isReducedEffects]);
+
+  // Glass panels: on unless switched off or effects are reduced.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-glass', settings.glassPanels !== false && !isReducedEffects ? 'on' : 'off');
+  }, [settings.glassPanels, isReducedEffects]);
 
   // Active webpage detection: on web pages, the viewport is pulled down below the top bar
   // so window controls, tabs, and site navigation controls never collide.

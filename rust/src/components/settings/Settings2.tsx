@@ -350,6 +350,9 @@ export const Settings2: React.FC<Settings2Props> = ({ onClose, settings, onUpdat
               <Row id="appearance.topbar" icon={PanelTop} title="Top bar buttons" detail="Flat, or outlined">
                 <Segmented label="Top bar buttons" value={settings.topBarStyle === 'pill' ? 'pill' : 'flat'} options={[{ value: 'flat', label: 'Flat' }, { value: 'pill', label: 'Outlined' }]} onChange={(topBarStyle) => onUpdateSettings({ topBarStyle })} />
               </Row>
+              <Row id="appearance.glass" icon={Layers} title="Glass panels" detail="Settings, menus and panels show what is behind them, blurred">
+                <Switch checked={settings.glassPanels !== false} label="Glass panels" onChange={(glassPanels) => onUpdateSettings({ glassPanels })} />
+              </Row>
               <Row id="appearance.autohide" icon={PanelTop} title="Hide the top bar on websites" detail="It slides in when the pointer reaches the top edge">
                 <Switch checked={settings.topBarAutoHide === true} label="Hide the top bar on websites" onChange={(topBarAutoHide) => onUpdateSettings({ topBarAutoHide })} />
               </Row>

@@ -76,6 +76,7 @@ export const SETTINGS_INDEX: IndexEntry[] = [
   { id: 'appearance.studio', page: 'appearance', group: 'Light and dark', title: 'Theme Studio', detail: 'Colours for each space', words: ['colour', 'color', 'palette', 'theme'] },
   { id: 'appearance.layout', page: 'appearance', group: 'Window', title: 'Tabs', detail: 'Down the side, or across the top', words: ['sidebar', 'top tabs', 'layout'] },
   { id: 'appearance.topbar', page: 'appearance', group: 'Window', title: 'Top bar buttons', detail: 'Flat, or outlined', words: ['toolbar', 'buttons'] },
+  { id: 'appearance.glass', page: 'appearance', group: 'Appearance', title: 'Glass panels', detail: 'Panels show what is behind them, blurred', words: ['glass', 'blur', 'translucent', 'transparent', 'liquid glass', 'vibrancy', 'acrylic', 'mica'] },
   { id: 'appearance.autohide', page: 'appearance', group: 'Window', title: 'Hide the top bar on websites', detail: 'It slides in when the pointer reaches the top edge', words: ['autohide', 'fullscreen'] },
   { id: 'appearance.dock', page: 'appearance', group: 'Window', title: 'Website dock', detail: 'One-click sites on the right edge', words: ['dock', 'pins'] },
   { id: 'appearance.textsize', page: 'appearance', group: 'Text and sizes', title: 'Text size', detail: 'The interface and newly opened pages', words: ['zoom', 'font', 'scale'] },

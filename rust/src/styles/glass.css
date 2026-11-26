@@ -1,0 +1,61 @@
+/* ==========================================================================
+   Glass panels (Settings › Appearance › Glass panels): Settings, Theme
+   Studio, the AI panel, History, Downloads, the command bar, setup, sheets
+   and menus show what is behind them (the page, the painting, the theme),
+   blurred and saturated. The backdrop is dimmed (dark themes) or lifted
+   (light themes) and the surface stays mostly opaque, so text keeps its
+   contrast over any page. Off with the switch or with reduced effects.
+   ========================================================================== */
+
+:root[data-glass='on'] {
+  --glass-panel: color-mix(in srgb, var(--ui-bg) 58%, transparent);
+  --glass-panel-filter: blur(40px) saturate(2.2) brightness(1.25);
+  --glass-panel-rim: rgba(255, 255, 255, 0.55);
+  /* Cards and washes inside a glass panel are tints, not opaque fills. */
+  --glass-card: color-mix(in srgb, var(--theme-fg, #1c1c1c) 4%, transparent);
+}
+
+:root[data-glass='on'][data-theme='dark'] {
+  /* Contrast depends on lightness, not colour: the backdrop is darkened
+     enough that even a white page behind (half of it at 0.34) keeps white
+     text above 4.5:1, and saturated so its colours still come through. */
+  --glass-panel: color-mix(in srgb, var(--ui-bg) 50%, transparent);
+  --glass-panel-filter: blur(40px) saturate(2.4) brightness(0.34);
+  --glass-panel-rim: rgba(255, 255, 255, 0.14);
+  --glass-card: color-mix(in srgb, var(--theme-fg, #f2f2f2) 5%, transparent);
+}
+
+:root[data-glass='on'] :is(
+  .settings2,
+  .sheet,
+  .setup-card,
+  .mcp-drawer.ai-panel,
+  .modal-content-card,
+  .command-bar-card-wrapper,
+  .theme-popover-card,
+  .whats-new,
+  .nsb-menu,
+  .app-context-menu
+) {
+  background: var(--glass-panel);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
+  backdrop-filter: var(--glass-panel-filter);
+  box-shadow:
+    inset 0 1px 0 var(--glass-panel-rim),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-panel-rim) 45%, transparent),
+    var(--shadow-sheet, 0 24px 60px rgba(0, 0, 0, 0.35));
+}
+
+/* Inside: cards and the Settings sidebar become tints of the glass. */
+:root[data-glass='on'] :is(.settings2, .sheet, .setup-card, .mcp-drawer.ai-panel) {
+  --card: var(--glass-card);
+}
+
+:root[data-glass='on'] .settings2 .s2-nav {
+  background: color-mix(in srgb, var(--theme-fg, #f2f2f2) 3%, transparent);
+}
+
+/* The dimming behind a panel steps back, so the backdrop reads through. */
+:root[data-glass='on'] :is(.modal-overlay, .command-bar-modal-backdrop, .shield-modal-backdrop) {
+  background-color: color-mix(in srgb, var(--ui-scrim, rgba(0, 0, 0, 0.4)) 55%, transparent);
+}
