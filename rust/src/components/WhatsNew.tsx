@@ -16,7 +16,7 @@ export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = 
     },
     {
       title: 'Theme Studio and Settings, rebuilt',
-      text: 'Curated palettes with a live preview, and settings regrouped with search (Ctrl+F). Bring bookmarks, history and passwords over from other browsers, and make Serica your default browser.',
+      text: 'Curated palettes with a live preview, settings regrouped with search (Ctrl+F), and glass panels that let what is behind them show through. Bring bookmarks, history and passwords over from other browsers, and make Serica your default browser.',
     },
     {
       title: 'Smoother everywhere',
