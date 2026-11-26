@@ -20,6 +20,13 @@ src-tauri/src/            Rust backend
   extensions.rs           Chrome Web Store extensions (CRX install, per-profile sync)
   downloads.rs            Download manager (WebView2 downloads, pause/resume, history)
   importer.rs             One-time read-only import of a profile from the old Electron build
+  browser_import.rs       Bookmarks, history and passwords from Chromium browsers and Firefox
+  bookmarks.rs            Bookmarks store
+  default_browser.rs      Registers Serica with Windows Default Apps
+  backgrounds.rs          New-tab pictures (copied in, served over sericabg://)
+  focus.rs                Focus Mode: rules, sessions, schedules, locks, tamper-resistant clock
+  focus_stats.rs          Focus statistics by local day (focus-stats.json)
+  dragdrop_win.rs         OLE drop target for links, text and files
   commands.rs             IPC commands (the `window.serica` API)
 src/                      UI only
   adapter/tauriBridge.ts  Typed invoke/listen wrappers, no logic
@@ -98,6 +105,7 @@ npm install
 npm run tauri dev                 # dev with Vite HMR
 npm run tauri build -- --no-bundle  # release exe in src-tauri/target/release
 cd src-tauri; cargo test          # backend unit tests
+npm test                          # UI logic tests (tools/tests)
 ```
 
 ## Status
@@ -116,6 +124,8 @@ Working:
 - History, Shields, the VPN modes above, the MCP tools, and the assistant drawer.
 - Media mini player, docked above the page while a page is shown.
 - HTML fullscreen and theme-color top-bar tint.
+- Focus Mode with statistics, browser import, default-browser registration,
+  new-tab widgets and backgrounds, setup after updates and a first-run tour.
 
 Not available yet:
 - Password manager. The UI shows it as unavailable.

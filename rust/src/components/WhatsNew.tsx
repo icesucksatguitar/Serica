@@ -5,6 +5,28 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.5.0': [
+    {
+      title: 'Focus Mode, with statistics',
+      text: 'Block distracting sites for a while or on a schedule, in every tab and profile. Lock it and nothing ends it early, not even a restart. Statistics show your focus time, streak, what you reached for and where your time went.',
+    },
+    {
+      title: 'A quieter new tab',
+      text: 'Only your widgets, now liquid glass, and the clock. Press and hold to move a widget anywhere. Pick a background: a colour, a gradient, your own picture, or Serica Special, three oil-pastel paintings.',
+    },
+    {
+      title: 'Theme Studio and Settings, rebuilt',
+      text: 'Curated palettes with a live preview, and settings regrouped with search (Ctrl+F). Bring bookmarks, history and passwords over from other browsers, and make Serica your default browser.',
+    },
+    {
+      title: 'Smoother everywhere',
+      text: 'Panels open and close with motion, the cursor stays smooth, the sidebar takes in the site controls when it opens, and the window controls are one line that turns into the control you point at.',
+    },
+    {
+      title: 'Drag and drop, and permission prompts',
+      text: 'Drop links, text and files onto Serica to open them. Sites asking for your camera, microphone or location now ask in Serica, and it remembers your answer per site.',
+    },
+  ],
   '0.4.7': [
     {
       title: 'A new look for Serica',

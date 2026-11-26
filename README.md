@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
-<img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with the sidebar, greeting, clock and ambient glow" width="900">
+<img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with widgets, the clock and a background" width="900">
 
 ### [⬇ Download Serica for Windows (.msi)](https://github.com/icesucksatguitar/Serica/releases/latest/download/Serica-Setup-x64.msi)
 
@@ -24,22 +24,28 @@ The installer adds Start menu and desktop shortcuts. Prefer not to install anyth
 
 ## Why Serica
 
-Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
+Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes, and adds a Cold Turkey-style Focus Mode. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
 
 ## Features
 
 ### Set up in a minute
-<img src="docs/screenshots/onboarding.png" alt="First-run setup asking for a theme, with a live preview behind the dialog" width="820">
+<img src="docs/screenshots/onboarding.png" alt="Serica's setup screen" width="820">
 
-The first launch asks what to call you, whether you want a sidebar or top tabs, your theme (dark, light or match the system), your text size, which sites go in the dock and which apps to pin. Everything can be changed later in Settings.
+Setup brings over bookmarks, history and passwords from Chrome, Edge, Brave, Vivaldi, Opera or Firefox, asks for a sidebar or top tabs, a look (light, dark or match Windows, a palette and a new-tab background), and can make Serica your default browser. A short tour then shows the address bar, the sidebar, widgets, Theme Studio and Focus Mode. Updating from an earlier Serica opens setup once and keeps everything you have: tabs, spaces, sign-ins, cookies, passwords and settings.
 
 ### Spaces and the sidebar
 <img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
 - **Spaces** for separate contexts (Study, Work, Leisure, or your own). Switch with <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Each space can use its own profile, so cookies and logins stay separate.
-- **Vertical sidebar** that slides in over the page (<kbd>Ctrl</kbd>+<kbd>S</kbd>, the space button, or the left edge of the window), with **Pinned** tabs, folders and a **Today** section. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
+- **Vertical sidebar** that slides in over the page (<kbd>Ctrl</kbd>+<kbd>S</kbd>, the space button, or the left edge of the window), with **Pinned** tabs, folders and a **Today** section. Back, forward and reload move into its top row while it's open. Today tabs you haven't touched in 12 hours move to an archive you can restore from (the interval is configurable).
 - **Tab previews** on hover, and a media mini player for audio playing in another tab.
 - Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
+
+### The new tab
+Only your widgets and the clock: press and hold a widget to move it anywhere on the grid (the others make room), resize it, or set it up; widgets are liquid glass that takes on the colours behind it. The background can be your space's colours, a solid colour, a gradient, your own picture, or **Serica Special**: three oil-pastel paintings after French Revolution-era art, crossfading slowly.
+
+### Focus Mode
+Block the sites that pull you away, Cold Turkey style: exact domains, `*.wildcards`, paths, categories and exceptions, for a set time or on a weekly schedule. Blocking happens in the request pipeline of every tab, profile and window, before the site is contacted, and shows a calm block page. A locked list can't be stopped, loosened or deleted until its time is up, not even by restarting Serica or moving the clock. **Statistics** show time focused, sessions kept, a streak, what you reached for while it was blocked and at what hour, and where your browsing time went, by day, week, month or year, with CSV export. Everything stays on your PC.
 
 ### Website dock
 One-click sites on the right edge of the window. On web pages it stays tucked away until you move the cursor to the right edge. Right-click the dock to add a site or hide it; turn it back on in Settings → Appearance.
@@ -50,9 +56,9 @@ One-click sites on the right edge of the window. On web pages it stays tucked aw
 <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>Ctrl</kbd>+<kbd>L</kbd> opens a URL, searches the web, or jumps to an open tab in any space. Type `>` for commands such as settings, themes, shields, downloads, extensions and tab hibernation.
 
 ### Theme Studio
-<img src="docs/screenshots/theme-studio.png" alt="Theme Studio with a color wheel, presets and ambient glow controls" width="820">
+<img src="docs/screenshots/theme-studio.png" alt="Theme Studio" width="820">
 
-Each space gets its own gradient theme. Pick colors on a wheel, adjust intensity and grain, switch light/dark/auto, or start from one of 10 presets. The new-tab page has an animated ambient glow with adjustable strength, speed and spread.
+Each space gets its own theme from curated palettes (or a hue of your own), light, dark or matching Windows, with a live preview; text contrast is kept readable whatever you pick.
 
 ### Shields: built-in ad and tracker blocking
 <img src="docs/screenshots/shields.png" alt="Shields panel showing blocked ads and trackers on a news site" width="820">
@@ -71,6 +77,9 @@ Serica can expose a local [Model Context Protocol](https://modelcontextprotocol.
 - **Text size** for the whole browser (Small, Default, Large, Larger) in Settings → Appearance; new web pages open at the same size.
 - **Chrome Web Store extensions.** Open an extension's store page and press **Add to Serica**, then manage extensions at `serica://extensions`.
 - **Download manager** (<kbd>Ctrl</kbd>+<kbd>J</kbd>) with pause, resume, cancel and retry.
+- **Import** bookmarks, history and saved passwords from other browsers on this PC, or a passwords CSV, in Settings → General.
+- **Default browser**: one button in Settings → General.
+- **Drag and drop** links, text and files onto the window to open them, and Serica's own prompts for camera, microphone, location and notifications.
 - **Privacy tunnel:** DNS-over-HTTPS, Tor (SOCKS5) or your own SOCKS5/HTTP proxy, with an optional kill switch.
 - **History** with search, find in page, zoom, and HTML fullscreen.
 
@@ -109,7 +118,7 @@ The endpoint is off by default and listens only on `127.0.0.1`. Every request ne
 - [x] Chrome Web Store extensions, download manager, MCP endpoint
 - [ ] Arc importer (Spaces, pinned tabs and folders)
 - [x] MSI installer with Start menu and desktop shortcuts
-- [ ] Auto-update
+- [x] Auto-update
 - [ ] Code signing, to remove the SmartScreen warning
 - [ ] Password manager
 
