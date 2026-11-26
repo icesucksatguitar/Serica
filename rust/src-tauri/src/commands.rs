@@ -1286,6 +1286,26 @@ pub async fn list_downloads(app: State<'_, Shared>) -> R<Vec<crate::downloads::D
     Ok(app.downloads.list())
 }
 
+/// Starts dragging finished downloads out of the Downloads panel as files
+/// (to a folder, the desktop, or a web page). Only files Serica downloaded
+/// and that still exist can be dragged.
+#[tauri::command]
+pub async fn start_download_drag(ids: Vec<String>, app: State<'_, Shared>) -> R<bool> {
+    let paths: Vec<std::path::PathBuf> = ids
+        .iter()
+        .filter_map(|id| app.downloads.get(id))
+        .filter(|d| d.state == crate::downloads::DownloadState::Completed)
+        .map(|d| std::path::PathBuf::from(d.path))
+        .filter(|p| p.is_file())
+        .collect();
+    if paths.is_empty() {
+        return Ok(false);
+    }
+    #[cfg(windows)]
+    crate::dragdrop_win::start_file_drag(app.inner(), paths);
+    Ok(true)
+}
+
 /// `pause` | `resume` | `cancel` | `open` | `show` | `remove` | `retry`.
 #[tauri::command]
 pub async fn download_action(id: String, action: String, app: State<'_, Shared>) -> R<bool> {

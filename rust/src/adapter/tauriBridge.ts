@@ -171,6 +171,8 @@ export const tauriBridge = {
   // Downloads
   listDownloads: () => invoke<any[]>('list_downloads'),
   downloadAction: (id: string, action: string) => invoke<boolean>('download_action', { id, action }),
+  /** Drags finished downloads out as files (to a folder, the desktop or a page). */
+  startDownloadDrag: (ids: string[]) => invoke<boolean>('start_download_drag', { ids }),
   clearDownloads: () => invoke<any[]>('clear_downloads'),
   openDownloadsFolder: () => invoke<void>('open_downloads_folder'),
   openFile: () => invoke<void>('open_file'),

@@ -283,6 +283,7 @@ export interface SericaAPI {
   mcpRegenerateToken?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
   listDownloads?: () => Promise<DownloadItem[]>;
   downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
+  startDownloadDrag?: (ids: string[]) => Promise<boolean>;
   clearDownloads?: () => Promise<DownloadItem[]>;
   openDownloadsFolder?: () => Promise<void>;
   /** Native "Open file" picker; chosen files (PDFs…) open in new tabs. */

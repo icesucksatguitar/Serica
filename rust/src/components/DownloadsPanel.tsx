@@ -155,8 +155,19 @@ export const DownloadsPanel: React.FC<DownloadsPanelProps> = ({ isOpen, onClose,
                       className={`download-row state-${d.state}${openable ? ' openable' : ''}${d.state === 'completed' && !d.fileExists ? ' missing' : ''}`}
                       role={openable ? 'button' : undefined}
                       tabIndex={openable ? 0 : undefined}
-                      title={openable ? `Open ${d.filename}` : d.url}
+                      title={openable ? `Open ${d.filename}, or drag it to a folder or a page` : d.url}
                       onClick={() => openable && act(d, 'open')}
+                      // A finished file drags out as a real file: to a folder,
+                      // the desktop, or into a page (the panel closes so the
+                      // page under it can take the drop).
+                      draggable={openable}
+                      onDragStart={(e) => {
+                        if (!openable) return;
+                        e.preventDefault();
+                        void window.serica?.startDownloadDrag?.([d.id]).then((ok) => {
+                          if (ok) onClose();
+                        });
+                      }}
                       onKeyDown={(e) => {
                         if (openable && (e.key === 'Enter' || e.key === ' ')) {
                           e.preventDefault();

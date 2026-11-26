@@ -213,6 +213,7 @@ pub fn run() {
             commands::passwords_list,
             commands::list_downloads,
             commands::download_action,
+            commands::start_download_drag,
             commands::clear_downloads,
             commands::open_downloads_folder,
             commands::list_extensions,

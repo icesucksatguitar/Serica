@@ -227,3 +227,59 @@ pub fn install(app: &Shared, main: &tauri::Webview) {
         }
     });
 }
+
+/// Drags files out of Serica (finished downloads) as a normal Windows file
+/// drag: drop them on the desktop or a folder to copy them, into a web page
+/// to upload them, or anywhere else that takes files.
+///
+/// The drag runs on its own OLE thread, not the main thread: a drag is a
+/// modal loop, and while it ran on the main thread nothing else in the app
+/// moved (the Downloads panel could not close, so the page under it stayed
+/// hidden and could not take the drop).
+pub fn start_file_drag(app: &Shared, paths: Vec<std::path::PathBuf>) {
+    use tauri::Manager;
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoTaskMemFree, IBindCtx};
+    use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+    use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+    use windows::Win32::UI::Shell::{SHCreateDataObject, SHDoDragDrop, SHParseDisplayName};
+    if paths.is_empty() {
+        return;
+    }
+    let hwnd = app.handle.get_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
+    let _ = std::thread::Builder::new().name("serica-drag".into()).spawn(move || unsafe {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
+        // Only while the button is still held: a drag started after it was
+        // released would drop the file at once, wherever the pointer is.
+        // (GetAsyncKeyState reads physical buttons: mind swapped ones.)
+        let primary = if GetSystemMetrics(SM_SWAPBUTTON) != 0 { VK_RBUTTON } else { VK_LBUTTON };
+        if GetAsyncKeyState(primary.0 as i32) >= 0 {
+            return;
+        }
+        if OleInitialize(None).is_err() {
+            return;
+        }
+        // Absolute item ids of each file; the data object holds all of them.
+        let mut pidls: Vec<*mut ITEMIDLIST> = Vec::new();
+        for p in &paths {
+            let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+            if SHParseDisplayName(&HSTRING::from(p.as_os_str()), None::<&IBindCtx>, &mut pidl, 0, None).is_ok() && !pidl.is_null() {
+                pidls.push(pidl);
+            }
+        }
+        if !pidls.is_empty() {
+            let children: Vec<*const ITEMIDLIST> = pidls.iter().map(|p| *p as *const ITEMIDLIST).collect();
+            if let Ok(data) = SHCreateDataObject(None, Some(&children), None::<&IDataObject>) {
+                let data: IDataObject = data;
+                let owner = HWND(hwnd as _);
+                // Copy (or link); never move a download out from under the list.
+                let _ = SHDoDragDrop(Some(owner), &data, None, DROPEFFECT_COPY | DROPEFFECT_LINK);
+            }
+        }
+        for p in pidls {
+            CoTaskMemFree(Some(p as _));
+        }
+        OleUninitialize();
+    });
+}
