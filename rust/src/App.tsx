@@ -550,6 +550,11 @@ export function App() {
     timestamp: number;
   } | null>(null);
   const dismissedMediaTabsRef = useRef<Set<string>>(new Set());
+  // Closing the mini player hides it for that tab until the user goes back to
+  // the tab; after that it shows again the next time they leave it playing.
+  useEffect(() => {
+    if (state.activeTabId) dismissedMediaTabsRef.current.delete(state.activeTabId);
+  }, [state.activeTabId]);
 
   // MCP Initial Tab state
   const [mcpInitialTab, setMcpInitialTab] = useState<'assistants' | 'local' | 'tools'>('assistants');

@@ -525,8 +525,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     };
   }, [mediaTabId]);
 
+  // Send each command once. The effect also re-runs when the playing tab
+  // changes (it does each time playback starts or stops), and re-sending the
+  // last command then paused music the user had just started again.
+  const sentMediaCommandRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!mediaCommand) return;
+    if (!mediaCommand || sentMediaCommandRef.current === mediaCommand.timestamp) return;
+    sentMediaCommandRef.current = mediaCommand.timestamp;
     const target = mediaCommand.tabId || mediaTabId || activeTabRef.current?.id;
     if (!target) return;
     void window.serica?.mediaControl?.(mediaCommand.action, { tabId: target, value: mediaCommand.value });
