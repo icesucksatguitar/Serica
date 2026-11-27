@@ -66,6 +66,15 @@ pub fn run() {
         .try_init();
     #[cfg(windows)]
     migrate_legacy_data();
+    // A second launch (a link opened from another app while Serica is the
+    // default browser) holds the foreground right the launching app gave it.
+    // Windows only lets the running instance raise its window if this process
+    // passes that right on before it hands over its arguments and exits.
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+    }
 
     // Serve a downloaded UI fix (see ui_patch.rs) instead of the built-in UI.
     let mut context = tauri::generate_context!();
@@ -79,6 +88,7 @@ pub fn run() {
                 files::open_args(&shared, argv.into_iter().skip(1));
             }
             if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
