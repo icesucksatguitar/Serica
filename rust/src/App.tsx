@@ -264,6 +264,17 @@ export function App() {
   // sampled top color; reports for a tab that is no longer active are ignored. Internal pages,
   // HTML fullscreen and undeterminable colors keep the default theme (R20.5, R20.6, R21.12).
   const [pageColor, setPageColor] = useState<TabPageColor | null>(null);
+  // The active tab's split view, when both of its tabs show a web page
+  // (otherwise the backend shows the active tab alone).
+  const activeSplit = useMemo(() => {
+    const id = activeTab?.id;
+    const sp = id ? state.splits?.find((x) => x.left === id || x.right === id) : undefined;
+    if (!sp || !activeTab) return null;
+    const partner = state.tabs.find((t) => t.id === (sp.left === id ? sp.right : sp.left));
+    const live = (t?: TabState) =>
+      !!t && !!t.url && t.url !== 'about:blank' && !t.url.startsWith('serica://') && !t.url.startsWith('neutrino://') && !t.isSleeping && !t.unloaded;
+    return live(activeTab) && live(partner) ? { split: sp, partner: partner! } : null;
+  }, [state.splits, state.tabs, activeTab]);
   const activeTabIdRef = useRef<string | undefined>(activeTab?.id);
   activeTabIdRef.current = activeTab?.id;
   const handlePageColor = useCallback((tabId: string, report: PageColorReport) => {
@@ -1418,6 +1429,8 @@ return (
       <div className="arc-web-canvas-frame seamless">
         <BrowserViewport
           activeTab={activeTab}
+          split={activeSplit?.split ?? null}
+          partnerTab={activeSplit?.partner}
           tabs={state.tabs}
           spaces={state.spaces}
           activeSpaceId={state.activeSpaceId}

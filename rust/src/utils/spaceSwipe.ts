@@ -119,3 +119,60 @@ export function easeOutCubic(p: number): number {
 export function settleOffset(targetIndex: number, index: number, width: number): number {
   return targetIndex === index ? 0 : targetIndex > index ? -width : width;
 }
+
+// ---------------------------------------------------------------------------
+// A new swipe during the momentum of the last one.
+//
+// Once a swipe has switched spaces, the rest of its wheel events (the fingers
+// still moving, then the touchpad's inertia) must not start another swipe, or
+// one flick would skip two spaces. Windows wheel events carry no gesture
+// phase, and the inertia runs for half a second or more with no pause, so a
+// second swipe made during it used to be ignored: switching spaces quickly
+// felt delayed. Inertia only ever decays; a new swipe pushes the deltas back
+// up (or the other way). So a new swipe is one whose deltas, after having
+// decayed to a trough, rise well above it for a few events in a row, or that
+// clearly reverses direction.
+
+export interface MomentumTail {
+  /** Direction of the committed swipe (sign of deltaX). */
+  sign: number;
+  /** Largest |deltaX| seen since the commit. */
+  peak: number;
+  /** Smallest |deltaX| since the peak. */
+  trough: number;
+  /** Rising (or reversed) events in a row. */
+  streak: number;
+}
+
+export function startTail(sign: number, lastMag: number): MomentumTail {
+  const m = Math.abs(lastMag);
+  return { sign: Math.sign(sign) || 1, peak: m, trough: m, streak: 0 };
+}
+
+/** Events in a row that must look like a new swipe. */
+const NEW_SWIPE_EVENTS = 3;
+
+/** Feeds one wheel delta of the spent gesture; `restart` when a new swipe began. */
+export function feedTail(t: MomentumTail, dx: number): { tail: MomentumTail; restart: boolean } {
+  const mag = Math.abs(dx);
+  const sign = Math.sign(dx);
+  let { peak, trough, streak } = t;
+  if (sign !== 0 && sign !== t.sign && mag >= 4) {
+    // The other way: a swipe back.
+    streak = streak > 0 && t.trough === -1 ? streak + 1 : 1;
+    return { tail: { ...t, trough: -1, streak }, restart: streak >= NEW_SWIPE_EVENTS - 1 };
+  }
+  if (trough === -1) trough = mag; // reversal streak broken: back to tracking decay
+  if (mag > peak) {
+    // Still speeding up (the fingers of the same swipe): not a trough yet.
+    return { tail: { ...t, peak: mag, trough: mag, streak: 0 }, restart: false };
+  }
+  const decayed = trough <= peak * 0.5;
+  if (decayed && mag >= Math.max(trough * 2, trough + 6)) {
+    streak += 1;
+  } else {
+    streak = 0;
+    trough = Math.min(trough, mag);
+  }
+  return { tail: { ...t, peak, trough, streak }, restart: streak >= NEW_SWIPE_EVENTS };
+}

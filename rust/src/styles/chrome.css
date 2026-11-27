@@ -231,3 +231,126 @@ html.sidebar-covering .floating-top-chrome-capsule .site-nav-controls {
   border-color: transparent;
   box-shadow: none;
 }
+
+/* ---- Split view (BrowserViewport): two pages side by side ---------------- */
+
+.split-focus-bar {
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background-color var(--dur-fast, 120ms) ease;
+  pointer-events: none;
+}
+
+.split-focus-bar.active {
+  background: var(--theme-accent, #a1a1aa);
+}
+
+.split-divider {
+  display: flex;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.split-divider-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 36px;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  background: var(--hairline, rgba(255, 255, 255, 0.14));
+  transition: background-color var(--dur-fast, 120ms) ease, height var(--dur-fast, 120ms) ease;
+}
+
+.split-divider:hover .split-divider-grip,
+body.split-resizing .split-divider-grip {
+  height: 56px;
+  background: var(--theme-accent, #a1a1aa);
+}
+
+.split-close {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line-strong, rgba(255, 255, 255, 0.16));
+  background: var(--ui-surface, #1c1c1f);
+  color: var(--ui-fg-muted, #a1a1aa);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+}
+
+.split-divider:hover .split-close,
+.split-close:focus-visible {
+  opacity: 1;
+}
+
+.split-close:hover {
+  color: var(--ui-fg, #f4f4f5);
+}
+
+body.split-resizing,
+body.split-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* Dropping a tab onto the page: which side it lands on. */
+.split-drop-zones {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.split-drop-zone {
+  flex: 1;
+  border-radius: 12px;
+  border: 1.5px dashed color-mix(in srgb, var(--theme-accent, #a1a1aa) 45%, transparent);
+  background: color-mix(in srgb, var(--theme-accent, #a1a1aa) 6%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-fg, #f4f4f5);
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.75;
+  transition: background-color var(--dur-fast, 120ms) ease, opacity var(--dur-fast, 120ms) ease, border-color var(--dur-fast, 120ms) ease;
+}
+
+.split-drop-zone.on {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--theme-accent, #a1a1aa);
+  background: color-mix(in srgb, var(--theme-accent, #a1a1aa) 18%, transparent);
+}
+
+.split-drop-zone span {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-surface, #18181b) 88%, transparent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-focus-bar,
+  .split-divider-grip,
+  .split-close,
+  .split-drop-zone {
+    transition: none;
+  }
+}

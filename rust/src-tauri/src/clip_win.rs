@@ -48,12 +48,11 @@ enum Slot {
 #[derive(Default)]
 struct State {
     holes: HashMap<String, Slot>,
-    /// Labels of the page webviews on screen.
-    pages: Vec<String>,
+    /// Labels of the page webviews on screen, with each page's origin in
+    /// logical px (zoomed by the text size; the panes of a split differ).
+    pages: Vec<(String, (f64, f64))>,
     /// Container window of each page webview, by label.
     windows: HashMap<String, isize>,
-    /// Page origin in logical px (zoomed by the text size).
-    origin: (f64, f64),
     /// Text size: UI CSS px to logical px.
     z: f64,
     /// Bumped on every change; `applied` is the last one on screen.
@@ -91,14 +90,13 @@ impl Clipper {
     pub fn forget(&self, label: &str) {
         let mut st = self.st.lock();
         st.windows.remove(label);
-        st.pages.retain(|l| l != label);
+        st.pages.retain(|(l, _)| l != label);
     }
 
-    /// The page webviews on screen and where the page area is.
-    pub fn set_pages(&self, pages: Vec<String>, origin: (f64, f64), z: f64) -> u64 {
+    /// The page webviews on screen and where each one is.
+    pub fn set_pages(&self, pages: Vec<(String, (f64, f64))>, z: f64) -> u64 {
         let mut st = self.st.lock();
         st.pages = pages;
-        st.origin = origin;
         st.z = if z.is_finite() && z > 0.0 { z } else { 1.0 };
         self.changed(&mut st)
     }
@@ -144,7 +142,7 @@ impl Clipper {
         let mut last: HashMap<isize, Vec<[i32; 5]>> = HashMap::new();
         let mut shown_before: HashSet<isize> = HashSet::new();
         loop {
-            let (seq, holes, targets, origin, z, animating) = {
+            let (seq, holes, targets, z, animating) = {
                 let mut st = self.st.lock();
                 let moving = |st: &State| st.holes.values().any(|s| matches!(s, Slot::Moving(_)));
                 while st.applied == st.seq && !moving(&st) {
@@ -177,12 +175,13 @@ impl Clipper {
                         }
                     }
                 }
-                let targets: Vec<isize> = st.pages.iter().filter_map(|l| st.windows.get(l).copied()).collect();
+                let targets: Vec<(isize, (f64, f64))> = st.pages.iter().filter_map(|(l, o)| st.windows.get(l).map(|h| (*h, *o))).collect();
                 let animating = moving(&st);
-                (st.seq, holes, targets, st.origin, st.z, animating)
+                (st.seq, holes, targets, st.z, animating)
             };
-            let now_shown: HashSet<isize> = targets.iter().copied().collect();
-            for hwnd in &targets {
+            let now_shown: HashSet<isize> = targets.iter().map(|(h, _)| *h).collect();
+            for &(hwnd, origin) in &targets {
+                let hwnd = &hwnd;
                 // A window that just came on screen gets its region set again.
                 if !shown_before.contains(hwnd) {
                     last.remove(hwnd);

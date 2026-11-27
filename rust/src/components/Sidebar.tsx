@@ -34,6 +34,9 @@ import {
   StarOff,
   Trash2,
   X,
+  Columns2,
+  AppWindow,
+  Undo2,
   type LucideIcon,
 } from 'lucide-react';
 import { SIDEBAR_EDGE_PX, sidebarVisibility } from '../shared/layout';
@@ -58,6 +61,7 @@ import {
   buildSidebarView,
   contextMenuActions,
   favoriteActivation,
+  pageMenuOptions,
   moveToSpaceOp,
   type SidebarItemKind,
   type SidebarItemRef,
@@ -221,6 +225,15 @@ function mergeProps<T extends Record<string, any>>(base: T, extra?: ExtraProps):
   return out as T;
 }
 
+/** Split view and own-window actions of a tab's menu (sidebar and top strip). */
+export function runPageMenuAction(item: SidebarItemRef, action: 'split' | 'new-window' | 'back-to-window', activeTabId?: string | null): void {
+  const id = item.tab?.id ?? item.id;
+  const api = window.serica;
+  if (action === 'split' && activeTabId) void api?.splitTabs?.(id, activeTabId, false);
+  if (action === 'new-window') void api?.detachTab?.(id);
+  if (action === 'back-to-window') void api?.reattachTab?.(id);
+}
+
 export const MENU_LABELS: Record<SidebarMenuAction, string> = {
   pin: 'Pin',
   unpin: 'Unpin',
@@ -229,6 +242,9 @@ export const MENU_LABELS: Record<SidebarMenuAction, string> = {
   'move-to-space': 'Move to space',
   'move-to-folder': 'Move to folder',
   duplicate: 'Duplicate',
+  split: 'Open in split view',
+  'new-window': 'Move to new window',
+  'back-to-window': 'Move back to this window',
   close: 'Close',
 };
 
@@ -240,6 +256,9 @@ export const MENU_ICONS: Record<SidebarMenuAction, LucideIcon> = {
   'move-to-space': ArrowRightLeft,
   'move-to-folder': Folder,
   duplicate: Copy,
+  split: Columns2,
+  'new-window': AppWindow,
+  'back-to-window': Undo2,
   close: X,
 };
 
@@ -844,6 +863,11 @@ const SidebarImpl: React.FC<SidebarProps> = ({
         break;
       case 'duplicate':
         actions.duplicateTab(item.id, item.kind === 'favorite' ? activeSpaceId : undefined);
+        break;
+      case 'split':
+      case 'new-window':
+      case 'back-to-window':
+        runPageMenuAction(item, action, activeTabId);
         break;
       case 'close':
         if (item.kind === 'favorite') {
@@ -1541,7 +1565,7 @@ const SidebarImpl: React.FC<SidebarProps> = ({
               </button>
             </>
           ) : !menu.showSpaces ? (
-            contextMenuActions(menu.item, { hasFolders: view.folders.length > 0 || menu.item.kind === 'pinned' }).map((action) => {
+            contextMenuActions(menu.item, { hasFolders: view.folders.length > 0 || menu.item.kind === 'pinned', ...pageMenuOptions(menu.item, state) }).map((action) => {
               const Icon = MENU_ICONS[action];
               return (
                 <button

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Space, TabState, ActiveMediaState, SiteAction } from '../types';
+import { Space, TabState, ActiveMediaState, SiteAction, type SplitView } from '../types';
 import { Homescreen } from './Homescreen';
+import { useSplitDropHint } from '../hooks/splitDrop';
 import { FindBar } from './FindBar';
 import type { PageColorReport } from '../utils/topBarTint';
 import type { HomeBackground, HomeWidgets, UiScale } from '../shared/settings';
-import { acquireViewportOverlay, prewarmPageUnderlay, refreshPageCapture, setUnderlayPage, setViewportCovered, setViewportPrewarmHandler, type Underlay, usePageUnderlays, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
+import { acquireViewportOverlay, prewarmPageUnderlay, refreshPageCapture, setUnderlayPanes, setViewportCovered, setViewportPrewarmHandler, type Underlay, type UnderlayPane, usePageUnderlays, useReservedPageBottom, useViewportOverlayCount } from '../hooks/useViewportOverlay';
 
 interface BrowserViewportProps {
   activeTab?: TabState;
@@ -38,6 +39,28 @@ interface BrowserViewportProps {
   uiScale?: UiScale;
   /** Panels slide over the live page (auto-hide sidebar or top bar): keep a capture of it ready. */
   captureAhead?: boolean;
+  /** The active tab's split view (both tabs are web pages), and the other pane's tab. */
+  split?: SplitView | null;
+  partnerTab?: TabState;
+}
+
+/** Split view geometry, as in the backend (tabhost.rs `pane_bounds`), CSS px. */
+const SPLIT_GAP = 10;
+const SPLIT_TOP = 3;
+
+interface PaneRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A pane of a split in a page area `w` x `h` (page-area coordinates). */
+function paneRect(w: number, h: number, ratio: number, left: boolean): PaneRect {
+  const inner = Math.max(0, w - SPLIT_GAP);
+  const lw = Math.round(inner * Math.min(0.8, Math.max(0.2, ratio)));
+  const top = Math.min(SPLIT_TOP, h);
+  return left ? { x: 0, y: top, w: lw, h: h - top } : { x: lw + SPLIT_GAP, y: top, w: inner - lw, h: h - top };
 }
 
 /** Height reserved above the page while the find bar is open (bar + margins). */
@@ -64,6 +87,91 @@ function nextPaint(): Promise<void> {
 function isWebUrl(url: string | undefined): url is string {
   return !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
 }
+
+const rectStyle = (r: PaneRect): React.CSSProperties => ({ left: r.x, top: r.y, width: r.w, height: r.h });
+
+/**
+ * Split view chrome, around the two page panes (native views placed in the
+ * same rectangles by the backend): a bar above each pane (the focused one is
+ * lit), and the divider between them, which resizes the panes when dragged,
+ * resets them on double-click, and has a button that ends the split.
+ */
+const SplitChrome: React.FC<{ split: SplitView; activeId: string; panes: { h: number }; areaWidth: number }> = ({ split, activeId, panes, areaWidth }) => {
+  const [live, setLive] = useState<number | null>(null);
+  const ratio = live ?? split.ratio;
+  const h = panes.h;
+  const left = paneRect(areaWidth, h, ratio, true);
+  const right = paneRect(areaWidth, h, ratio, false);
+  const drag = useRef<{ x0: number; raf: number; next: number | null } | null>(null);
+  // The saved ratio arrived: stop showing the local one.
+  useEffect(() => {
+    if (!drag.current) setLive(null);
+  }, [split.ratio]);
+  const clampRatio = (r: number) => Math.min(0.8, Math.max(0.2, r));
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const area = e.currentTarget.parentElement?.getBoundingClientRect();
+    drag.current = { x0: area?.left ?? 0, raf: 0, next: null };
+    document.body.classList.add('split-resizing');
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const r = clampRatio((e.clientX - d.x0 - SPLIT_GAP / 2) / Math.max(1, areaWidth - SPLIT_GAP));
+    setLive(r);
+    d.next = r;
+    // One resize of the pages per frame.
+    if (!d.raf) {
+      d.raf = requestAnimationFrame(() => {
+        d.raf = 0;
+        if (d.next !== null) void window.serica?.setSplitRatio?.(activeId, d.next, false);
+      });
+    }
+  };
+  const onPointerUp = () => {
+    const d = drag.current;
+    if (!d) return;
+    if (d.raf) cancelAnimationFrame(d.raf);
+    drag.current = null;
+    document.body.classList.remove('split-resizing');
+    if (d.next !== null) void window.serica?.setSplitRatio?.(activeId, d.next, true);
+  };
+  return (
+    <>
+      <div className={`split-focus-bar${split.left === activeId ? ' active' : ''}`} style={{ position: 'absolute', left: left.x, top: 0, width: left.w, height: SPLIT_TOP }} />
+      <div className={`split-focus-bar${split.right === activeId ? ' active' : ''}`} style={{ position: 'absolute', left: right.x, top: 0, width: right.w, height: SPLIT_TOP }} />
+      <div
+        className="split-divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize split view"
+        aria-valuenow={Math.round(ratio * 100)}
+        style={{ position: 'absolute', left: left.w, top: 0, width: SPLIT_GAP, height: h }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={() => void window.serica?.setSplitRatio?.(activeId, 0.5, true)}
+      >
+        <span className="split-divider-grip" aria-hidden="true" />
+        <button
+          type="button"
+          className="split-close"
+          title="Close split view"
+          aria-label="Close split view"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => void window.serica?.unsplitTab?.(activeId)}
+        >
+          <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+            <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+};
 
 /** A capture of part of the page, drawn where that part is (page-area coordinates). */
 const UnderlayCanvas: React.FC<{ underlay: Underlay; left: number; top: number }> = ({ underlay, left, top }) => {
@@ -115,6 +223,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   dockVisible,
   uiScale,
   captureAhead = false,
+  split = null,
+  partnerTab,
 }) => {
   const pageAreaRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<TabState | undefined>(activeTab);
@@ -126,10 +236,16 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const [findQuery, setFindQuery] = useState('');
   const [findState, setFindState] = useState({ activeMatch: 0, totalMatches: 0 });
   const [frozenImage, setFrozenImage] = useState<string | null>(null);
+  // In a split view, the other pane's picture while the page is covered.
+  const [frozenPartner, setFrozenPartner] = useState<string | null>(null);
+  const partnerRef = useRef<string | null>(null);
+  partnerRef.current = split && partnerTab ? partnerTab.id : null;
   const frozenImageRef = useRef<string | null>(null);
   frozenImageRef.current = frozenImage;
   // Captures of the page beneath panels sliding over it (see preparePageUnderlay).
   const underlays = usePageUnderlays();
+  // A tab dragged from the sidebar over the page (split view).
+  const splitDrop = useSplitDropHint();
 
   const isWebPage = Boolean(activeTab && isWebUrl(activeTab.url) && !activeTab.isSleeping && !activeTab.unloaded);
   const findVisible = isFindOpen && isWebPage;
@@ -162,21 +278,57 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     reportBounds();
   }, [reportBounds, insetLeft, insetRight, pageTop, reservedBottom]);
 
-  // Where captures drawn under sliding panels go, and which page they show.
+  // Where captures drawn under sliding panels go, and which page they show:
+  // the page area, or each pane of a split.
   const underlayKey = isWebPage && activeTab ? `${activeTab.id}|${activeTab.url}` : '';
+  const partnerKey = split && partnerTab ? `${partnerTab.id}|${partnerTab.url}` : '';
+  const splitRatio = split?.ratio ?? 0.5;
+  const leftId = split?.left ?? '';
   useLayoutEffect(() => {
-    const update = () =>
-      setUnderlayPage({
-        key: underlayKey,
-        left: insetLeft,
-        top: pageTop,
-        width: Math.max(0, window.innerWidth - insetLeft - insetRight),
-        height: Math.max(0, window.innerHeight - pageTop - reservedBottom),
-      });
+    const update = () => {
+      if (!underlayKey) {
+        setUnderlayPanes([]);
+        return;
+      }
+      const w = Math.max(0, window.innerWidth - insetLeft - insetRight);
+      const h = Math.max(0, window.innerHeight - pageTop - reservedBottom);
+      const at = (tabId: string, key: string, r: PaneRect): UnderlayPane => ({ tabId, key, left: insetLeft + r.x, top: pageTop + r.y, width: r.w, height: r.h });
+      const activeId = underlayKey.split('|')[0];
+      if (partnerKey) {
+        const partnerId = partnerKey.split('|')[0];
+        setUnderlayPanes([
+          at(activeId, underlayKey, paneRect(w, h, splitRatio, leftId === activeId)),
+          at(partnerId, partnerKey, paneRect(w, h, splitRatio, leftId === partnerId)),
+        ]);
+      } else {
+        setUnderlayPanes([at(activeId, underlayKey, { x: 0, y: 0, w, h })]);
+      }
+    };
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
-  }, [underlayKey, insetLeft, insetRight, pageTop, reservedBottom]);
+  }, [underlayKey, partnerKey, splitRatio, leftId, insetLeft, insetRight, pageTop, reservedBottom]);
+
+  // The page area's size (CSS px), for laying out a split's panes.
+  const [areaSize, setAreaSize] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const update = () => {
+      const w = Math.max(0, window.innerWidth - insetLeft - insetRight);
+      const h = Math.max(0, window.innerHeight - pageTop - reservedBottom);
+      setAreaSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [insetLeft, insetRight, pageTop, reservedBottom]);
+  const splitPanes =
+    isWebPage && split && partnerTab && activeTab
+      ? {
+          active: paneRect(areaSize.w, areaSize.h, split.ratio, split.left === activeTab.id),
+          partner: paneRect(areaSize.w, areaSize.h, split.ratio, split.left === partnerTab.id),
+          h: areaSize.h,
+        }
+      : null;
 
   // The pointer is heading for an edge over the page: capture it now, so a
   // panel opening there has a capture to slide over without waiting.
@@ -189,16 +341,16 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   const pageLoading = Boolean(activeTab?.isLoading);
   useEffect(() => {
     if (!underlayKey || !captureAhead || pageLoading) return;
-    const t = window.setTimeout(refreshPageCapture, 700);
+    const t = window.setTimeout(() => refreshPageCapture(), 700);
     return () => window.clearTimeout(t);
-  }, [underlayKey, captureAhead, pageLoading]);
+  }, [underlayKey, partnerKey, captureAhead, pageLoading]);
   useEffect(() => {
     if (!underlayKey || !captureAhead) return;
-    const tabId = activeTab?.id;
+    const ids = [activeTab?.id, partnerTab?.id];
     return window.serica?.onPageSettled?.((id) => {
-      if (id === tabId) refreshPageCapture();
+      if (ids.includes(id)) refreshPageCapture(id);
     });
-  }, [underlayKey, captureAhead, activeTab?.id]);
+  }, [underlayKey, captureAhead, activeTab?.id, partnerTab?.id]);
 
   useEffect(() => {
     window.addEventListener('resize', reportBounds);
@@ -296,9 +448,19 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
                 img = quick as string | null;
               }
             }
+            // The other pane of a split: its last capture, or a fresh one.
+            const partner = partnerRef.current;
+            const partnerImg = partner
+              ? await Promise.race([
+                  window.serica.captureViewport(partner).catch(() => null),
+                  sleep(160).then(() => window.serica?.getTabPreview?.(partner).catch(() => null) ?? null),
+                ])
+              : null;
             if (img && wantFrozenRef.current) {
               if (!ready) await decodeImage(img);
+              if (partnerImg) await decodeImage(partnerImg);
               setFrozenImage(img);
+              setFrozenPartner(partnerImg ?? null);
               await nextPaint();
             }
             await window.serica.freezeViewport?.(false).catch(() => null);
@@ -313,7 +475,10 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           freezeApplied.current = false;
           setViewportCovered(!isWebPageRef.current);
           await nextPaint();
-          if (!wantFrozenRef.current) setFrozenImage(null);
+          if (!wantFrozenRef.current) {
+            setFrozenImage(null);
+            setFrozenPartner(null);
+          }
         }
       }
     } finally {
@@ -584,8 +749,30 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
             src={(frozenImage || placeholder)!}
             alt=""
             draggable={false}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}
+            style={{ position: 'absolute', ...(splitPanes ? rectStyle(splitPanes.active) : { inset: 0, width: '100%', height: '100%' }), objectFit: 'fill', pointerEvents: 'none' }}
           />
+        )}
+        {splitPanes && frozenImage && frozenPartner && (
+          <img
+            className="native-page-snapshot"
+            src={frozenPartner}
+            alt=""
+            draggable={false}
+            style={{ position: 'absolute', ...rectStyle(splitPanes.partner), objectFit: 'fill', pointerEvents: 'none' }}
+          />
+        )}
+        {splitPanes && split && activeTab && (
+          <SplitChrome split={split} activeId={activeTab.id} panes={splitPanes} areaWidth={areaSize.w} />
+        )}
+        {isWebPage && splitDrop && (
+          <div className="split-drop-zones" aria-hidden="true">
+            <div className={`split-drop-zone${splitDrop.left ? ' on' : ''}`}>
+              <span>Open on the left</span>
+            </div>
+            <div className={`split-drop-zone${!splitDrop.left ? ' on' : ''}`}>
+              <span>Open on the right</span>
+            </div>
+          </div>
         )}
       </div>
 

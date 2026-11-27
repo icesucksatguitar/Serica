@@ -158,6 +158,17 @@ export interface BrowserAppState {
   activeProfileId?: string;
   favorites?: FavoriteEntry[];
   folders?: FolderRecord[];
+  /** Split views: pairs of tabs shown side by side. */
+  splits?: SplitView[];
+  /** Tabs shown in windows of their own. */
+  detachedTabs?: string[];
+}
+
+/** Two tabs side by side; `ratio` is the left pane's share of the width. */
+export interface SplitView {
+  left: string;
+  right: string;
+  ratio: number;
 }
 
 export interface ThemeConfig {
@@ -246,7 +257,14 @@ export interface SericaAPI {
   // Native tab viewport (Rust tab host)
   siteAction?: (action: SiteAction) => Promise<void>;
   setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
-  captureViewport?: () => Promise<string | null>;
+  captureViewport?: (tabId?: string) => Promise<string | null>;
+  splitTabs?: (dragged: string, target: string, left: boolean) => Promise<boolean>;
+  unsplitTab?: (tabId: string) => Promise<boolean>;
+  detachTab?: (tabId: string, x?: number, y?: number) => Promise<void>;
+  reattachTab?: (tabId: string) => Promise<void>;
+  tabAction?: (tabId: string, action: 'back' | 'forward' | 'reload' | 'stop') => Promise<void>;
+  navigateTab?: (tabId: string, url: string) => Promise<void>;
+  setSplitRatio?: (tabId: string, ratio: number, commit?: boolean) => Promise<boolean>;
   setViewportHole?: (
     id: string,
     rect: [number, number, number, number],

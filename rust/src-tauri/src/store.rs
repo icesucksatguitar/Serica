@@ -41,6 +41,8 @@ struct PersistedState {
     #[serde(default)]
     closed_tabs: Vec<TabState>,
     #[serde(default)]
+    splits: Vec<Split>,
+    #[serde(default)]
     shield_stats: ShieldStats,
 }
 
@@ -87,6 +89,11 @@ pub struct Store {
     pub folders: Vec<FolderRecord>,
     pub archive: Vec<ArchivedTab>,
     pub closed: Vec<TabState>,
+    /// Split views: pairs of tabs shown side by side.
+    pub splits: Vec<Split>,
+    /// Tabs moved out into windows of their own: tab id to window label.
+    /// Never saved: after a restart they are back in the main window.
+    pub detached: std::collections::HashMap<String, String>,
     pub settings: BrowserSettings,
     pub shield_stats: ShieldStats,
     pub data_dir: PathBuf,
@@ -206,6 +213,8 @@ impl Store {
             folders: p.folders,
             archive: p.archive,
             closed: p.closed_tabs,
+            splits: p.splits,
+            detached: Default::default(),
             settings: settings.unwrap_or_default(),
             shield_stats: p.shield_stats,
             data_dir,
@@ -285,6 +294,8 @@ impl Store {
             "folders": self.folders,
             "archive": self.archive,
             "closedTabs": self.closed,
+            // Private tabs are never written down, nor splits with them.
+            "splits": self.splits.iter().filter(|s| [&s.left, &s.right].iter().all(|id| self.tab(id).is_some_and(|t| !t.private))).collect::<Vec<_>>(),
             "shieldStats": self.shield_stats,
         });
         [("state.json", state), ("settings.json", serde_json::to_value(&self.settings).unwrap_or_default())]
@@ -309,6 +320,8 @@ impl Store {
             active_profile_id: self.active_profile_id(),
             favorites: self.favorites.clone(),
             folders: self.folders.clone(),
+            splits: self.splits.clone(),
+            detached_tabs: self.detached.keys().cloned().collect(),
         }
     }
 
@@ -423,7 +436,8 @@ impl Store {
     /// Makes `id` the active tab (switching space if needed). Wakes it and
     /// reloads a closed pinned tab.
     pub fn activate_tab(&mut self, id: &str) -> bool {
-        if self.tab(id).is_none() {
+        // A tab in a window of its own is not shown in the main window.
+        if self.tab(id).is_none() || self.detached.contains_key(id) {
             return false;
         }
         // The tab being left was in use until now (it may have been restored
@@ -442,7 +456,130 @@ impl Store {
         let space = tab.space_id.clone();
         self.active_space_id = space;
         self.active_tab_id = Some(id.to_string());
+        // Its split partner is on screen with it: awake and in use too.
+        if let Some(p) = self.split_partner(id) {
+            if let Some(t) = self.tab_mut(&p) {
+                t.is_sleeping = false;
+                t.unloaded = false;
+                t.last_active_at = Some(now);
+            }
+        }
         true
+    }
+
+    // ---------------------------------------------------------------- split view
+
+    pub fn split_of(&self, id: &str) -> Option<&Split> {
+        self.splits.iter().find(|s| s.has(id))
+    }
+
+    pub fn split_partner(&self, id: &str) -> Option<String> {
+        self.split_of(id).and_then(|s| s.partner(id)).map(str::to_string)
+    }
+
+    /// Shows `dragged` beside `target` (`left`: on its left), and focuses it.
+    /// Either tab leaves the split it was in. Both must be web pages; the
+    /// dragged tab joins the target's space.
+    pub fn split_with(&mut self, dragged: &str, target: &str, left: bool) -> bool {
+        if dragged == target {
+            return false;
+        }
+        let ok = |t: Option<&TabState>| t.is_some_and(|t| !is_internal_url(&t.url) && !self.detached.contains_key(&t.id));
+        if !ok(self.tab(dragged)) || !ok(self.tab(target)) {
+            return false;
+        }
+        let space = self.tab(target).map(|t| t.space_id.clone()).unwrap_or_default();
+        if let Some(t) = self.tab_mut(dragged) {
+            if t.space_id != space {
+                t.space_id = space;
+                t.folder_id = None;
+            }
+        }
+        self.splits.retain(|s| !s.has(dragged) && !s.has(target));
+        let (l, r) = if left { (dragged, target) } else { (target, dragged) };
+        self.splits.push(Split { left: l.to_string(), right: r.to_string(), ratio: 0.5 });
+        self.activate_tab(dragged)
+    }
+
+    pub fn unsplit(&mut self, id: &str) -> bool {
+        let n = self.splits.len();
+        self.splits.retain(|s| !s.has(id));
+        n != self.splits.len()
+    }
+
+    // ------------------------------------------------------- tabs in own windows
+
+    /// Moves a web page tab out into the window `label`. If it was on screen,
+    /// the main window shows the next tab (or a new one). Not for Serica's
+    /// own pages, which only the main window can show.
+    pub fn detach(&mut self, id: &str, label: &str) -> bool {
+        let Some(tab) = self.tab(id) else { return false };
+        if is_internal_url(&tab.url) || self.detached.contains_key(id) {
+            return false;
+        }
+        let was_active = self.active_tab_id.as_deref() == Some(id);
+        let next = if was_active { self.split_partner(id).or_else(|| self.neighbor_of(id)) } else { None };
+        self.splits.retain(|s| !s.has(id));
+        self.detached.insert(id.to_string(), label.to_string());
+        if let Some(t) = self.tab_mut(id) {
+            t.is_sleeping = false;
+            t.unloaded = false;
+            t.last_active_at = Some(now_ms());
+        }
+        if was_active {
+            match next {
+                Some(n) => {
+                    self.activate_tab(&n);
+                }
+                None => {
+                    let space = self.active_space_id.clone();
+                    let t = self.create_tab(None, Some(space), true, None);
+                    self.active_tab_id = Some(t.id);
+                }
+            }
+        }
+        true
+    }
+
+    /// Brings a tab back from its own window into the main one, on screen.
+    pub fn reattach(&mut self, id: &str) -> bool {
+        if self.detached.remove(id).is_none() {
+            return false;
+        }
+        self.activate_tab(id);
+        true
+    }
+
+    pub fn set_split_ratio(&mut self, id: &str, ratio: f64) -> bool {
+        let Some(s) = self.splits.iter_mut().find(|s| s.has(id)) else { return false };
+        if !ratio.is_finite() {
+            return false;
+        }
+        s.ratio = ratio.clamp(0.2, 0.8);
+        true
+    }
+
+    /// Drops splits that no longer make sense: a tab closed, moved to
+    /// another space, or showing one of Serica's own pages (they are not
+    /// pages that can sit in a pane). A tab is in at most one split.
+    pub fn prune_splits(&mut self) -> bool {
+        let before = self.splits.len();
+        let mut seen = std::collections::HashSet::new();
+        let splits = std::mem::take(&mut self.splits);
+        for s in splits {
+            let valid = match (self.tab(&s.left), self.tab(&s.right)) {
+                (Some(a), Some(b)) => {
+                    a.id != b.id && a.space_id == b.space_id && !self.detached.contains_key(&a.id) && !self.detached.contains_key(&b.id) && !is_internal_url(&a.url) && !is_internal_url(&b.url) && !a.unloaded && !b.unloaded
+                }
+                _ => false,
+            };
+            if valid && !seen.contains(&s.left) && !seen.contains(&s.right) {
+                seen.insert(s.left.clone());
+                seen.insert(s.right.clone());
+                self.splits.push(s);
+            }
+        }
+        before != self.splits.len()
     }
 
     /// Activates a space and picks its most recently used live tab, creating a
@@ -465,7 +602,7 @@ impl Store {
         let best = order
             .iter()
             .filter_map(|id| self.tab(id))
-            .filter(|t| !t.unloaded)
+            .filter(|t| !t.unloaded && !self.detached.contains_key(&t.id))
             .max_by_key(|t| t.last_active_at.unwrap_or(0))
             .map(|t| t.id.clone());
         match best {
@@ -522,7 +659,7 @@ impl Store {
         let order: Vec<String> = self
             .visible_order(&self.active_space_id)
             .into_iter()
-            .filter(|id| id == closing || self.tab(id).map(|t| !t.unloaded).unwrap_or(false))
+            .filter(|id| id == closing || (!self.detached.contains_key(id) && self.tab(id).map(|t| !t.unloaded).unwrap_or(false)))
             .collect();
         let pos = order.iter().position(|id| id == closing)?;
         order.get(pos + 1).or_else(|| pos.checked_sub(1).and_then(|p| order.get(p))).cloned()
@@ -532,8 +669,10 @@ impl Store {
     /// tab is removed and remembered for reopen (R12.9, R15.3).
     pub fn close_tab(&mut self, id: &str) -> bool {
         let Some(tab) = self.tab(id).cloned() else { return false };
+        self.detached.remove(id);
         let was_active = self.active_tab_id.as_deref() == Some(id);
-        let next = if was_active { self.neighbor_of(id) } else { None };
+        // Closing one pane of a split leaves the other on screen.
+        let next = if was_active { self.split_partner(id).or_else(|| self.neighbor_of(id)) } else { None };
         if tab.section() == Section::Pinned {
             if let Some(t) = self.tab_mut(id) {
                 t.unloaded = true;
@@ -588,7 +727,7 @@ impl Store {
         let order: Vec<String> = self
             .visible_order(&self.active_space_id)
             .into_iter()
-            .filter(|id| self.tab(id).map(|t| !t.unloaded).unwrap_or(false))
+            .filter(|id| !self.detached.contains_key(id) && self.tab(id).map(|t| !t.unloaded).unwrap_or(false))
             .collect();
         if order.is_empty() {
             return None;
@@ -1040,6 +1179,7 @@ impl Store {
                     && !t.has_active_media
                     // Sleeping a private tab would end its session.
                     && !t.private
+                    && !self.detached.contains_key(&t.id)
                     && t.section() != Section::Pinned
                     && !is_internal_url(&t.url)
             })
@@ -1065,6 +1205,7 @@ impl Store {
         for t in &self.tabs {
             if t.section() == Section::Today
                 && Some(&t.id) != active.as_ref()
+                && !self.detached.contains_key(&t.id)
                 && !t.has_active_media
                 && !t.private
                 && t.last_active_at.unwrap_or(i64::MAX) < cutoff
@@ -1140,6 +1281,58 @@ mod tests {
     fn store() -> Store {
         let dir = std::env::temp_dir().join(format!("serica-test-{}", uuid::Uuid::new_v4()));
         Store::load(dir)
+    }
+
+    fn web_tabs(s: &mut Store, n: usize) -> Vec<String> {
+        let space = s.active_space_id.clone();
+        (0..n).map(|i| s.create_tab(Some(format!("https://example.com/{i}")), Some(space.clone()), true, None).id).collect()
+    }
+
+    #[test]
+    fn split_pairs_two_web_tabs_and_ends_when_one_closes() {
+        let mut s = store();
+        let ids = web_tabs(&mut s, 3);
+        assert!(s.split_with(&ids[0], &ids[1], true));
+        assert_eq!(s.active_tab_id.as_deref(), Some(ids[0].as_str()));
+        assert_eq!(s.split_partner(&ids[1]).as_deref(), Some(ids[0].as_str()));
+        // Joining another split leaves the old one.
+        assert!(s.split_with(&ids[2], &ids[1], false));
+        assert!(s.split_of(&ids[0]).is_none());
+        // Closing a pane shows its partner and ends the split.
+        s.activate_tab(&ids[2]);
+        s.close_tab(&ids[2]);
+        assert_eq!(s.active_tab_id.as_deref(), Some(ids[1].as_str()));
+        s.prune_splits();
+        assert!(s.splits.is_empty());
+        assert!(!s.set_split_ratio(&ids[1], 0.3));
+    }
+
+    #[test]
+    fn detached_tab_leaves_the_main_window_and_comes_back() {
+        let mut s = store();
+        let ids = web_tabs(&mut s, 2);
+        assert_eq!(s.active_tab_id.as_deref(), Some(ids[1].as_str()));
+        assert!(s.split_with(&ids[0], &ids[1], true));
+        assert!(s.detach(&ids[1], "dwin-1"));
+        // The main window shows another tab, the split is over, and the
+        // detached tab cannot be activated there.
+        assert_ne!(s.active_tab_id.as_deref(), Some(ids[1].as_str()));
+        assert!(s.splits.is_empty());
+        assert!(!s.activate_tab(&ids[1]));
+        assert!(!s.split_with(&ids[0], &ids[1], true));
+        assert!(!s.detach(&ids[1], "dwin-2"));
+        assert!(s.snapshot().detached_tabs.contains(&ids[1]));
+        assert!(s.reattach(&ids[1]));
+        assert_eq!(s.active_tab_id.as_deref(), Some(ids[1].as_str()));
+        assert!(s.detached.is_empty());
+    }
+
+    #[test]
+    fn new_tab_page_cannot_be_detached() {
+        let mut s = store();
+        let space = s.active_space_id.clone();
+        let t = s.create_tab(None, Some(space), true, None);
+        assert!(!s.detach(&t.id, "dwin-1"));
     }
 
     fn today_ids(s: &Store, space: &str) -> Vec<String> {

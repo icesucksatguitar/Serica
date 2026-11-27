@@ -63,7 +63,16 @@ export const tauriBridge = {
   // Native viewport (tab webviews are positioned over this rectangle)
   setViewport: (x: number, y: number, width: number, height: number) =>
     invoke<void>('set_viewport', { x, y, width, height }),
-  captureViewport: () => invoke<string | null>('viewport_capture'),
+  captureViewport: (tabId?: string) => invoke<string | null>('viewport_capture', { tabId: tabId ?? null }),
+  // Split view
+  splitTabs: (dragged: string, target: string, left: boolean) => invoke<boolean>('split_tabs', { dragged, target, left }),
+  unsplitTab: (tabId: string) => invoke<boolean>('unsplit_tab', { tabId }),
+  // Tabs in windows of their own
+  detachTab: (tabId: string, x?: number, y?: number) => invoke<void>('detach_tab', { tabId, x: x ?? null, y: y ?? null }),
+  reattachTab: (tabId: string) => invoke<void>('reattach_tab', { tabId }),
+  tabAction: (tabId: string, action: 'back' | 'forward' | 'reload' | 'stop') => invoke<void>('tab_action', { tabId, action }),
+  navigateTab: (tabId: string, url: string) => invoke<void>('navigate', { url, tabId }),
+  setSplitRatio: (tabId: string, ratio: number, commit = true) => invoke<boolean>('set_split_ratio', { tabId, ratio, commit }),
   setViewportHole: (
     id: string,
     rect: [number, number, number, number],

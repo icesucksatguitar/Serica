@@ -10,10 +10,13 @@ import {
   decideTarget,
   easeOutCubic,
   estimateVelocity,
+  feedTail,
   lockAxis,
   rawBounds,
   resolveOffset,
   settleOffset,
+  startTail,
+  type MomentumTail,
   type SwipeAxis,
 } from '../utils/spaceSwipe';
 
@@ -86,6 +89,10 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     animMs: 0,
     /** Last tint written, so unchanged frames skip a style recalculation. */
     tint: '',
+    /** Last wheel deltaX of the gesture in progress. */
+    lastDx: 0,
+    /** The committed swipe's remaining wheel events (see `feedTail`). */
+    tail: startTail(1, 0) as MomentumTail,
   }).current;
 
   const writeTint = (value: string) => {
@@ -245,8 +252,10 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     s.phase = 'anim';
     s.pendingId = targetId;
     s.settle = settleOffset(target, s.index, s.width);
-    // The rest of this gesture's momentum must not start another swipe.
+    // The rest of this gesture's momentum must not start another swipe
+    // (a new swipe made during it still does, see `feedTail`).
     s.axis = 'spent';
+    s.tail = startTail(target > s.index ? 1 : -1, s.lastDx);
     animate(s.settle, rest);
     optsRef.current.onCommit(targetId);
   };
@@ -296,9 +305,12 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     if (s.axis === 'spent') {
       // Momentum of a finished gesture: prevent page back/forward navigation
       if (horizontalish) e.preventDefault();
-      // A new swipe starts after a pause; the decaying momentum of the one
-      // just committed never does (it would skip a second space).
-      if (dt > GESTURE_END_MS) {
+      // A new swipe starts after a pause, or when the deltas rise again out
+      // of the decaying momentum of the one just committed; that momentum
+      // itself never does (it would skip a second space).
+      const fed = feedTail(s.tail, e.deltaX);
+      s.tail = fed.tail;
+      if (dt > GESTURE_END_MS || fed.restart) {
         s.axis = null;
         s.accX = 0;
         s.accY = 0;
@@ -314,10 +326,17 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     }
 
     if (s.axis === 'v') return;
+    s.lastDx = e.deltaX;
 
     // Fluid interruption: if user starts a horizontal swipe while the track is animating, catch it immediately!
     if (s.phase === 'anim' && horizontalish) {
       stopAnim();
+      // The glide after a switch is centred on the new space once it is
+      // active (see the layout effect below): the swipe goes on from there.
+      if (!s.pendingId) {
+        s.index = Math.max(0, o.order.findIndex((x) => x.id === o.activeId));
+        s.width = o.trackRef.current?.parentElement?.clientWidth || o.trackRef.current?.clientWidth || s.width || 260;
+      }
       s.phase = 'drag';
       s.raw = s.offset;
       s.axis = 'h';

@@ -153,6 +153,28 @@ unsafe fn install(
     let ctx = Rc::new(RefCell::new(Ctx { booting: first_url.is_some(), ..Ctx::default() }));
     let mut token = Default::default();
 
+    // A click into one pane of a split view makes its tab the active one
+    // (the address bar and shortcuts follow the pane in use).
+    {
+        let app_for_blur = app.clone();
+        let (app, id) = (app.clone(), tab_id.clone());
+        controller.add_GotFocus(
+            &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                app.page_focused(&id);
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        let (app2, id) = (app_for_blur, tab_id.clone());
+        controller.add_LostFocus(
+            &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                app2.page_blurred(&id);
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+
     if let Ok(settings) = core.Settings() {
         let _ = settings.SetAreDevToolsEnabled(true);
         let _ = settings.SetIsZoomControlEnabled(true);
@@ -352,7 +374,7 @@ unsafe fn install(
         tracing::warn!("permission hook install failed: {e}");
     }
     {
-        let app = app.clone();
+        let (app, fs_id) = (app.clone(), tab_id.clone());
         core.add_ContainsFullScreenElementChanged(
             &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
                 let _perf = crate::perf::span("wv.ContainsFullScreenElementChanged");
@@ -361,6 +383,9 @@ unsafe fn install(
                 sender.ContainsFullScreenElement(&mut fs)?;
                 let fs = fs.as_bool();
                 use tauri::Manager;
+                if crate::detached::set_fullscreen(&app, &fs_id, fs) {
+                    return Ok(());
+                }
                 if let Some(w) = app.handle.get_window("main") {
                     let _ = w.set_fullscreen(fs);
                 }
@@ -373,7 +398,7 @@ unsafe fn install(
 
     // ---- browser shortcuts while a page has focus
     {
-        let app = app.clone();
+        let (app, id) = (app.clone(), tab_id.clone());
         controller.add_AcceleratorKeyPressed(
             &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
                 let _perf = crate::perf::span("wv.AcceleratorKeyPressed");
@@ -394,6 +419,24 @@ unsafe fn install(
                         args.SetHandled(true)?;
                     }
                     if status.WasKeyDown.as_bool() && !matches!(sc, Shortcut::CycleTab(_)) {
+                        return Ok(());
+                    }
+                    // In a window of its own, Ctrl+W closes this tab, not the
+                    // main window's; other shortcuts act in the main window.
+                    if crate::detached::is_detached(&id) {
+                        match sc {
+                            Shortcut::CloseTab => {
+                                let id = id.clone();
+                                app.mutate(|s| s.close_tab(&id));
+                            }
+                            Shortcut::Escape | Shortcut::Find | Shortcut::CycleTab(_) => {}
+                            sc => {
+                                if let Some(w) = tauri::Manager::get_webview_window(&app.handle, "main") {
+                                    let _ = w.set_focus();
+                                }
+                                app.shortcut(sc);
+                            }
+                        }
                         return Ok(());
                     }
                     app.shortcut(sc);
@@ -497,8 +540,13 @@ unsafe fn install(
                     return Ok(());
                 }
                 if v["t"] == "settled" {
-                    // Only the page on screen matters (the UI captures it).
-                    if app.store.lock().active_tab_id.as_deref() == Some(id.as_str()) {
+                    // Only pages on screen matter (the UI captures them): the
+                    // active tab, and the other pane of its split.
+                    let on_screen = {
+                        let s = app.store.lock();
+                        s.active_tab_id.as_deref() == Some(id.as_str()) || s.active_tab_id.as_deref().and_then(|a| s.split_partner(a)).as_deref() == Some(id.as_str())
+                    };
+                    if on_screen {
                         crate::app::ui_emit(&app.handle, "serica:page-settled", id.as_str());
                     }
                     return Ok(());
@@ -1916,6 +1964,18 @@ mod tests {
 
 /// Finds the container window of a page webview (on the main thread, once)
 /// and hands it to the clip worker, which cuts holes in it from then on.
+/// Drops the UI cut-outs from a page's window (it left the main window).
+pub fn clear_clip_region(wv: &Webview) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::SetWindowRgn;
+    let _ = wv.with_webview(move |pw| unsafe {
+        let mut host = HWND::default();
+        if pw.controller().ParentWindow(&mut host).is_ok() && !host.0.is_null() {
+            let _ = SetWindowRgn(host, None, true);
+        }
+    });
+}
+
 pub fn register_clip_window(wv: &Webview, clipper: std::sync::Arc<crate::clip_win::Clipper>) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;

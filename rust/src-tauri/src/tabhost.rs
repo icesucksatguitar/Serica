@@ -30,12 +30,33 @@ pub struct Bounds {
     pub h: f64,
 }
 
+/// Split view geometry (UI CSS px; the UI draws the same): the gap between
+/// the panes (the divider) and a strip above each pane (focus bar).
+pub const SPLIT_GAP: f64 = 10.0;
+pub const SPLIT_TOP: f64 = 3.0;
+
+/// One pane of a split in the page area `b` (logical px, zoomed by `z`).
+pub fn pane_bounds(b: Bounds, ratio: f64, left: bool, z: f64) -> Bounds {
+    let gap = SPLIT_GAP * z;
+    let top = (SPLIT_TOP * z).min(b.h);
+    let w = (b.w - gap).max(0.0);
+    let lw = (w * ratio.clamp(0.2, 0.8)).round();
+    if left {
+        Bounds { x: b.x, y: b.y + top, w: lw, h: b.h - top }
+    } else {
+        Bounds { x: b.x + lw + gap, y: b.y + top, w: w - lw, h: b.h - top }
+    }
+}
+
 pub struct TabView {
     pub webview: Webview,
     pub profile: String,
     pub shown: bool,
     /// When the view was last hidden (drives background suspension).
     pub hidden_at: Option<std::time::Instant>,
+    /// The page is in a window of its own (see `detached.rs`): the main
+    /// window's reconcile neither shows, hides, clips nor suspends it.
+    pub detached: bool,
 }
 
 /// Hidden tabs drop to WebView2's low-memory level after `TRIM_AFTER`, and
@@ -195,6 +216,8 @@ pub struct TabHost {
     /// False while a UI overlay covers the viewport.
     pub visible: bool,
     pub active: Option<String>,
+    /// The split on screen (the active tab's), if any.
+    pub split: Option<crate::model::Split>,
     pub assistant: Option<(Webview, Bounds)>,
     /// Last page of each assistant (by host), so switching assistants or
     /// closing the panel returns to the same chat instead of its home page.
@@ -211,7 +234,7 @@ pub struct TabHost {
     /// shutting down after a network change); creation is retried a few times.
     create_failures: u32,
     /// Tabs whose webview is being built right now (outside the lock).
-    creating: std::collections::HashSet<String>,
+    pub(crate) creating: std::collections::HashSet<String>,
     /// Profiles whose pages are kept closed for now (their password store is
     /// being written by an import).
     paused: std::collections::HashSet<String>,
@@ -406,7 +429,7 @@ pub fn pdf_dark_js(on: bool) -> String {
 }
 
 /// A tab webview ready to be built (see `TabHost::prepare`).
-struct PendingView {
+pub(crate) struct PendingView {
     window: tauri::Window,
     builder: WebviewBuilder<tauri::Wry>,
     bounds: Bounds,
@@ -426,6 +449,7 @@ impl TabHost {
             bounds: None,
             visible: true,
             active: None,
+            split: None,
             assistant: None,
             assistant_last: HashMap::new(),
             data_root,
@@ -471,6 +495,11 @@ impl TabHost {
             // dropped files (uploads), links or text, and HTML5 drag and drop
             // inside them broke. Pages handle drops themselves, as in Edge.
             .disable_drag_drop_handler()
+            // Not focused when built: `reconcile` gives focus to the page on
+            // screen when it should have it. Built focused, a page woken by a
+            // space swipe took focus from the sidebar (and with it the
+            // touchpad), so the next swipe went to the page.
+            .focused(false)
             .background_color(tauri::webview::Color(255, 255, 255, 255))
             .browser_extensions_enabled(true)
             .initialization_script(PAGE_SCRIPT)
@@ -525,6 +554,11 @@ impl TabHost {
     fn prepare(&self, app: &Shared, tab_id: &str, url: &str, profile: &str, private: bool) -> Option<PendingView> {
         let bounds = self.bounds?;
         let window = app.handle.get_window("main")?;
+        self.prepare_in(app, tab_id, url, profile, private, window, bounds)
+    }
+
+    /// `prepare` for a page in `window` at `bounds` (a tab's own window).
+    pub(crate) fn prepare_in(&self, app: &Shared, tab_id: &str, url: &str, profile: &str, private: bool, window: tauri::Window, bounds: Bounds) -> Option<PendingView> {
         let parsed = url::Url::parse(url).ok()?;
         let label = format!("tab-{}-{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed), sanitize(tab_id));
         // On Windows the page starts blank so its adblock scripts can be
@@ -543,7 +577,7 @@ impl TabHost {
     /// built it, and the main thread takes the host lock in its own callbacks
     /// (preview captures finishing, page events), so this must run without
     /// the host lock held, or both threads wait on each other forever.
-    fn build(app: &Shared, tab_id: &str, profile: &str, p: PendingView) -> Option<Webview> {
+    pub(crate) fn build(app: &Shared, tab_id: &str, profile: &str, p: PendingView) -> Option<Webview> {
         let PendingView { window, builder, bounds, url: parsed } = p;
         let _perf = crate::perf::span("build_webview(any thread)");
         match window.add_child(builder, LogicalPosition::new(bounds.x, bounds.y), LogicalSize::new(bounds.w.max(1.0), bounds.h.max(1.0))) {
@@ -561,7 +595,7 @@ impl TabHost {
         }
     }
 
-    fn apply_bounds(wv: &Webview, b: Bounds) {
+    pub(crate) fn apply_bounds(wv: &Webview, b: Bounds) {
         let _ = wv.set_bounds(tauri::Rect {
             position: LogicalPosition::new(b.x, b.y).into(),
             size: LogicalSize::new(b.w.max(1.0), b.h.max(1.0)).into(),
@@ -579,8 +613,10 @@ impl TabHost {
             zoom: f64,
             private: bool,
         }
-        let (wants, active, auto_pip, text_scale): (HashMap<String, Want>, Option<String>, bool, f64) = {
+        let (wants, active, auto_pip, text_scale, split): (HashMap<String, Want>, Option<String>, bool, f64, Option<crate::model::Split>) = {
             let s = app.store.lock();
+            // The active tab's split partner is on screen beside it.
+            let split = s.active_tab_id.as_deref().and_then(|a| s.split_of(a)).cloned();
             let wants = s
                 .tabs
                 .iter()
@@ -601,8 +637,11 @@ impl TabHost {
                     (t.id.clone(), want)
                 })
                 .collect();
-            (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture, s.settings.text_scale)
+            (wants, s.active_tab_id.clone(), s.settings.auto_picture_in_picture, s.settings.text_scale, split)
         };
+        // Both panes need a page: a split whose partner has none shows as a single tab.
+        let split = split.filter(|sp| [&sp.left, &sp.right].iter().all(|id| wants.get(*id).is_some_and(|w| w.live && !is_internal_url(&w.url))));
+        let on_screen = |id: &str| Some(id) == active.as_deref() || split.as_ref().is_some_and(|s| s.has(id));
         let mut host = app.host.lock();
 
         // Close webviews whose tab is gone, asleep, unloaded, on an internal
@@ -613,11 +652,16 @@ impl TabHost {
             .filter(|(id, v)| host.paused.contains(&v.profile) || wants.get(*id).map(|w| !w.live || w.profile != v.profile).unwrap_or(true))
             .map(|(id, _)| id.clone())
             .collect();
+        // Pages in windows of their own that go too: their window closes.
+        let mut windows_to_close = Vec::new();
         for id in stale {
             if let Some(v) = host.views.remove(&id) {
                 #[cfg(windows)]
                 host.clipper.forget(v.webview.label());
                 let _ = v.webview.close();
+                if v.detached {
+                    windows_to_close.push(id.clone());
+                }
             }
             if !wants.contains_key(&id) {
                 app.previews.remove(&id);
@@ -635,25 +679,51 @@ impl TabHost {
         // and shortcuts typed right after (Ctrl+T) were lost.
         let mut focus_page: Option<Webview> = None;
         let active_shown_before = active.as_ref().and_then(|id| host.views.get(id)).is_some_and(|v| v.shown);
+        host.split = split.clone();
+        let pane = |id: &str| -> Option<Bounds> {
+            let b = bounds?;
+            Some(match &split {
+                Some(sp) if sp.has(id) => pane_bounds(b, sp.ratio, sp.left == id, text_scale),
+                _ => b,
+            })
+        };
+        // The page with keyboard focus is leaving the screen and no page takes
+        // focus after it (a switch that keeps focus in the UI, or one to a
+        // page still to be built): the UI takes it first. Otherwise focus
+        // stayed in the hidden page, and keys and touchpad swipes went
+        // nowhere until the window was clicked.
+        if visible {
+            let focused = app.focused_page.lock().clone();
+            let leaving = focused.as_deref().is_some_and(|f| !on_screen(f) && host.views.get(f).is_some_and(|v| v.shown && !v.detached));
+            let next_takes_focus = !host.keep_ui_focus && active.as_ref().is_some_and(|a| host.views.contains_key(a));
+            if leaving && !next_takes_focus {
+                if let Some(main) = app.handle.get_webview("main") {
+                    let _ = main.set_focus();
+                }
+            }
+        }
         for (id, v) in host.views.iter_mut() {
-            let should_show = visible && Some(id) == active.as_ref();
+            if v.detached {
+                continue;
+            }
+            let should_show = visible && on_screen(id);
             // Leaving a playing video for another tab: keep watching it in a
             // mini player (also when the page was under a dialog at the time,
             // e.g. switching from the command bar). Not when UI only covers
             // the page for a moment: the tab is still the one in use.
             #[cfg(windows)]
-            if auto_pip && previous.as_ref() == Some(id) && active.as_ref() != Some(id) && wants.get(id).map(|w| w.media).unwrap_or(false) {
+            if auto_pip && previous.as_ref() == Some(id) && active.as_ref() != Some(id) && !should_show && wants.get(id).map(|w| w.media).unwrap_or(false) {
                 Self::pip_on_leave(app, id.clone(), v.webview.clone());
             }
             if should_show {
-                if let Some(b) = bounds {
+                if let Some(b) = pane(id) {
                     Self::apply_bounds(&v.webview, b);
                 }
                 if !v.shown {
                     // Not when the page only comes back from under UI that
                     // covered it (menus, previews): moving focus then blurs the
                     // UI, which closes the auto-hide sidebar.
-                    if previous.as_ref() != Some(id) || v.hidden_at.is_none() {
+                    if (previous.as_ref() != Some(id) || v.hidden_at.is_none()) && active.as_ref() == Some(id) {
                         focus_page = Some(v.webview.clone());
                     }
                     #[cfg(windows)]
@@ -692,6 +762,9 @@ impl TabHost {
         #[cfg(not(windows))]
         let _ = text_scale;
         drop(host);
+        if !windows_to_close.is_empty() {
+            crate::detached::page_gone(app, windows_to_close);
+        }
         if let Some(wv) = focus_page {
             let _ = wv.set_focus();
         } else if focus_ui {
@@ -720,7 +793,9 @@ impl TabHost {
         // Build the active tab's webview last, once the page being left is
         // hidden: building takes a while (a slept tab waking up) and the old
         // page must not stay on screen under the new tab's address meanwhile.
-        if let Some(id) = &active {
+        // The split partner's page too (a woken tab, or one restored at start).
+        let partner = split.as_ref().zip(active.as_ref()).and_then(|(sp, a)| sp.partner(a).map(str::to_string));
+        for id in active.iter().chain(partner.iter()) {
             if let Some(w) = wants.get(id) {
                 if w.live && !is_internal_url(&w.url) && !app.host.lock().paused.contains(&w.profile) {
                     Self::create_active(app, id, w.url.clone(), w.profile.clone(), w.zoom, w.private);
@@ -795,7 +870,7 @@ impl TabHost {
         let _ = zoom;
         #[cfg(windows)]
         crate::webview_win::register_clip_window(&wv, host.clipper.clone());
-        if let Some(old) = host.views.insert(id.to_string(), TabView { webview: wv, profile, shown: false, hidden_at: None }) {
+        if let Some(old) = host.views.insert(id.to_string(), TabView { webview: wv, profile, shown: false, hidden_at: None, detached: false }) {
             let _ = old.webview.close();
         }
         // The state was read before the lock was released for the build: a
@@ -824,7 +899,7 @@ impl TabHost {
                 let host = app.host.lock();
                 host.views
                     .get(&id)
-                    .filter(|v| !v.shown && v.hidden_at.is_some_and(|t| t.elapsed() >= after))
+                    .filter(|v| !v.shown && !v.detached && v.hidden_at.is_some_and(|t| t.elapsed() >= after))
                     .map(|v| v.webview.clone())
             };
             let low = crate::app::memory_load_percent().is_some_and(|l| l >= LOW_MEMORY_LOAD);
@@ -861,13 +936,19 @@ impl TabHost {
     }
 
     pub fn set_bounds(app: &Shared, b: Bounds) {
+        let z = app.store.lock().settings.text_scale;
         let mut host = app.host.lock();
         host.bounds = Some(b);
         let first = host.views.is_empty();
+        let split = host.split.clone();
         // Always apply (the UI already dedupes): this also repairs a native
         // view that ended up somewhere else, e.g. right after creation.
-        for v in host.views.values().filter(|v| v.shown) {
-            Self::apply_bounds(&v.webview, b);
+        for (id, v) in host.views.iter().filter(|(_, v)| v.shown) {
+            let r = match &split {
+                Some(sp) if sp.has(id) => pane_bounds(b, sp.ratio, &sp.left == id, z),
+                _ => b,
+            };
+            Self::apply_bounds(&v.webview, r);
         }
         drop(host);
         // Hole positions are relative to the page, which just moved.
@@ -881,9 +962,20 @@ impl TabHost {
     /// page area is (holes are in window coordinates).
     #[cfg(windows)]
     fn sync_clip_pages(host: &TabHost, z: f64) -> u64 {
-        let pages = host.views.values().filter(|v| v.shown).map(|v| v.webview.label().to_string()).collect();
-        let origin = host.bounds.map(|b| (b.x, b.y)).unwrap_or((0.0, 0.0));
-        host.clipper.set_pages(pages, origin, z)
+        let b = host.bounds.unwrap_or(Bounds { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
+        let pages = host
+            .views
+            .iter()
+            .filter(|(_, v)| v.shown)
+            .map(|(id, v)| {
+                let r = match &host.split {
+                    Some(sp) if sp.has(id) => pane_bounds(b, sp.ratio, &sp.left == id, z),
+                    _ => b,
+                };
+                (v.webview.label().to_string(), (r.x, r.y))
+            })
+            .collect();
+        host.clipper.set_pages(pages, z)
     }
 
     /// Applies the current holes to every page view on screen.
@@ -1088,6 +1180,7 @@ impl TabHost {
     }
 
     pub fn close_all(app: &Shared) {
+        crate::detached::close_all(app);
         let mut host = app.host.lock();
         for (_, v) in host.views.drain() {
             let _ = v.webview.close();

@@ -5,6 +5,7 @@ import {
   buildSidebarView,
   contextMenuActions,
   moveToSpaceOp,
+  pageMenuOptions,
   type SidebarItemRef,
   type SidebarMenuAction,
 } from '../utils/sidebarModel';
@@ -12,7 +13,7 @@ import { useHoverPreview } from '../hooks/useHoverPreview';
 import { useElementHole, useViewportOverlay } from '../hooks/useViewportOverlay';
 import { addSettledBlurListener } from '../utils/settledBlur';
 import { TabPreviewCard } from './TabPreviewCard';
-import { MENU_ICONS, MENU_LABELS, SpaceIcon } from './Sidebar';
+import { MENU_ICONS, MENU_LABELS, SpaceIcon, runPageMenuAction } from './Sidebar';
 
 /** The tab commands the strip's right-click menu issues (names match `useBrowser()`). */
 export interface TopTabActions {
@@ -122,6 +123,11 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
       case 'duplicate':
         actions.duplicateTab(item.id);
         break;
+      case 'split':
+      case 'new-window':
+      case 'back-to-window':
+        runPageMenuAction(item, action, state.activeTabId);
+        break;
       case 'close':
         onCloseTab(item.id);
         break;
@@ -136,7 +142,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
 
   // The strip shows no folders, so "Move to folder" stays in the sidebar.
   const menuActions = menu
-    ? contextMenuActions(menu.item, { hasFolders: false }).filter((a) => a !== 'move-to-folder')
+    ? contextMenuActions(menu.item, { hasFolders: false, ...pageMenuOptions(menu.item, state) }).filter((a) => a !== 'move-to-folder')
     : [];
   const menuSpaces = menu ? view.spaceOrder.filter((s) => s.id !== menu.item.tab?.spaceId) : [];
   const profileCount = view.groups.length;

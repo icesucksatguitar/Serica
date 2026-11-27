@@ -218,13 +218,55 @@ export type SidebarMenuAction =
   | 'move-to-space'
   | 'move-to-folder'
   | 'duplicate'
+  | 'split'
+  | 'new-window'
+  | 'back-to-window'
   | 'close';
+
+/** What the menu may offer for a tab's page: split view and its own window. */
+export interface PageMenuOptions {
+  /** It can be shown beside the tab on screen (split view). */
+  canSplit?: boolean;
+  /** It can move into a window of its own. */
+  canDetach?: boolean;
+  /** It is in a window of its own already. */
+  detached?: boolean;
+}
+
+const isWebUrl = (url?: string) => !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
+
+/** Split view / own-window options for an item's tab, from the browser state. */
+export function pageMenuOptions(
+  item: Pick<SidebarItemRef, 'kind' | 'id' | 'tab'>,
+  state: { tabs: { id: string; url: string; unloaded?: boolean }[]; activeTabId?: string | null; detachedTabs?: string[] },
+): PageMenuOptions {
+  const id = item.tab?.id ?? (item.kind === 'favorite' ? undefined : item.id);
+  const tab = id ? state.tabs.find((t) => t.id === id) : undefined;
+  if (!tab) return {};
+  if (state.detachedTabs?.includes(tab.id)) return { detached: true };
+  const web = isWebUrl(tab.url);
+  const active = state.tabs.find((t) => t.id === state.activeTabId);
+  return {
+    canSplit: web && !!active && active.id !== tab.id && isWebUrl(active.url) && !state.detachedTabs?.includes(active.id),
+    canDetach: web && !tab.unloaded,
+  };
+}
 
 /** Context-menu actions offered for an item (R12.10). */
 export function contextMenuActions(
   item: Pick<SidebarItemRef, 'kind' | 'tab'>,
-  options?: { hasFolders?: boolean },
+  options?: { hasFolders?: boolean } & PageMenuOptions,
 ): SidebarMenuAction[] {
+  const page: SidebarMenuAction[] = options?.detached
+    ? ['back-to-window']
+    : [...(options?.canSplit ? (['split'] as const) : []), ...(options?.canDetach ? (['new-window'] as const) : [])];
+  const list = baseMenuActions(item, options);
+  if (!page.length) return list;
+  const at = list.indexOf('duplicate');
+  return at < 0 ? [...list, ...page] : [...list.slice(0, at), ...page, ...list.slice(at)];
+}
+
+function baseMenuActions(item: Pick<SidebarItemRef, 'kind' | 'tab'>, options?: { hasFolders?: boolean }): SidebarMenuAction[] {
   switch (item.kind) {
     case 'today':
       return ['pin', 'add-favorite', 'move-to-space', 'duplicate', 'close'];

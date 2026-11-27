@@ -58,8 +58,78 @@ pub async fn close_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
 
 #[tauri::command]
 pub async fn select_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
+    // A tab in a window of its own: that window comes to the front.
+    if crate::detached::focus(&tab_id) {
+        return Ok(());
+    }
     app.mutate(|s| s.activate_tab(&tab_id));
     Ok(())
+}
+
+/// Split view: shows `dragged` beside `target` (`left`: on its left).
+#[tauri::command]
+pub async fn split_tabs(dragged: String, target: String, left: bool, app: State<'_, Shared>) -> R<bool> {
+    Ok(app.mutate(|s| s.split_with(&dragged, &target, left)))
+}
+
+/// Moves a tab into a window of its own, near `x`, `y` (screen, physical px).
+#[tauri::command]
+pub async fn detach_tab(tab_id: String, x: Option<f64>, y: Option<f64>, app: State<'_, Shared>) -> R<()> {
+    let app = app.inner().clone();
+    let at = x.zip(y);
+    tauri::async_runtime::spawn_blocking(move || crate::detached::detach(&app, &tab_id, at)).await.map_err(|e| e.to_string())?
+}
+
+/// Brings a tab from its own window back into the main window.
+#[tauri::command]
+pub async fn reattach_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
+    let app = app.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::detached::reattach(&app, &tab_id)).await.map_err(|e| e.to_string())?
+}
+
+/// Back, forward, reload or stop on one tab's page (a tab window's toolbar).
+#[tauri::command]
+pub async fn tab_action(tab_id: String, action: String, app: State<'_, Shared>) -> R<()> {
+    let Some(wv) = TabHost::webview(app.inner(), &tab_id) else { return Ok(()) };
+    #[cfg(windows)]
+    {
+        let a: &'static str = match action.as_str() {
+            "back" => "back",
+            "forward" => "forward",
+            "reload" => "reload",
+            "hard-reload" => "hard-reload",
+            "stop" => "stop",
+            _ => return Ok(()),
+        };
+        crate::webview_win::nav(&wv, a);
+    }
+    #[cfg(not(windows))]
+    let _ = (wv, action);
+    Ok(())
+}
+
+/// Ends the split `tab_id` is in; the tab stays the active one.
+#[tauri::command]
+pub async fn unsplit_tab(tab_id: String, app: State<'_, Shared>) -> R<bool> {
+    Ok(app.mutate(|s| s.unsplit(&tab_id)))
+}
+
+/// The left pane's share of the width (0.2-0.8). While the divider is being
+/// dragged (`commit` false) the panes only resize; the release saves it and
+/// tells the UI.
+#[tauri::command]
+pub async fn set_split_ratio(tab_id: String, ratio: f64, commit: Option<bool>, app: State<'_, Shared>) -> R<bool> {
+    let changed = if commit.unwrap_or(true) {
+        app.mutate(|s| s.set_split_ratio(&tab_id, ratio))
+    } else {
+        app.store.lock().set_split_ratio(&tab_id, ratio)
+    };
+    if changed {
+        // Resize at once, not after the next state broadcast.
+        let app = app.inner().clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || TabHost::reconcile(&app)).await;
+    }
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -472,17 +542,21 @@ pub fn ui_cursor(app: State<'_, Shared>) -> Option<[f64; 3]> {
     }
 }
 
-/// Captures the active page while it is on screen (for the UI to show in its
-/// place), without hiding it.
+/// Captures a page while it is on screen (for the UI to show in its place),
+/// without hiding it: the active tab's, or `tab_id`'s (a pane of a split).
 #[tauri::command]
-pub async fn viewport_capture(app: State<'_, Shared>) -> R<Option<String>> {
+pub async fn viewport_capture(tab_id: Option<String>, app: State<'_, Shared>) -> R<Option<String>> {
     let app = app.inner().clone();
     // The tab being captured (read before: a switch may happen meanwhile).
-    let active_id = app.store.lock().active_tab_id.clone();
+    let active_id = tab_id.or_else(|| app.store.lock().active_tab_id.clone());
     let mut image = None;
     #[cfg(windows)]
-    if let Some(wv) = TabHost::active_webview(&app) {
-        if app.host.lock().visible {
+    if let Some(id) = &active_id {
+        let wv = {
+            let host = app.host.lock();
+            host.views.get(id).filter(|v| host.visible && v.shown).map(|v| v.webview.clone())
+        };
+        if let Some(wv) = wv {
             image = await_cb(|done| crate::webview_win::capture(&wv, done)).await.flatten();
         }
     }
