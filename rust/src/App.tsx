@@ -25,7 +25,8 @@ import { useSettings } from './hooks/useSettings';
 import { prewarmPageUnderlay, useLingering, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
 import { Presence } from './hooks/usePresence';
 import type { SettingsPage } from './components/settings/parts';
-import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
+import { TOP_BAR_HEIGHT, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
+import { useEdgeRelay } from './hooks/useEdgeRelay';
 import { resolveSpaceTheme, resolveReducedEffectsActive, SETUP_VERSION } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -1033,8 +1034,12 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
   // The page's insets from the window edges: the strip the sidebar slides
   // out of, and the one the dock waits in on websites. The top bar on a
   // website takes the same width as the page.
-  const pageInsetLeft = showSidebar ? 8 : 0;
-  const pageInsetRight = settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0;
+  // The page runs to the window's edges: the pointer reaching an edge over
+  // it is relayed to the UI instead of needing uncovered strips (see
+  // useEdgeRelay), which showed as gaps at the sides and corners.
+  const pageInsetLeft = 0;
+  const pageInsetRight = 0;
+  useEdgeRelay(isWebpage && !isHtmlFullscreen);
 // The top bar on web pages: 30px, and (by default) hidden until the pointer
 // reaches the top edge. The tab strip of top-tabs mode keeps it shown.
 const TOP_TAB_STRIP_HEIGHT = 38;
@@ -1051,7 +1056,7 @@ const contentTop = isHtmlFullscreen
   : showTopTabs
     ? TOP_BAR_HEIGHT + TOP_TAB_STRIP_HEIGHT
     : topBarAutoHideOn
-      ? TOP_BAR_REVEAL_STRIP
+      ? 0
       : TOP_BAR_HEIGHT;
 
 const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
