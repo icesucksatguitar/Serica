@@ -6,7 +6,9 @@
 //! tauri.conf.json (the plugin rejects packages not signed with our key); the
 //! UI then offers "Restart to update", which saves the session and runs the
 //! installer in passive mode (a progress bar, no questions). Serica reopens
-//! after the installer finishes.
+//! after the installer finishes. If the user just closes Serica instead, a
+//! downloaded update is installed as it quits (see `install_on_exit`), so the
+//! next launch is already the new version.
 
 use crate::app::{ui_emit, Shared};
 use parking_lot::Mutex;
@@ -167,6 +169,20 @@ async fn check_inner(handle: &AppHandle) -> Result<(), String> {
         s.progress = None;
     });
     Ok(())
+}
+
+/// Called as Serica quits (after the session is saved): if an update has
+/// been downloaded, the installer runs now and does not reopen Serica, so
+/// the next launch is already the new version. Nothing happens otherwise.
+/// On Windows this does not return when it starts the installer.
+pub fn install_on_exit() {
+    let Some((update, bytes)) = inner().lock().ready.take() else {
+        return;
+    };
+    tracing::info!("installing Serica {} on exit", update.version);
+    if let Err(e) = update.restart_after_install(false).install(bytes) {
+        tracing::warn!("couldn't install the update on exit: {e}");
+    }
 }
 
 /// Saves the session and runs the downloaded installer; the app exits.

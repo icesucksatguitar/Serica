@@ -267,6 +267,8 @@ pub fn run() {
                 shared.focus_stats.save(true);
                 tabhost::TabHost::close_all(&shared);
             }
+            // Last: on Windows this starts the installer and exits.
+            updater::install_on_exit();
         }
     });
 }
