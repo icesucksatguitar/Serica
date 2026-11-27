@@ -62,45 +62,71 @@ import './styles/window-controls.css';
 import './styles/glass.css';
 import './styles/motion.css';
 
-const ArchiveList = lazy(() =>
+// Panels load on first use. Their code is fetched and compiled while the
+// browser is idle after start, so the first opening has no hitch (the
+// command bar's first open took ~85 ms).
+const PANEL_LOADERS: (() => Promise<unknown>)[] = [];
+function panel<T>(load: () => Promise<T>): () => Promise<T> {
+  PANEL_LOADERS.push(load);
+  return load;
+}
+function preloadPanels(): void {
+  const idle = (cb: () => void) =>
+    typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 200);
+  const next = (i: number) => {
+    const load = PANEL_LOADERS[i];
+    if (!load) return;
+    idle(() => {
+      void load().catch(() => null).finally(() => next(i + 1));
+    });
+  };
+  next(0);
+}
+
+const ArchiveList = lazy(panel(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
-);
-const CommandBar = lazy(() =>
+));
+const CommandBar = lazy(panel(() =>
   import('./components/CommandBar').then((m) => ({ default: m.CommandBar }))
-);
-const ShieldModal = lazy(() =>
+));
+const ShieldModal = lazy(panel(() =>
   import('./components/ShieldModal').then((m) => ({ default: m.ShieldModal }))
-);
-const McpModal = lazy(() =>
+));
+const McpModal = lazy(panel(() =>
   import('./components/McpModal').then((m) => ({ default: m.McpModal }))
-);
-const ThemeStudio = lazy(() =>
+));
+const ThemeStudio = lazy(panel(() =>
   import('./components/ThemeStudio').then((m) => ({ default: m.ThemeStudio }))
-);
-const MediaPlayer = lazy(() =>
+));
+const MediaPlayer = lazy(panel(() =>
   import('./components/MediaPlayer').then((m) => ({ default: m.MediaPlayer }))
-);
-const Setup = lazy(() => import('./components/Setup').then((m) => ({ default: m.Setup })));
-const Settings2 = lazy(() =>
+));
+const Setup = lazy(panel(() => import('./components/Setup').then((m) => ({ default: m.Setup }))));
+const Settings2 = lazy(panel(() =>
   import('./components/settings/Settings2').then((m) => ({ default: m.Settings2 }))
-);
-const DownloadsPanel = lazy(() =>
+));
+const DownloadsPanel = lazy(panel(() =>
   import('./components/DownloadsPanel').then((m) => ({ default: m.DownloadsPanel }))
-);
-const ExtensionsModal = lazy(() =>
+));
+const ExtensionsModal = lazy(panel(() =>
   import('./components/ExtensionsModal').then((m) => ({ default: m.ExtensionsModal }))
-);
-const HistoryModal = lazy(() =>
+));
+const HistoryModal = lazy(panel(() =>
   import('./components/HistoryModal').then((m) => ({ default: m.HistoryModal }))
-);
-const VpnModal = lazy(() =>
+));
+const VpnModal = lazy(panel(() =>
   import('./components/VpnModal').then((m) => ({ default: m.VpnModal }))
-);
+));
 
 /** How long a panel takes to leave (keep in step with --dur-exit in foundation.css). */
-const PANEL_EXIT_MS = 170;
+const PANEL_EXIT_MS = 240;
 
 export function App() {
+  // Panel code loads while idle once start-up has settled (see `panel`).
+  useEffect(() => {
+    const t = window.setTimeout(preloadPanels, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
   const browser = useBrowser();
   const {
     state,

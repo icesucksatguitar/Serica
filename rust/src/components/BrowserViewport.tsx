@@ -417,13 +417,18 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     return p && p.key === pageKey() && performance.now() - p.at < 1500 ? p.img : null;
   };
 
+  // Covering a page that has not painted yet: there is nothing to capture.
+  const loadCoverRef = useRef<string | null>(null);
   const applyFreeze = useCallback(async () => {
     if (freezeBusy.current) return;
     freezeBusy.current = true;
     try {
       while (freezeApplied.current !== wantFrozenRef.current) {
         if (wantFrozenRef.current) {
-          if (isWebPageRef.current && window.serica?.captureViewport) {
+          if (loadCoverRef.current && loadCoverRef.current === activeTabRef.current?.id) {
+            await window.serica?.freezeViewport?.(false).catch(() => null);
+            setFrozenImage(null);
+          } else if (isWebPageRef.current && window.serica?.captureViewport) {
             const ready = takePrewarmed();
             let img: string | null = ready;
             if (!img) {
@@ -535,6 +540,52 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
     return () => window.clearTimeout(t);
   }, [wakeImage, activeTabLoading]);
   const placeholder = wakeImage && wakeImage.tabId === activeTab?.id ? wakeImage.img : null;
+
+  // A page opened in a new tab (or from the new tab page) has nothing to
+  // show until it first paints: the page area went theme colour, then black
+  // (the page being built), then white (blank), then the site. The page
+  // stays covered by one calm surface until it has loaded, then shows once.
+  // Tabs that were already open (restored, or woken from sleep) keep their
+  // last capture instead (see wakeImage).
+  const knownUrls = useRef<Map<string, string> | null>(null);
+  if (!knownUrls.current) knownUrls.current = new Map(tabs.map((t) => [t.id, t.url]));
+  const [loadCover, setLoadCover] = useState<string | null>(null);
+  const coverSawLoad = useRef(false);
+  useEffect(() => {
+    const id = activeTab?.id;
+    if (!id) return;
+    const before = knownUrls.current!.get(id);
+    knownUrls.current!.set(id, activeTab!.url);
+    const fresh = before === undefined || !isWebUrl(before);
+    if (fresh && isWebPage && !placeholder) {
+      loadCoverRef.current = id;
+      coverSawLoad.current = false;
+      setLoadCover(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.url]);
+  useEffect(() => {
+    if (!loadCover) return;
+    if (loadCover !== activeTab?.id || !isWebPage) {
+      setLoadCover(null);
+      return;
+    }
+    if (activeTabLoading) coverSawLoad.current = true;
+    // Loaded: a moment for its first frame, then the page shows. A page that
+    // never reports loading, or a slow site, shows as it is after a while.
+    const ms = activeTabLoading ? 1800 : coverSawLoad.current ? 350 : 1500;
+    const t = window.setTimeout(() => setLoadCover(null), ms);
+    return () => window.clearTimeout(t);
+  }, [loadCover, activeTab?.id, isWebPage, activeTabLoading]);
+  // The cover itself, held for the whole load (not per loading change).
+  useEffect(() => {
+    if (!loadCover) {
+      loadCoverRef.current = null;
+      return;
+    }
+    const release = acquireViewportOverlay();
+    return release;
+  }, [loadCover]);
 
   // A different tab or page makes the snapshot stale. Switching tabs while the
   // page is covered (from the sidebar, for example) shows the new tab's last
@@ -740,6 +791,7 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           backgroundColor: isWebPage ? 'var(--theme-bg-canvas)' : 'transparent',
         }}
       >
+        {loadCover && loadCover === activeTab?.id && <div className="page-load-cover" aria-hidden="true" />}
         {isWebPage &&
           !frozenImage &&
           underlays.map((u) => <UnderlayCanvas key={u.id} underlay={u} left={insetLeft} top={pageTop} />)}
@@ -765,12 +817,13 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           <SplitChrome split={split} activeId={activeTab.id} panes={splitPanes} areaWidth={areaSize.w} />
         )}
         {isWebPage && splitDrop && (
-          <div className="split-drop-zones" aria-hidden="true">
-            <div className={`split-drop-zone${splitDrop.left ? ' on' : ''}`}>
-              <span>Open on the left</span>
-            </div>
-            <div className={`split-drop-zone${!splitDrop.left ? ' on' : ''}`}>
-              <span>Open on the right</span>
+          <div className="split-drop" aria-hidden="true">
+            <div className={`split-drop-target ${splitDrop.left ? 'left' : 'right'}`}>
+              <div className="split-drop-card">
+                {splitDrop.favicon ? <img src={splitDrop.favicon} alt="" width={16} height={16} draggable={false} /> : <span className="split-drop-dot" />}
+                <span className="split-drop-title">{splitDrop.title}</span>
+                <span className="split-drop-side">Opens on the {splitDrop.left ? 'left' : 'right'}</span>
+              </div>
             </div>
           </div>
         )}

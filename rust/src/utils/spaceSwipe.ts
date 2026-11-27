@@ -8,7 +8,7 @@
 /** No wheel events for this long ends the gesture. */
 export const GESTURE_END_MS = 140;
 /** Duration of the snap / spring-back animation. */
-export const SNAP_MS = 220;
+export const SNAP_MS = 300;
 /** Fraction of the pane width that commits a swipe. */
 export const COMMIT_FRACTION = 0.3;
 /** Release velocity (px/ms) that counts as a flick. */

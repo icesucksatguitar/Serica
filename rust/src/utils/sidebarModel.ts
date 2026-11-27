@@ -12,8 +12,32 @@ import type { BrowserAppState, FavoriteEntry, FolderRecord, MoveOp, Profile, Spa
 /** Fields of the renderer state the sidebar reads. */
 export type SidebarSource = Pick<
   BrowserAppState,
-  'tabs' | 'spaces' | 'activeSpaceId' | 'activeTabId' | 'favorites' | 'profiles' | 'activeProfileId' | 'folders'
+  'tabs' | 'spaces' | 'activeSpaceId' | 'activeTabId' | 'favorites' | 'profiles' | 'activeProfileId' | 'folders' | 'splits' | 'detachedTabs'
 >;
+
+/** How a tab shows in the sidebar besides its row: in a split (which side,
+ *  and whether that split is the one on screen), or in a window of its own. */
+export interface TabPlacement {
+  split?: { side: 'left' | 'right'; onScreen: boolean; partnerTitle: string };
+  detached?: boolean;
+}
+
+export function tabPlacement(tabId: string | undefined, src: Pick<SidebarSource, 'tabs' | 'splits' | 'detachedTabs' | 'activeTabId'>): TabPlacement {
+  if (!tabId) return {};
+  if (src.detachedTabs?.includes(tabId)) return { detached: true };
+  const sp = src.splits?.find((s) => s.left === tabId || s.right === tabId);
+  if (!sp) return {};
+  const partner = sp.left === tabId ? sp.right : sp.left;
+  const p = src.tabs.find((t) => t.id === partner);
+  if (!p) return {};
+  return {
+    split: {
+      side: sp.left === tabId ? 'left' : 'right',
+      onScreen: src.activeTabId === tabId || src.activeTabId === partner,
+      partnerTitle: p.title || p.url,
+    },
+  };
+}
 
 /** Profile id used for spaces/profiles before the first `state-update` arrives. */
 export const FALLBACK_PROFILE_ID = 'default';

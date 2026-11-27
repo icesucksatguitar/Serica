@@ -6,6 +6,7 @@ import {
   contextMenuActions,
   moveToSpaceOp,
   pageMenuOptions,
+  tabPlacement,
   type SidebarItemRef,
   type SidebarMenuAction,
 } from '../utils/sidebarModel';
@@ -13,7 +14,7 @@ import { useHoverPreview } from '../hooks/useHoverPreview';
 import { useElementHole, useViewportOverlay } from '../hooks/useViewportOverlay';
 import { addSettledBlurListener } from '../utils/settledBlur';
 import { TabPreviewCard } from './TabPreviewCard';
-import { MENU_ICONS, MENU_LABELS, SpaceIcon, runPageMenuAction } from './Sidebar';
+import { MENU_ICONS, MENU_LABELS, PlacementMark, SpaceIcon, runPageMenuAction } from './Sidebar';
 
 /** The tab commands the strip's right-click menu issues (names match `useBrowser()`). */
 export interface TopTabActions {
@@ -276,6 +277,8 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
 
   const renderTab = (item: SidebarItemRef, pinned: boolean) => {
     const active = item.id === state.activeTabId;
+    const place = tabPlacement(item.id, state);
+    const partner = !active && !!place.split?.onScreen;
     const props = preview.itemProps(item, 'below');
     const section = pinned ? 'pinned' : 'today';
     return (
@@ -285,7 +288,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
         role="tab"
         aria-selected={active}
         tabIndex={0}
-        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}`}
+        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}${partner ? ' split-partner' : ''}`}
         title={pinned ? item.title : undefined}
         onPointerMove={onTabPointerMove}
         onPointerUp={endTabDrag}
@@ -323,6 +326,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
       >
         <Favicon src={item.favicon ?? item.tab?.favicon} />
         {!pinned && <span className="ttab-title">{item.title || 'New Tab'}</span>}
+        {!pinned && <PlacementMark placement={place} />}
         {!pinned && (
           <button
             type="button"

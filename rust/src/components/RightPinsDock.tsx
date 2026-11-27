@@ -182,7 +182,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     const radius = parseFloat(getComputedStyle(track).borderTopLeftRadius) || 0;
     const shownRect: [number, number, number, number] = [left, top, w, h];
     const hiddenRect: [number, number, number, number] = [left + shift, top, w, h];
-    const ease: [number, number, number, number] = [0.22, 1, 0.36, 1];
+    const ease: [number, number, number, number] = [0.32, 0.72, 0, 1];
     if (isHoveredDock) {
       void setViewportHole('dock', shownRect, holeShown.current ? { radius } : { from: hiddenRect, ms: 320, ease, lead: 8, radius }).then(() =>
         setHoleReady(true),

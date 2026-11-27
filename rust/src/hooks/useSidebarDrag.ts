@@ -46,7 +46,7 @@ function pageDropAt(x: number, y: number, item: SidebarItemRef, root: HTMLElemen
   const active = src.tabs.find((t) => t.id === src.activeTabId);
   const dragged = item.tab ?? src.tabs.find((t) => t.id === item.id);
   if (!active || !isWebTab(active) || !dragged || dragged.id === active.id || !(isWebTab(dragged) || dragged.unloaded)) return null;
-  return { left: x < area.left + area.width / 2 };
+  return { left: x < area.left + area.width / 2, title: dragged.title || dragged.url, favicon: dragged.favicon };
 }
 
 /**
@@ -282,6 +282,13 @@ export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => un
           press.el.setPointerCapture(press.pointerId);
         } catch {}
       }
+      // The focus hand-over above can drop the pointer capture; without it
+      // the drag stops being seen once the pointer leaves the window.
+      if (!press.el.hasPointerCapture?.(press.pointerId)) {
+        try {
+          press.el.setPointerCapture(press.pointerId);
+        } catch {}
+      }
       const outside = outsideDrop(e, press.item, stateRef.current);
       const dpr = window.devicePixelRatio || 1;
       outsideRef.current = outside ? { tabId: outside, x: e.screenX * dpr, y: e.screenY * dpr } : null;
@@ -341,16 +348,28 @@ export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => un
 
   const attach = useCallback(() => {
     detachRef.current?.();
-    const blur = () => cancel();
+    const lost = () => cancel();
+    // Over the page the native page is swapped for a picture of it, and
+    // keyboard focus is handed back to the UI: the UI blurs for a moment and
+    // gets focus back. Only a blur that lasts (switching to another app)
+    // ends the drag; ending it at once dropped tabs dragged onto the page.
+    let blurTimer = 0;
+    const blur = () => {
+      window.clearTimeout(blurTimer);
+      blurTimer = window.setTimeout(() => {
+        if (!document.hasFocus()) cancel();
+      }, 250);
+    };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', blur);
+    window.addEventListener('pointercancel', lost);
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('blur', blur);
     detachRef.current = () => {
+      window.clearTimeout(blurTimer);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', blur);
+      window.removeEventListener('pointercancel', lost);
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('blur', blur);
     };

@@ -50,8 +50,8 @@ import { addSettledBlurListener } from '../utils/settledBlur';
 import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 
 /** The auto-hide sidebar's slide (keep in step with `.nsb.autohide` in sidebar.css). */
-const SLIDE_IN_MS = 220;
-const SLIDE_OUT_MS = 180;
+const SLIDE_IN_MS = 320;
+const SLIDE_OUT_MS = 240;
 /** How long the pointer must be away before the sidebar hides. */
 const HIDE_DELAY_MS = 100;
 /** A sidebar just revealed stays at least this long (a pass over the edge). */
@@ -62,6 +62,8 @@ import {
   contextMenuActions,
   favoriteActivation,
   pageMenuOptions,
+  tabPlacement,
+  type TabPlacement,
   moveToSpaceOp,
   type SidebarItemKind,
   type SidebarItemRef,
@@ -224,6 +226,28 @@ function mergeProps<T extends Record<string, any>>(base: T, extra?: ExtraProps):
   if (base.style || extra.style) out.style = { ...base.style, ...extra.style };
   return out as T;
 }
+
+/** A tab's place outside the plain list: the half of a split it is in, or its own window. */
+export const PlacementMark: React.FC<{ placement: TabPlacement }> = ({ placement }) => {
+  if (placement.detached) {
+    return (
+      <span className="nsb-place-mark" title="In its own window" aria-label="In its own window">
+        <AppWindow size={12} strokeWidth={2} />
+      </span>
+    );
+  }
+  const sp = placement.split;
+  if (!sp) return null;
+  const label = `Split view, ${sp.side} side, with ${sp.partnerTitle}`;
+  return (
+    <span className={`nsb-place-mark split${sp.onScreen ? ' on' : ''}`} title={label} aria-label={label}>
+      <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+        <rect x="0.75" y="0.75" width="12.5" height="10.5" rx="2.25" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <rect x={sp.side === 'left' ? 2.25 : 7.75} y="2.25" width="4" height="7.5" rx="1" fill="currentColor" />
+      </svg>
+    </span>
+  );
+};
 
 /** Split view and own-window actions of a tab's menu (sidebar and top strip). */
 export function runPageMenuAction(item: SidebarItemRef, action: 'split' | 'new-window' | 'back-to-window', activeTabId?: string | null): void {
@@ -587,14 +611,14 @@ const SidebarImpl: React.FC<SidebarProps> = ({
         setHoleReady(false);
       }
     } else if (visible) {
-      const anim = opening ? { from: [0, 0, -24, H] as HoleRect, ms: SLIDE_IN_MS, ease: [0.22, 1, 0.36, 1] as [number, number, number, number], lead: 8 } : undefined;
+      const anim = opening ? { from: [0, 0, -24, H] as HoleRect, ms: SLIDE_IN_MS, ease: [0.32, 0.72, 0, 1] as [number, number, number, number], lead: 8 } : undefined;
       void setViewportHole('sidebar', [0, 0, holeWidth, H], anim).then(() => {
         if (current()) setHoleReady(true);
       });
     } else {
       setHoleReady(false);
       if (holeShown.current) {
-        void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: SLIDE_OUT_MS, ease: [0.4, 0, 0.6, 1], lead: -12, remove: true });
+        void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: SLIDE_OUT_MS, ease: [0.4, 0, 0.2, 1], lead: -12, remove: true });
       }
     }
     holeShown.current = visible;
@@ -994,14 +1018,18 @@ const SidebarImpl: React.FC<SidebarProps> = ({
   };
   const renderTabRow = (item: SidebarItemRef, inert = false) => {
     const active = isActiveItem(item);
+    const place = tabPlacement(item.tab?.id ?? item.id, state);
+    // The other half of the split on screen is on screen too: lit like the active row.
+    const partner = !active && !!place.split?.onScreen;
     // Sleeping tabs look like any other: memory is freed in the background.
-    const cls = `nsb-tab ${active ? 'active' : ''} ${item.tab?.unloaded ? 'unloaded' : ''}`;
+    const cls = `nsb-tab ${active ? 'active' : ''} ${partner ? 'split-partner' : ''} ${item.tab?.unloaded ? 'unloaded' : ''}`;
     const content = (
       <>
         <span className="nsb-tab-favicon">
           <Favicon src={item.favicon ?? item.tab?.favicon} />
         </span>
         <span className="nsb-tab-title">{item.title || item.url || 'New Tab'}</span>
+        <PlacementMark placement={place} />
       </>
     );
     // Neighbour panes only need to look right: no handlers, no focusable controls.

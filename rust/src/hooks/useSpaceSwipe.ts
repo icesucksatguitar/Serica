@@ -95,6 +95,30 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     tail: startTail(1, 0) as MomentumTail,
   }).current;
 
+  // The pane width, kept by a ResizeObserver. Reading clientWidth while a
+  // space switch commits forced a full layout in the middle of it (~7 ms,
+  // a dropped frame at the start of the slide).
+  const widthRef = useRef(0);
+  const paneWidth = () => {
+    if (!widthRef.current) {
+      const t = optsRef.current.trackRef.current;
+      widthRef.current = t?.parentElement?.clientWidth || t?.clientWidth || 0;
+    }
+    return widthRef.current;
+  };
+  useEffect(() => {
+    const el = opts.trackRef.current?.parentElement;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      // Layout is clean when this runs: reading clientWidth here is free.
+      const w = (entries[0]?.target as HTMLElement | undefined)?.clientWidth;
+      if (w) widthRef.current = w;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const writeTint = (value: string) => {
     if (value === s.tint) return;
     s.tint = value;
@@ -335,7 +359,7 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
       // active (see the layout effect below): the swipe goes on from there.
       if (!s.pendingId) {
         s.index = Math.max(0, o.order.findIndex((x) => x.id === o.activeId));
-        s.width = o.trackRef.current?.parentElement?.clientWidth || o.trackRef.current?.clientWidth || s.width || 260;
+        s.width = paneWidth() || s.width || 260;
       }
       s.phase = 'drag';
       s.raw = s.offset;
@@ -366,7 +390,7 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
       s.phase = 'drag';
       s.index = Math.max(0, idx);
       const measuredWidth =
-        o.trackRef.current?.parentElement?.clientWidth || o.trackRef.current?.clientWidth || 260;
+        paneWidth() || 260;
       s.width = measuredWidth;
       s.reduced = reducedMotion();
       s.raw = -s.accX;
@@ -440,7 +464,7 @@ export function useSpaceSwipe(opts: SpaceSwipeOptions): OutgoingSpace | null {
     const iNew = order.findIndex((x) => x.id === activeId);
     const iOld = order.findIndex((x) => x.id === prev);
     const track = trackRef.current;
-    const measuredWidth = track?.parentElement?.clientWidth || track?.clientWidth || 260;
+    const measuredWidth = paneWidth() || 260;
     s.width = measuredWidth;
     if (!track || iNew < 0 || iOld < 0 || reducedMotion() || measuredWidth <= 0) {
       rest();
