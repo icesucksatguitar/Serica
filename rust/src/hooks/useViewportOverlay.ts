@@ -356,9 +356,40 @@ async function show(group: string, pane: UnderlayPane, r: HoleRect, cap: Capture
   return true;
 }
 
+/** Only a capture this recent will do (a page playing video: an older one
+ *  shows a frame from back then), waiting up to `waitMs` for one. */
+export interface FreshCapture {
+  maxAgeMs: number;
+  waitMs: number;
+}
+
+/** A capture taken within `fresh.maxAgeMs`, or null if none comes in time. */
+async function freshCapture(tabId: string, key: string, fresh: FreshCapture): Promise<Capture | null> {
+  const now = performance.now();
+  const ok = (c: Capture | null | undefined): c is Capture => !!c && c.key === key && performance.now() - c.startedAt <= fresh.maxAgeMs;
+  const have = captures.get(tabId);
+  if (ok(have)) return have;
+  // One started recently (as the pointer headed for the edge) is used;
+  // otherwise a new one is started now.
+  const running = inflight.get(tabId);
+  let p: Promise<Capture | null>;
+  if (running && now - running.at <= fresh.maxAgeMs) {
+    p = running.p;
+  } else {
+    changedAt.set(tabId, now);
+    p = capturePage(tabId);
+  }
+  const cap = await Promise.race([p, wait(fresh.waitMs).then(() => null)]);
+  return ok(cap) ? cap : null;
+}
+
 /** One page's part of `preparePageUnderlay`. */
-async function preparePane(group: string, pane: UnderlayPane, r: HoleRect): Promise<boolean> {
+async function preparePane(group: string, pane: UnderlayPane, r: HoleRect, fresh?: FreshCapture): Promise<boolean> {
   const tabId = pane.tabId;
+  if (fresh) {
+    const cap = await freshCapture(tabId, pane.key, fresh);
+    return !!cap && (await show(group, pane, r, cap));
+  }
   let cap = currentCapture(tabId);
   let stale = false;
   if (!cap) {
@@ -389,10 +420,10 @@ async function preparePane(group: string, pane: UnderlayPane, r: HoleRect): Prom
  * painted, false when there is no capture to show (the panel then slides
  * over the page area's plain background). Never waits long for a capture.
  */
-export async function preparePageUnderlay(group: string, rect: HoleRect): Promise<boolean> {
+export async function preparePageUnderlay(group: string, rect: HoleRect, fresh?: FreshCapture): Promise<boolean> {
   const jobs = panes.map((p) => [p, intersect(rect, p)] as const).filter((j): j is readonly [UnderlayPane, HoleRect] => j[1] !== null);
   if (!jobs.length) return false;
-  const shown = await Promise.all(jobs.map(([p, r]) => preparePane(group, p, r)));
+  const shown = await Promise.all(jobs.map(([p, r]) => preparePane(group, p, r, fresh)));
   if (!shown.some(Boolean)) return false;
   await twoFrames();
   return true;

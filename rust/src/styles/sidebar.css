@@ -1264,3 +1264,20 @@ body.light .nsb-preview-url {
 .nsb.collapsed .nsb-today-section-header {
   display: none;
 }
+
+/* Over a playing video without a fresh snapshot (Sidebar `snap`): shown and
+   hidden in one step, contents fading in, so nothing beside it can show a
+   stale frame or black. */
+.nsb.autohide.nsb-snap,
+.nsb.autohide.nsb-snap.hidden {
+  transition: none !important;
+}
+
+.nsb.autohide.nsb-snap.visible > * {
+  animation: nsb-snap-in 160ms var(--ease-out, ease-out);
+}
+
+@keyframes nsb-snap-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

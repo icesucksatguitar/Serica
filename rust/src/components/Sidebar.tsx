@@ -47,11 +47,14 @@ import { TabPreviewCard } from './TabPreviewCard';
 import { SpaceMenu } from './SpaceMenu';
 import { GuideTour, type GuideStep } from './GuideTour';
 import { addSettledBlurListener } from '../utils/settledBlur';
-import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
+import { type HoleRect, preparePageUnderlay, prewarmPageUnderlay, refreshPageCapture, removeViewportHole, setPageUnderlay, setViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 
 /** The auto-hide sidebar's slide (keep in step with `.nsb.autohide` in sidebar.css). */
 const SLIDE_IN_MS = 320;
 const SLIDE_OUT_MS = 240;
+const nextFrames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+/** The snapshot under a sliding sidebar when the page plays video (see pagePlaying). */
+const FRESH_VIDEO_CAPTURE = { maxAgeMs: 800, waitMs: 80 };
 /** How long the pointer must be away before the sidebar hides. */
 const HIDE_DELAY_MS = 100;
 /** A sidebar just revealed stays at least this long (a pass over the edge). */
@@ -568,9 +571,51 @@ const SidebarImpl: React.FC<SidebarProps> = ({
   // page goes beneath it first, the clip is cut in one step (nothing visibly
   // changes), and the sidebar slides over the snapshot; closing runs the
   // same steps backwards.
+  // A page playing video changes every frame: the snapshot the sidebar
+  // slides over must be fresh, or the video beside it showed a frame from up
+  // to a minute ago (or black, with none ready yet). A muted video plays
+  // without the engine reporting audio, so the page is also asked, as the
+  // pointer heads for the left edge, and a fresh capture is started then.
+  const [videoPlaying, setVideoPlaying] = useState<{ tabId: string; playing: boolean } | null>(null);
+  const activeTabForMedia = state.tabs.find((t) => t.id === state.activeTabId);
+  const audioPlaying = Boolean(activeTabForMedia?.hasActiveMedia);
+  useEffect(() => {
+    const api = window.serica;
+    const tabId = state.activeTabId;
+    if (!autoHide || !livePage || !tabId || !api?.onEdgeApproach || !api.getMediaState) return;
+    let alive = true;
+    const check = () => {
+      void api.getMediaState!(tabId)
+        .catch(() => null)
+        .then((r: { isPlaying?: boolean; hasVideo?: boolean } | null) => {
+          const playing = Boolean(r?.isPlaying && r?.hasVideo);
+          if (alive) setVideoPlaying({ tabId, playing });
+          if (alive && playing) refreshPageCapture(tabId);
+        });
+    };
+    check();
+    const off = api.onEdgeApproach((edge) => {
+      if (edge !== 'left') return;
+      if (audioPlayingRef.current) refreshPageCapture(tabId);
+      check();
+    });
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, [autoHide, livePage, state.activeTabId]);
+  const pagePlaying = audioPlaying || (videoPlaying?.tabId === state.activeTabId && videoPlaying.playing);
+  const audioPlayingRef = useRef(audioPlaying);
+  audioPlayingRef.current = audioPlaying;
+  const pagePlayingRef = useRef(pagePlaying);
+  pagePlayingRef.current = pagePlaying;
   const instant = Boolean(livePage);
   const shown = instant ? holeReady : visible && holeReady;
 
+  // Over a playing video with no fresh snapshot to slide over, the sidebar
+  // shows and goes in one step (only its contents fade in): a slide would
+  // show black or a stale frame beside it.
+  const [snap, setSnap] = useState(false);
   const holeWidth = (sidebarWidth ?? 240) + 1;
   const holeShown = useRef(false);
   const holeSeq = useRef(0);
@@ -583,18 +628,40 @@ const SidebarImpl: React.FC<SidebarProps> = ({
     const closing = !visible && holeShown.current;
     if (instant && opening) {
       void (async () => {
-        await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight]);
+        const playing = pagePlayingRef.current;
+        const ready = await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight], playing ? FRESH_VIDEO_CAPTURE : undefined);
         if (!current()) return;
+        if (playing && !ready) {
+          // One step: the sidebar is drawn in place (still under the page)
+          // first, then the cut reveals it, so the hole is never empty.
+          setSnap(true);
+          setHoleReady(true);
+          await nextFrames();
+          if (!current()) return;
+          await setViewportHole('sidebar', [0, 0, holeWidth, H]);
+          return;
+        }
         await setViewportHole('sidebar', [0, 0, holeWidth, H]);
         if (!current()) return;
+        setSnap(false);
         setHoleReady(true); // slides in over the snapshot
         await sleepMs(SLIDE_IN_MS + 40);
         if (current()) setPageUnderlay('sidebar'); // fully covered by the sidebar now
       })();
     } else if (instant && closing) {
       void (async () => {
-        await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight]);
+        const playing = pagePlayingRef.current;
+        const ready = await preparePageUnderlay('sidebar', [0, 0, holeWidth, window.innerHeight], playing ? FRESH_VIDEO_CAPTURE : undefined);
         if (!current()) return;
+        if (playing && !ready) {
+          // One step: the page covers the sidebar again first, then it goes.
+          await setViewportHole('sidebar', [0, 0, 0, 0], { remove: true });
+          if (!current()) return;
+          setSnap(true);
+          setHoleReady(false);
+          return;
+        }
+        setSnap(false);
         setHoleReady(false); // slides out over the snapshot
         await sleepMs(SLIDE_OUT_MS + 20);
         if (!current()) return;
@@ -611,11 +678,14 @@ const SidebarImpl: React.FC<SidebarProps> = ({
         setHoleReady(false);
       }
     } else if (visible) {
+      // A snapshot slide cut short (the page started playing) leaves none behind.
+      setPageUnderlay('sidebar');
       const anim = opening ? { from: [0, 0, -24, H] as HoleRect, ms: SLIDE_IN_MS, ease: [0.32, 0.72, 0, 1] as [number, number, number, number], lead: 8 } : undefined;
       void setViewportHole('sidebar', [0, 0, holeWidth, H], anim).then(() => {
         if (current()) setHoleReady(true);
       });
     } else {
+      setPageUnderlay('sidebar');
       setHoleReady(false);
       if (holeShown.current) {
         void setViewportHole('sidebar', [0, 0, -24, H], { from: [0, 0, holeWidth, H], ms: SLIDE_OUT_MS, ease: [0.4, 0, 0.2, 1], lead: -12, remove: true });
@@ -1325,6 +1395,7 @@ const SidebarImpl: React.FC<SidebarProps> = ({
     expanded ? 'expanded' : 'collapsed',
     drag.dragging ? 'dragging' : '',
     autoHide ? 'autohide' : '',
+    snap ? 'nsb-snap' : '',
     shown ? 'visible' : 'hidden',
     className ?? '',
   ]
