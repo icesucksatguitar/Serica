@@ -421,8 +421,24 @@ export function setViewportHole(id: string, rect: HoleRect, opts?: HoleOptions):
   return p ? p.catch(() => undefined) : Promise.resolve();
 }
 
-export function removeViewportHole(id: string): void {
-  void setViewportHole(id, [0, 0, 0, 0], { remove: true });
+export function removeViewportHole(id: string): Promise<void> {
+  return setViewportHole(id, [0, 0, 0, 0], { remove: true });
+}
+
+/**
+ * Every cut-out the UI makes. The backend keeps them until they are removed;
+ * a UI that reloads (a UI patch applied with "Reload now") never runs its
+ * cleanup, so a popup's cut-out stayed cut into every page. A fresh UI
+ * removes them all once before it cuts its own.
+ */
+const UI_HOLE_IDS = [
+  'sidebar', 'topbar', 'dock', 'dock-menu', 'app-context-menu', 'page-context-menu', 'permission-prompt',
+  'sidebar-folder-menu', 'sidebar-menu', 'sidebar-space-menu', 'tab-preview', 'top-tab-menu',
+  'ui-patch-notice', 'update-notice', 'whats-new', 'guide-widgets', 'guide-sidebar',
+];
+
+export function clearStaleViewportHoles(): Promise<unknown> {
+  return Promise.all(UI_HOLE_IDS.map((id) => removeViewportHole(id).catch(() => undefined)));
 }
 
 /**

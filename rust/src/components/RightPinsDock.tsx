@@ -195,7 +195,7 @@ export const RightPinsDock: React.FC<RightPinsDockProps> = ({
     }
     holeShown.current = isHoveredDock;
   }, [isOnWebpage, isHoveredDock, pins.length]);
-  useEffect(() => () => removeViewportHole('dock'), []);
+  useEffect(() => () => void removeViewportHole('dock'), []);
 
   const itemRefs = useRef<{ [id: string]: HTMLDivElement | null }>({});
 
