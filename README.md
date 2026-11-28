@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
-<img src="docs/screenshots/hero-homescreen.png" alt="Serica new-tab page with widgets, the clock and a background" width="900">
+<img src="docs/screenshots/new-tab.jpg" alt="Serica's new tab: glass widgets and the clock over a Serica Special oil-pastel painting" width="900">
 
 ### [⬇ Download Serica for Windows (.msi)](https://github.com/icesucksatguitar/Serica/releases/latest/download/Serica-Setup-x64.msi)
 
@@ -33,6 +33,10 @@ Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that p
 
 Setup brings over bookmarks, history and passwords from Chrome, Edge, Brave, Vivaldi, Opera or Firefox, asks for a sidebar or top tabs, a look (light, dark or match Windows, a palette and a new-tab background), and can make Serica your default browser. A short tour then shows the address bar, the sidebar, widgets, Theme Studio and Focus Mode. Updating from an earlier Serica opens setup once and keeps everything you have: tabs, spaces, sign-ins, cookies, passwords and settings.
 
+<img src="docs/screenshots/settings-import.png" alt="Settings, General: make Serica the default browser and bring bookmarks, history and passwords over from Edge or Zen" width="820">
+
+You can bring things over again at any time from Settings → General, into the current profile or a new one.
+
 ### Spaces and the sidebar
 <img src="docs/screenshots/spaces-sidebar.png" alt="Sidebar with pinned and Today tabs next to a web page" width="820">
 
@@ -42,9 +46,13 @@ Setup brings over bookmarks, history and passwords from Chrome, Edge, Brave, Viv
 - Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
 
 ### The new tab
+<img src="docs/screenshots/new-tab-dark.png" alt="New tab on a black background with a contribution graph, Claude and Notion widgets, and the website dock" width="820">
+
 Only your widgets and the clock (with an optional greeting in **Customize**): press and hold a widget to move it anywhere on the grid (the others make room), resize it, or set it up; widgets are liquid glass that takes on the colours behind it. The background can be your space's colours, a solid colour, a gradient, your own picture, or **Serica Special**: three oil-pastel paintings after French Revolution-era art, crossfading slowly.
 
 ### Focus Mode
+<img src="docs/screenshots/focus.png" alt="Focus settings with Lists and Statistics tabs and a verified clock" width="820">
+
 Block the sites that pull you away, Cold Turkey style: exact domains, `*.wildcards`, paths, categories and exceptions, for a set time or on a weekly schedule. Blocking happens in the request pipeline of every tab, profile and window, before the site is contacted, and shows a calm block page. A locked list can't be stopped, loosened or deleted until its time is up, not even by restarting Serica or moving the clock. **Statistics** show time focused, sessions kept, a streak, what you reached for while it was blocked and at what hour, and where your browsing time went, by day, week, month or year, with CSV export. Everything stays on your PC.
 
 ### Website dock
@@ -59,6 +67,10 @@ One-click sites on the right edge of the window. On web pages it stays tucked aw
 <img src="docs/screenshots/theme-studio.png" alt="Theme Studio" width="820">
 
 Each space gets its own theme from curated palettes (or a hue of your own), light, dark or matching Windows, with a live preview; text contrast is kept readable whatever you pick.
+
+<img src="docs/screenshots/settings-appearance.png" alt="Appearance settings: light or dark per space, sidebar or top tabs, glass panels, a hiding top bar and the website dock" width="820">
+
+Settings → Appearance also switches between sidebar and top tabs, flat or outlined top-bar buttons, glass panels, and a top bar that hides on websites until the pointer reaches the top edge.
 
 ### Shields: built-in ad and tracker blocking
 <img src="docs/screenshots/shields.png" alt="Shields panel showing blocked ads and trackers on a news site" width="820">
