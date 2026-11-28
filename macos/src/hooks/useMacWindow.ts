@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react';
 
 /** Where the window can be dragged (the regions the Windows build marks `-webkit-app-region: drag`). */
-const DRAG_REGIONS = '.macos-window-drag-bar, .nsb-header, .nsb-chrome-row';
+const DRAG_REGIONS = '.macos-window-drag-bar, .nsb-header, .nsb-chrome-row, .dwin-bar';
 
 /** What stays clickable inside a drag region (`-webkit-app-region: no-drag`). */
 const NO_DRAG = [
@@ -34,6 +34,7 @@ const NO_DRAG = [
   '.site-nav-controls',
   '.site-nav-btn',
   '.topbar-new-tab-btn',
+  '.dwin-address',
 ].join(', ');
 
 /** Installs the drag-region handling; returns its removal. */

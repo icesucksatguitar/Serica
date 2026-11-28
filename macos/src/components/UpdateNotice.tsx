@@ -38,7 +38,8 @@ function summary(notes: string | null | undefined): string[] {
  * (checked shortly after launch and every two hours). "Remind me later"
  * hides it for a few hours; it comes back the next time the window is used
  * after that, until Serica is restarted into the new version. The update is
- * also offered in Settings → About.
+ * also offered in Settings → About, and installs on its own when Serica is
+ * closed.
  */
 export const UpdateNotice: React.FC = () => {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
@@ -97,7 +98,7 @@ export const UpdateNotice: React.FC = () => {
             Serica {version} is ready
           </p>
           <p className="update-notice-text" id="update-notice-text">
-            {installing ? 'Installing… Serica will reopen when it’s done.' : 'Restart to update. Your tabs will be right where you left them.'}
+            {installing ? 'Installing… Serica will reopen when it’s done.' : 'Restart now, or it installs when you close Serica. Your tabs will be right where you left them.'}
           </p>
         </div>
         {!installing && (

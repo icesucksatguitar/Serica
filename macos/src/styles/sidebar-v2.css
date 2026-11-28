@@ -240,6 +240,27 @@
   box-shadow: inset 0 0 0 1px var(--ui-line);
 }
 
+/* The other half of the split on screen: lit, a step quieter than the active row. */
+.nsb-tab.split-partner,
+.ttab.split-partner {
+  background: color-mix(in srgb, var(--ui-selected) 55%, transparent);
+  color: var(--ui-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-line) 70%, transparent);
+}
+
+/* Split view half / own window, after the title. */
+.nsb-place-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--ui-fg-faint, var(--ui-fg-muted));
+}
+
+.nsb-place-mark.split.on {
+  color: var(--theme-accent, var(--ui-fg));
+}
+
 /* No colored bar: the fill marks the current tab. */
 .nsb-tab.active::before {
   content: none;

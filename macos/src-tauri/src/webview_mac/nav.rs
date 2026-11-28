@@ -515,8 +515,12 @@ pub(super) fn observed(wv: &WKWebView, key: &str) {
             };
             if changed && (state == 1 || state == 0) {
                 crate::clip_mac::set_fullscreen(wv, fs);
-                crate::tabhost::TabHost::set_html_fullscreen(&ctx.app, fs);
-                ui_emit(&ctx.app.handle, "serica:html-fullscreen", fs);
+                // A tab in a window of its own: WebKit shows the element in its
+                // own fullscreen window; the main window is not involved.
+                if !crate::detached::set_fullscreen(&ctx.app, &ctx.tab_id, fs) {
+                    crate::tabhost::TabHost::set_html_fullscreen(&ctx.app, fs);
+                    ui_emit(&ctx.app.handle, "serica:html-fullscreen", fs);
+                }
             }
         }
         "themeColor" => {

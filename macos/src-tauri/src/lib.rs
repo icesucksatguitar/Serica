@@ -6,6 +6,7 @@ mod bookmarks;
 mod browser_import;
 mod default_browser;
 mod commands;
+mod detached;
 mod downloads;
 mod extensions;
 mod files;
@@ -118,6 +119,16 @@ pub fn run() {
             menu_mac::install();
             if let Some(window) = app.get_webview_window("main") {
                 window_state::attach(&window, data_dir.join("window.json"));
+                // Tabs in windows of their own close with the main window
+                // (otherwise Serica would keep running for them).
+                let h = app.handle().clone();
+                window.on_window_event(move |e| {
+                    if matches!(e, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed) {
+                        if let Some(shared) = h.try_state::<app::Shared>() {
+                            detached::close_all(&shared);
+                        }
+                    }
+                });
             }
             let shared = app::App::new(app.handle().clone(), data_dir);
             app::set_global(shared.clone());
@@ -265,6 +276,12 @@ pub fn run() {
             commands::list_downloads,
             commands::download_action,
             commands::start_download_drag,
+            commands::split_tabs,
+            commands::detach_tab,
+            commands::reattach_tab,
+            commands::tab_action,
+            commands::unsplit_tab,
+            commands::set_split_ratio,
             commands::clear_downloads,
             commands::open_downloads_folder,
             commands::list_extensions,
@@ -355,6 +372,8 @@ pub fn run() {
                 webview_mac::fail_all_pending();
                 tabhost::TabHost::close_all(&shared);
             }
+            // Last: a downloaded update replaces the app bundle now.
+            updater::install_on_exit();
         }
         _ => {}
     });

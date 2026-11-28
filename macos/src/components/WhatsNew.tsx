@@ -5,6 +5,24 @@ import { useElementHole } from '../hooks/useViewportOverlay';
 
 /** What changed in each version, shown once after Serica updates to it. */
 export const RELEASE_NOTES: Record<string, { title: string; text: string }[]> = {
+  '0.5.3': [
+    {
+      title: 'Split view',
+      text: 'Drag a tab from the sidebar onto the page to show two sites side by side, or right-click a tab › Open in split view. Drag the divider to resize, double-click it to even out, and use its × to end the split.',
+    },
+    {
+      title: 'Tabs in their own window',
+      text: 'Drag a tab out of the window, or right-click › Move to new window. The page keeps its place. Back to Serica puts it back, and closing the window closes the tab.',
+    },
+    {
+      title: 'Fast space swipes',
+      text: 'Swipe between spaces as quickly as you like: a new swipe works right away, and Serica keeps focus while you swipe instead of losing it to the page.',
+    },
+    {
+      title: 'Smaller fixes',
+      text: 'Links opened from other apps bring Serica to the front, music no longer pauses again after closing the mini player, a downloaded update installs when you quit Serica, and the notes widget no longer underlines words.',
+    },
+  ],
   '0.5.2': [
     {
       title: 'Smoother sidebar and swipes',

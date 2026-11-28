@@ -88,7 +88,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   will-change: transform;
   transform: translate3d(0, 0, 0);
   visibility: visible;
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
+  transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s linear 0s;
 }
 
 [data-theme="light"] .nsb.autohide {
@@ -102,7 +102,7 @@ body.sidebar-resizing-active .arc-viewport-container {
   transform: translate3d(calc(-100% - 24px), 0, 0);
   visibility: hidden;
   pointer-events: none;
-  transition: transform 180ms cubic-bezier(0.4, 0, 0.6, 1), visibility 0s linear 180ms;
+  transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 240ms;
 }
 
 .nsb-edge-zone {
@@ -146,7 +146,7 @@ body.sidebar-resizing-active .arc-viewport-container {
 html.sidebar-covering .floating-top-chrome-capsule .macos-window-controls-cluster,
 html.sidebar-covering .floating-top-chrome-capsule .top-floating-url-pill {
   transition:
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 320ms cubic-bezier(0.32, 0.72, 0, 1),
     opacity 160ms ease,
     background 0.2s ease,
     border-color 0.2s ease,
@@ -1263,4 +1263,21 @@ body.light .nsb-preview-url {
 .nsb.collapsed .nsb-section-empty-hint,
 .nsb.collapsed .nsb-today-section-header {
   display: none;
+}
+
+/* Over a playing video without a fresh snapshot (Sidebar `snap`): shown and
+   hidden in one step, contents fading in, so nothing beside it can show a
+   stale frame or black. */
+.nsb.autohide.nsb-snap,
+.nsb.autohide.nsb-snap.hidden {
+  transition: none !important;
+}
+
+.nsb.autohide.nsb-snap.visible > * {
+  animation: nsb-snap-in 160ms var(--ease-out, ease-out);
+}
+
+@keyframes nsb-snap-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

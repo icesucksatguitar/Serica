@@ -1,6 +1,6 @@
 {
   "name": "serica-macos",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Serica Browser - macOS (Tauri v2 + WebKit) implementation",
   "type": "module",
   "scripts": {

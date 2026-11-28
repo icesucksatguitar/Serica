@@ -137,7 +137,9 @@ fn run(app: &Shared, cmd: &Value) -> Value {
             let handle = app.handle.clone();
             on_main(&app.handle, WAIT, move || {
                 let mtm = MainThreadMarker::new().expect("main thread");
-                let Some(window) = main_window(&handle) else { return json!({ "error": "no window" }) };
+                // `"window":"<label>"` aims at another window (a tab's own window).
+                let label = cmd["window"].as_str().unwrap_or("main").to_string();
+                let Some(window) = window_by_label(&handle, &label) else { return json!({ "error": "no window" }) };
                 match cmd["op"].as_str().unwrap_or("") {
                     "key" => key(mtm, &window, &cmd),
                     "keyequiv" => key_equivalent(mtm, &window, &cmd),
@@ -156,7 +158,11 @@ fn run(app: &Shared, cmd: &Value) -> Value {
 }
 
 fn main_window(handle: &tauri::AppHandle) -> Option<Retained<NSWindow>> {
-    let w = handle.get_window("main")?;
+    window_by_label(handle, "main")
+}
+
+fn window_by_label(handle: &tauri::AppHandle, label: &str) -> Option<Retained<NSWindow>> {
+    let w = handle.get_window(label)?;
     let ptr = w.ns_window().ok()? as *const NSWindow;
     // SAFETY: the live NSWindow, used on the main thread.
     (!ptr.is_null()).then(|| unsafe { (*ptr).retain() })

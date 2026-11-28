@@ -14,7 +14,7 @@
    ========================================================================== */
 
 :root {
-  --panel-enter: var(--dur-slow) var(--spring-snap);
+  --panel-enter: var(--dur-slow) var(--ease-out);
   --panel-exit: var(--dur-exit) var(--ease-in);
 }
 
@@ -131,7 +131,7 @@
 .app-context-menu,
 .tools-menu-panel,
 .page-context-menu {
-  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-slow) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

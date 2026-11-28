@@ -17,6 +17,35 @@ use objc2_foundation::{NSObjectProtocol, NSString};
 use std::cell::RefCell;
 
 /// Serica commands behind menu items, by item tag.
+/// A menu shortcut while a tab's own window is the key window: ⌘W closes
+/// that tab and navigation acts on its page; the rest act in the main window,
+/// which comes to the front (as on Windows).
+fn detached_shortcut(app: &crate::app::Shared, id: &str, sc: Shortcut) {
+    let nav = match sc {
+        Shortcut::CloseTab => {
+            let id = id.to_string();
+            app.mutate(|s| s.close_tab(&id));
+            return;
+        }
+        Shortcut::Back => "back",
+        Shortcut::Forward => "forward",
+        Shortcut::Reload => "reload",
+        Shortcut::HardReload => "hard-reload",
+        Shortcut::Stop => "stop",
+        Shortcut::Find | Shortcut::FindNext | Shortcut::FindPrevious | Shortcut::CycleTab(_) => return,
+        sc => {
+            if let Some(w) = tauri::Manager::get_webview_window(&app.handle, "main") {
+                let _ = w.set_focus();
+            }
+            app.shortcut(sc);
+            return;
+        }
+    };
+    if let Some(wv) = crate::tabhost::TabHost::webview(app, id) {
+        crate::webview_mac::nav(&wv, nav);
+    }
+}
+
 fn command(tag: isize) -> Option<Shortcut> {
     Some(match tag {
         1 => Shortcut::NewTab,
@@ -61,7 +90,10 @@ define_class!(
         #[unsafe(method(sericaCommand:))]
         fn run(&self, sender: &NSMenuItem) {
             if let (Some(sc), Some(app)) = (command(sender.tag()), crate::app::global()) {
-                app.shortcut(sc);
+                match crate::detached::key_tab() {
+                    Some(id) => detached_shortcut(&app, &id, sc),
+                    None => app.shortcut(sc),
+                }
             }
         }
 

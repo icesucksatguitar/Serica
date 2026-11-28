@@ -255,6 +255,36 @@ pub struct ResourceStats {
     pub sleeping_count: usize,
 }
 
+/// Two tabs shown side by side (split view): `left` and `right` share the
+/// page area, `ratio` is the left pane's share of its width.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Split {
+    pub left: String,
+    pub right: String,
+    #[serde(default = "half")]
+    pub ratio: f64,
+}
+
+fn half() -> f64 {
+    0.5
+}
+
+impl Split {
+    pub fn has(&self, id: &str) -> bool {
+        self.left == id || self.right == id
+    }
+    pub fn partner(&self, id: &str) -> Option<&str> {
+        if self.left == id {
+            Some(&self.right)
+        } else if self.right == id {
+            Some(&self.left)
+        } else {
+            None
+        }
+    }
+}
+
 /// Snapshot sent to the UI on every `serica:state-update`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -269,4 +299,7 @@ pub struct BrowserAppState {
     pub active_profile_id: String,
     pub favorites: Vec<FavoriteEntry>,
     pub folders: Vec<FolderRecord>,
+    pub splits: Vec<Split>,
+    /// Tabs shown in windows of their own (see `Store::detached`).
+    pub detached_tabs: Vec<String>,
 }

@@ -25,6 +25,14 @@ pub fn page_script() -> String {
     clearTimeout(settle);
     settle = setTimeout(() => {{ if (document.visibilityState === 'visible') post({{ t: 'settled' }}); }}, 300);
   }}, {{ passive: true, capture: true }});
+  // Keyboard focus in the page (a click into one pane of a split view makes
+  // its tab the active one). Blur only once focus has left the document:
+  // focus moving into one of its frames is still the page.
+  addEventListener('focus', (e) => {{ if (e.target === window) post({{ t: 'focus' }}); }});
+  addEventListener('blur', (e) => {{
+    if (e.target !== window) return;
+    setTimeout(() => {{ if (!document.hasFocus()) post({{ t: 'blur' }}); }}, 0);
+  }});
   const seenC = new Set(), seenI = new Set();
   let pendC = [], pendI = [], timer = 0;
   const flush = () => {{ timer = 0; if (pendC.length || pendI.length) {{ post({{ t: 'cosmetic', classes: pendC, ids: pendI }}); pendC = []; pendI = []; }} }};

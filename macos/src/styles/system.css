@@ -42,7 +42,7 @@
   --text-xl: 18px;
 
   --dur-fast: 120ms;
-  --dur-enter: 180ms;
+  --dur-enter: 240ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* Semantic colors, following the active space's theme. */

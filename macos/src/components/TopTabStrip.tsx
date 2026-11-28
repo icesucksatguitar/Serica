@@ -5,6 +5,8 @@ import {
   buildSidebarView,
   contextMenuActions,
   moveToSpaceOp,
+  pageMenuOptions,
+  tabPlacement,
   type SidebarItemRef,
   type SidebarMenuAction,
 } from '../utils/sidebarModel';
@@ -12,7 +14,7 @@ import { useHoverPreview } from '../hooks/useHoverPreview';
 import { useElementHole, useViewportOverlay } from '../hooks/useViewportOverlay';
 import { addSettledBlurListener } from '../utils/settledBlur';
 import { TabPreviewCard } from './TabPreviewCard';
-import { MENU_ICONS, MENU_LABELS, SpaceIcon } from './Sidebar';
+import { MENU_ICONS, MENU_LABELS, PlacementMark, SpaceIcon, runPageMenuAction } from './Sidebar';
 
 /** The tab commands the strip's right-click menu issues (names match `useBrowser()`). */
 export interface TopTabActions {
@@ -122,6 +124,11 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
       case 'duplicate':
         actions.duplicateTab(item.id);
         break;
+      case 'split':
+      case 'new-window':
+      case 'back-to-window':
+        runPageMenuAction(item, action, state.activeTabId);
+        break;
       case 'close':
         onCloseTab(item.id);
         break;
@@ -136,7 +143,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
 
   // The strip shows no folders, so "Move to folder" stays in the sidebar.
   const menuActions = menu
-    ? contextMenuActions(menu.item, { hasFolders: false }).filter((a) => a !== 'move-to-folder')
+    ? contextMenuActions(menu.item, { hasFolders: false, ...pageMenuOptions(menu.item, state) }).filter((a) => a !== 'move-to-folder')
     : [];
   const menuSpaces = menu ? view.spaceOrder.filter((s) => s.id !== menu.item.tab?.spaceId) : [];
   const profileCount = view.groups.length;
@@ -270,6 +277,8 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
 
   const renderTab = (item: SidebarItemRef, pinned: boolean) => {
     const active = item.id === state.activeTabId;
+    const place = tabPlacement(item.id, state);
+    const partner = !active && !!place.split?.onScreen;
     const props = preview.itemProps(item, 'below');
     const section = pinned ? 'pinned' : 'today';
     return (
@@ -279,7 +288,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
         role="tab"
         aria-selected={active}
         tabIndex={0}
-        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}`}
+        className={`ttab${pinned ? ' pinned' : ''}${active ? ' active' : ''}${partner ? ' split-partner' : ''}`}
         title={pinned ? item.title : undefined}
         onPointerMove={onTabPointerMove}
         onPointerUp={endTabDrag}
@@ -317,6 +326,7 @@ export const TopTabStrip: React.FC<TopTabStripProps> = ({
       >
         <Favicon src={item.favicon ?? item.tab?.favicon} />
         {!pinned && <span className="ttab-title">{item.title || 'New Tab'}</span>}
+        {!pinned && <PlacementMark placement={place} />}
         {!pinned && (
           <button
             type="button"

@@ -5,7 +5,9 @@
 //! downloaded in the background and verified against the public key in
 //! tauri.conf.json (the plugin rejects packages not signed with our key); the
 //! UI then offers "Restart to update", which saves the session, replaces
-//! the app bundle with the new one and relaunches Serica.
+//! the app bundle with the new one and relaunches Serica. If the user just
+//! quits Serica instead, a downloaded update is installed as it quits (see
+//! `install_on_exit`), so the next launch is already the new version.
 
 use crate::app::{ui_emit, Shared};
 use parking_lot::Mutex;
@@ -178,6 +180,20 @@ async fn check_inner(handle: &AppHandle) -> Result<(), String> {
 fn is_missing_platform(err: &str) -> bool {
     let e = err.to_ascii_lowercase();
     e.contains("darwin") && (e.contains("not found") || e.contains("platform"))
+}
+
+/// Called as Serica quits (after the session is saved): if an update has
+/// been downloaded, the new app bundle replaces this one now (without
+/// relaunching), so the next launch is already the new version. Nothing
+/// happens otherwise.
+pub fn install_on_exit() {
+    let Some((update, bytes)) = inner().lock().ready.take() else {
+        return;
+    };
+    tracing::info!("installing Serica {} on exit", update.version);
+    if let Err(e) = update.install(bytes) {
+        tracing::warn!("couldn't install the update on exit: {e}");
+    }
 }
 
 /// Saves the session and swaps in the downloaded app; Serica relaunches.

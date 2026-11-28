@@ -27,6 +27,7 @@ import { Presence } from './hooks/usePresence';
 import type { SettingsPage } from './components/settings/parts';
 import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
 import { installDragRegions, useMacWindowState, useSidebarCovering, useTrafficLights } from './hooks/useMacWindow';
+import { useEdgeRelay } from './hooks/useEdgeRelay';
 import { resolveSpaceTheme, resolveReducedEffectsActive, SETUP_VERSION } from './shared/settings';
 import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
 import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
@@ -64,45 +65,71 @@ import './styles/glass.css';
 import './styles/motion.css';
 import './styles/macos.css';
 
-const ArchiveList = lazy(() =>
+// Panels load on first use. Their code is fetched and compiled while the
+// browser is idle after start, so the first opening has no hitch (the
+// command bar's first open took ~85 ms).
+const PANEL_LOADERS: (() => Promise<unknown>)[] = [];
+function panel<T>(load: () => Promise<T>): () => Promise<T> {
+  PANEL_LOADERS.push(load);
+  return load;
+}
+function preloadPanels(): void {
+  const idle = (cb: () => void) =>
+    typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 200);
+  const next = (i: number) => {
+    const load = PANEL_LOADERS[i];
+    if (!load) return;
+    idle(() => {
+      void load().catch(() => null).finally(() => next(i + 1));
+    });
+  };
+  next(0);
+}
+
+const ArchiveList = lazy(panel(() =>
   import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
-);
-const CommandBar = lazy(() =>
+));
+const CommandBar = lazy(panel(() =>
   import('./components/CommandBar').then((m) => ({ default: m.CommandBar }))
-);
-const ShieldModal = lazy(() =>
+));
+const ShieldModal = lazy(panel(() =>
   import('./components/ShieldModal').then((m) => ({ default: m.ShieldModal }))
-);
-const McpModal = lazy(() =>
+));
+const McpModal = lazy(panel(() =>
   import('./components/McpModal').then((m) => ({ default: m.McpModal }))
-);
-const ThemeStudio = lazy(() =>
+));
+const ThemeStudio = lazy(panel(() =>
   import('./components/ThemeStudio').then((m) => ({ default: m.ThemeStudio }))
-);
-const MediaPlayer = lazy(() =>
+));
+const MediaPlayer = lazy(panel(() =>
   import('./components/MediaPlayer').then((m) => ({ default: m.MediaPlayer }))
-);
-const Setup = lazy(() => import('./components/Setup').then((m) => ({ default: m.Setup })));
-const Settings2 = lazy(() =>
+));
+const Setup = lazy(panel(() => import('./components/Setup').then((m) => ({ default: m.Setup }))));
+const Settings2 = lazy(panel(() =>
   import('./components/settings/Settings2').then((m) => ({ default: m.Settings2 }))
-);
-const DownloadsPanel = lazy(() =>
+));
+const DownloadsPanel = lazy(panel(() =>
   import('./components/DownloadsPanel').then((m) => ({ default: m.DownloadsPanel }))
-);
-const ExtensionsModal = lazy(() =>
+));
+const ExtensionsModal = lazy(panel(() =>
   import('./components/ExtensionsModal').then((m) => ({ default: m.ExtensionsModal }))
-);
-const HistoryModal = lazy(() =>
+));
+const HistoryModal = lazy(panel(() =>
   import('./components/HistoryModal').then((m) => ({ default: m.HistoryModal }))
-);
-const VpnModal = lazy(() =>
+));
+const VpnModal = lazy(panel(() =>
   import('./components/VpnModal').then((m) => ({ default: m.VpnModal }))
-);
+));
 
 /** How long a panel takes to leave (keep in step with --dur-exit in foundation.css). */
-const PANEL_EXIT_MS = 170;
+const PANEL_EXIT_MS = 240;
 
 export function App() {
+  // Panel code loads while idle once start-up has settled (see `panel`).
+  useEffect(() => {
+    const t = window.setTimeout(preloadPanels, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
   const browser = useBrowser();
   const {
     state,
@@ -266,6 +293,17 @@ export function App() {
   // sampled top color; reports for a tab that is no longer active are ignored. Internal pages,
   // HTML fullscreen and undeterminable colors keep the default theme (R20.5, R20.6, R21.12).
   const [pageColor, setPageColor] = useState<TabPageColor | null>(null);
+  // The active tab's split view, when both of its tabs show a web page
+  // (otherwise the backend shows the active tab alone).
+  const activeSplit = useMemo(() => {
+    const id = activeTab?.id;
+    const sp = id ? state.splits?.find((x) => x.left === id || x.right === id) : undefined;
+    if (!sp || !activeTab) return null;
+    const partner = state.tabs.find((t) => t.id === (sp.left === id ? sp.right : sp.left));
+    const live = (t?: TabState) =>
+      !!t && !!t.url && t.url !== 'about:blank' && !t.url.startsWith('serica://') && !t.url.startsWith('neutrino://') && !t.isSleeping && !t.unloaded;
+    return live(activeTab) && live(partner) ? { split: sp, partner: partner! } : null;
+  }, [state.splits, state.tabs, activeTab]);
   const activeTabIdRef = useRef<string | undefined>(activeTab?.id);
   activeTabIdRef.current = activeTab?.id;
   const handlePageColor = useCallback((tabId: string, report: PageColorReport) => {
@@ -552,6 +590,11 @@ export function App() {
     timestamp: number;
   } | null>(null);
   const dismissedMediaTabsRef = useRef<Set<string>>(new Set());
+  // Closing the mini player hides it for that tab until the user goes back to
+  // the tab; after that it shows again the next time they leave it playing.
+  useEffect(() => {
+    if (state.activeTabId) dismissedMediaTabsRef.current.delete(state.activeTabId);
+  }, [state.activeTabId]);
 
   // MCP Initial Tab state
   const [mcpInitialTab, setMcpInitialTab] = useState<'assistants' | 'local' | 'tools'>('assistants');
@@ -1016,8 +1059,12 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
   // The page's insets from the window edges: the strip the sidebar slides
   // out of, and the one the dock waits in on websites. The top bar on a
   // website takes the same width as the page.
-  const pageInsetLeft = showSidebar ? 8 : 0;
-  const pageInsetRight = settings.rightPinsDockVisible && isWebpage && !isHtmlFullscreen ? 6 : 0;
+  // The page runs to the window's edges: the pointer reaching an edge over
+  // it is relayed to the UI instead of needing uncovered strips (see
+  // useEdgeRelay), which showed as gaps at the sides and corners.
+  const pageInsetLeft = 0;
+  const pageInsetRight = 0;
+  useEdgeRelay(isWebpage && !isHtmlFullscreen);
 // The top bar on web pages: 30px, and (by default) hidden until the pointer
 // reaches the top edge. The tab strip of top-tabs mode keeps it shown.
 const TOP_TAB_STRIP_HEIGHT = 38;
@@ -1040,7 +1087,7 @@ const contentTop = isHtmlFullscreen
   : showTopTabs
     ? TOP_BAR_HEIGHT + TOP_TAB_STRIP_HEIGHT
     : topBarAutoHideOn
-      ? TOP_BAR_REVEAL_STRIP
+      ? 0
       : TOP_BAR_HEIGHT;
 
 const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -1444,6 +1491,8 @@ return (
       <div className="arc-web-canvas-frame seamless">
         <BrowserViewport
           activeTab={activeTab}
+          split={activeSplit?.split ?? null}
+          partnerTab={activeSplit?.partner}
           tabs={state.tabs}
           spaces={state.spaces}
           activeSpaceId={state.activeSpaceId}

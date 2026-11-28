@@ -58,10 +58,9 @@ enum Slot {
 #[derive(Default)]
 struct State {
     holes: HashMap<String, Slot>,
-    /// Labels of the page webviews on screen.
-    pages: Vec<String>,
-    /// Page origin in points (window coordinates, top-left).
-    origin: (f64, f64),
+    /// Labels of the page webviews on screen, with each page's origin in
+    /// points (window coordinates, top-left; the panes of a split differ).
+    pages: Vec<(String, (f64, f64))>,
     /// Text size: UI CSS px to points.
     z: f64,
     /// Bumped on every change; `applied` is the last one on screen.
@@ -140,11 +139,10 @@ impl Clipper {
         seq
     }
 
-    /// The page webviews on screen and where the page area is.
-    pub fn set_pages(self: &Arc<Self>, pages: Vec<String>, origin: (f64, f64), z: f64) -> u64 {
+    /// The page webviews on screen and where each one is.
+    pub fn set_pages(self: &Arc<Self>, pages: Vec<(String, (f64, f64))>, z: f64) -> u64 {
         let mut st = self.st.lock();
         st.pages = pages;
-        st.origin = origin;
         st.z = if z.is_finite() && z > 0.0 { z } else { 1.0 };
         self.changed(&mut st)
     }
@@ -191,7 +189,7 @@ impl Clipper {
     /// Evaluates the holes now and applies them to the page views on screen.
     /// Main thread only.
     fn pass(&self) {
-        let (seq, holes, pages, origin, z, animating) = {
+        let (seq, holes, pages, z, animating) = {
             let mut st = self.st.lock();
             let now = Instant::now();
             let mut holes = Vec::with_capacity(st.holes.len());
@@ -221,15 +219,18 @@ impl Clipper {
                 }
             }
             let animating = st.holes.values().any(|s| matches!(s, Slot::Moving(_)));
-            (st.seq, holes, st.pages.clone(), st.origin, st.z, animating)
+            (st.seq, holes, st.pages.clone(), st.z, animating)
         };
-        let rects = rects_for(&holes, origin, z);
         VIEWS.with(|v| {
             let mut v = v.borrow_mut();
             v.retain(|_, view| view.view.load().is_some());
             for (label, view) in v.iter_mut() {
                 let Some(nv) = view.view.load() else { continue };
-                let want: Vec<Rect5> = if pages.contains(label) && !view.fullscreen { rects.clone() } else { Vec::new() };
+                let origin = pages.iter().find(|(l, _)| l == label).map(|(_, o)| *o);
+                let want: Vec<Rect5> = match origin {
+                    Some(o) if !view.fullscreen => rects_for(&holes, o, z),
+                    _ => Vec::new(),
+                };
                 if want != view.cut {
                     let _p = crate::perf::span("clip.set_mask");
                     apply_mask(&nv, &want);

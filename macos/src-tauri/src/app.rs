@@ -130,12 +130,20 @@ pub struct App {
     /// Profiles whose cookies were already swept this session ("clear cookies
     /// when Serica closes" also runs at start, in case it could not at exit).
     cookie_swept: Mutex<std::collections::HashSet<String>>,
+    /// The tab whose page holds keyboard focus (WebView2 GotFocus/LostFocus).
+    pub focused_page: Mutex<Option<String>>,
 }
 
 /// Emits to the app UI only, never to web pages in tab webviews.
 pub fn ui_emit<S: serde::Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
     if let Some(n) = crate::perf::span("emit").map(|_| serde_json::to_string(&payload).map(|j| j.len()).unwrap_or(0)) {
         crate::perf::count(if event == "serica:state-update" { "emit.state.bytes" } else { "emit.other.bytes" }, n as u64);
+    }
+    // Tabs in windows of their own: their toolbars follow the tab's state.
+    if event == "serica:state-update" {
+        for label in crate::detached::ui_labels() {
+            let _ = handle.emit_to(label.as_str(), event, payload.clone());
+        }
     }
     let _ = handle.emit_to("main", event, payload);
 }
@@ -328,6 +336,7 @@ impl App {
             ui_dark: std::sync::atomic::AtomicBool::new(true),
             pdf_light_tabs: Mutex::new(Default::default()),
             cookie_swept: Mutex::new(Default::default()),
+            focused_page: Mutex::new(None),
             save_lock: Mutex::new(()),
             written: Mutex::new(Default::default()),
         });
@@ -386,8 +395,11 @@ impl App {
                 crate::mcp_http::sync(&self);
             }
             if state || settings {
+                // A tab closed or left for one of Serica's pages ends its split.
+                self.store.lock().prune_splits();
                 let snap = self.snapshot();
                 ui_emit(&self.handle, "serica:state-update", snap);
+                crate::detached::sync_titles(&self);
                 last_state_emit = Instant::now();
                 blocked_pending = false;
                 TabHost::reconcile(&self);
@@ -456,6 +468,28 @@ impl App {
     /// True the first time it is asked for `profile` this session.
     pub fn claim_cookie_sweep(&self, profile: &str) -> bool {
         self.cookie_swept.lock().insert(profile.to_string())
+    }
+
+    /// A page took keyboard focus. In a split view that makes its pane the
+    /// active tab. Called on the main thread: only notifies, never waits.
+    pub fn page_focused(&self, tab_id: &str) {
+        *self.focused_page.lock() = Some(tab_id.to_string());
+        let changed = {
+            let mut s = self.store.lock();
+            let partner_of_active = s.active_tab_id.as_deref().and_then(|a| s.split_partner(a));
+            partner_of_active.as_deref() == Some(tab_id) && s.activate_tab(tab_id)
+        };
+        if changed {
+            self.notify(Notice::State);
+        }
+    }
+
+    /// A page lost keyboard focus (to the UI, another page, or another app).
+    pub fn page_blurred(&self, tab_id: &str) {
+        let mut f = self.focused_page.lock();
+        if f.as_deref() == Some(tab_id) {
+            *f = None;
+        }
     }
 
     /// Mutates the store and schedules a broadcast. Keep `f` free of webview calls.

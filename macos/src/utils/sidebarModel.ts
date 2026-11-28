@@ -12,8 +12,32 @@ import type { BrowserAppState, FavoriteEntry, FolderRecord, MoveOp, Profile, Spa
 /** Fields of the renderer state the sidebar reads. */
 export type SidebarSource = Pick<
   BrowserAppState,
-  'tabs' | 'spaces' | 'activeSpaceId' | 'activeTabId' | 'favorites' | 'profiles' | 'activeProfileId' | 'folders'
+  'tabs' | 'spaces' | 'activeSpaceId' | 'activeTabId' | 'favorites' | 'profiles' | 'activeProfileId' | 'folders' | 'splits' | 'detachedTabs'
 >;
+
+/** How a tab shows in the sidebar besides its row: in a split (which side,
+ *  and whether that split is the one on screen), or in a window of its own. */
+export interface TabPlacement {
+  split?: { side: 'left' | 'right'; onScreen: boolean; partnerTitle: string };
+  detached?: boolean;
+}
+
+export function tabPlacement(tabId: string | undefined, src: Pick<SidebarSource, 'tabs' | 'splits' | 'detachedTabs' | 'activeTabId'>): TabPlacement {
+  if (!tabId) return {};
+  if (src.detachedTabs?.includes(tabId)) return { detached: true };
+  const sp = src.splits?.find((s) => s.left === tabId || s.right === tabId);
+  if (!sp) return {};
+  const partner = sp.left === tabId ? sp.right : sp.left;
+  const p = src.tabs.find((t) => t.id === partner);
+  if (!p) return {};
+  return {
+    split: {
+      side: sp.left === tabId ? 'left' : 'right',
+      onScreen: src.activeTabId === tabId || src.activeTabId === partner,
+      partnerTitle: p.title || p.url,
+    },
+  };
+}
 
 /** Profile id used for spaces/profiles before the first `state-update` arrives. */
 export const FALLBACK_PROFILE_ID = 'default';
@@ -218,13 +242,55 @@ export type SidebarMenuAction =
   | 'move-to-space'
   | 'move-to-folder'
   | 'duplicate'
+  | 'split'
+  | 'new-window'
+  | 'back-to-window'
   | 'close';
+
+/** What the menu may offer for a tab's page: split view and its own window. */
+export interface PageMenuOptions {
+  /** It can be shown beside the tab on screen (split view). */
+  canSplit?: boolean;
+  /** It can move into a window of its own. */
+  canDetach?: boolean;
+  /** It is in a window of its own already. */
+  detached?: boolean;
+}
+
+const isWebUrl = (url?: string) => !!url && url !== 'about:blank' && !url.startsWith('serica://') && !url.startsWith('neutrino://');
+
+/** Split view / own-window options for an item's tab, from the browser state. */
+export function pageMenuOptions(
+  item: Pick<SidebarItemRef, 'kind' | 'id' | 'tab'>,
+  state: { tabs: { id: string; url: string; unloaded?: boolean }[]; activeTabId?: string | null; detachedTabs?: string[] },
+): PageMenuOptions {
+  const id = item.tab?.id ?? (item.kind === 'favorite' ? undefined : item.id);
+  const tab = id ? state.tabs.find((t) => t.id === id) : undefined;
+  if (!tab) return {};
+  if (state.detachedTabs?.includes(tab.id)) return { detached: true };
+  const web = isWebUrl(tab.url);
+  const active = state.tabs.find((t) => t.id === state.activeTabId);
+  return {
+    canSplit: web && !!active && active.id !== tab.id && isWebUrl(active.url) && !state.detachedTabs?.includes(active.id),
+    canDetach: web && !tab.unloaded,
+  };
+}
 
 /** Context-menu actions offered for an item (R12.10). */
 export function contextMenuActions(
   item: Pick<SidebarItemRef, 'kind' | 'tab'>,
-  options?: { hasFolders?: boolean },
+  options?: { hasFolders?: boolean } & PageMenuOptions,
 ): SidebarMenuAction[] {
+  const page: SidebarMenuAction[] = options?.detached
+    ? ['back-to-window']
+    : [...(options?.canSplit ? (['split'] as const) : []), ...(options?.canDetach ? (['new-window'] as const) : [])];
+  const list = baseMenuActions(item, options);
+  if (!page.length) return list;
+  const at = list.indexOf('duplicate');
+  return at < 0 ? [...list, ...page] : [...list.slice(0, at), ...page, ...list.slice(at)];
+}
+
+function baseMenuActions(item: Pick<SidebarItemRef, 'kind' | 'tab'>, options?: { hasFolders?: boolean }): SidebarMenuAction[] {
   switch (item.kind) {
     case 'today':
       return ['pin', 'add-favorite', 'move-to-space', 'duplicate', 'close'];

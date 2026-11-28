@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { tauriBridge, type UiPatchStatus } from '../adapter/tauriBridge';
-import { useElementHole } from '../hooks/useViewportOverlay';
+import { removeViewportHole, useElementHole } from '../hooks/useViewportOverlay';
 import { usePresence } from '../hooks/usePresence';
 
 /**
@@ -32,6 +32,9 @@ export const UiPatchNotice: React.FC = () => {
     setBusy(true);
     try {
       await tauriBridge.applyUiPatch();
+      // The reload skips this popup's cleanup: take its cut-out out of the
+      // page first, or a box of the popup's size stays cut into every page.
+      await removeViewportHole('ui-patch-notice');
       window.location.reload();
     } catch {
       setBusy(false);

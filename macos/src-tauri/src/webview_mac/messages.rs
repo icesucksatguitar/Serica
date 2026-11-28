@@ -23,9 +23,23 @@ pub fn handle(message: &WKScriptMessage) -> Option<serde_json::Value> {
     let (proto, host) = unsafe { (origin.protocol().to_string(), origin.host().to_string()) };
     match body["t"].as_str().unwrap_or("") {
         "settled" => {
-            // Only the page on screen matters (the UI captures it).
-            if main && ctx.kind == Kind::Tab && ctx.app.store.lock().active_tab_id.as_deref() == Some(ctx.tab_id.as_str()) {
+            // Only pages on screen matter (the UI captures them): the active
+            // tab, and the other pane of its split.
+            let on_screen = main && ctx.kind == Kind::Tab && {
+                let s = ctx.app.store.lock();
+                let id = Some(ctx.tab_id.as_str());
+                s.active_tab_id.as_deref() == id || s.active_tab_id.as_deref().and_then(|a| s.split_partner(a)).as_deref() == id
+            };
+            if on_screen {
                 ui_emit(&ctx.app.handle, "serica:page-settled", ctx.tab_id.as_str());
+            }
+            None
+        }
+        "focus" | "blur" if main && ctx.kind == Kind::Tab => {
+            if body["t"] == "focus" {
+                ctx.app.page_focused(&ctx.tab_id);
+            } else {
+                ctx.app.page_blurred(&ctx.tab_id);
             }
             None
         }

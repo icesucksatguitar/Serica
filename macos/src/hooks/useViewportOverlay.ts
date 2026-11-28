@@ -139,43 +139,69 @@ export function useReservedPageBottom(): number {
 // smoothly, however busy the app's main thread is.
 //
 // Opening must not wait for a capture: one takes 100-300 ms (more on a busy
-// page). So the page is captured ahead of time: once it has loaded, after
-// each scroll settles (`serica:page-settled`), after a tab switch, and when
-// the pointer heads for an edge (`serica:edge-approach`). Opening uses the
-// latest capture of the page as it is; if the page changed since, a fresher
-// capture replaces it should one arrive during the slide. Only the strip under the panel is drawn (a
-// small cropped bitmap), not the whole page, so showing it costs little.
+// page). So pages are captured ahead of time: once loaded, after each scroll
+// settles (`serica:page-settled`), after a tab switch, and when the pointer
+// heads for an edge (`serica:edge-approach`). Opening uses the latest
+// capture as it is; if the page changed since, a fresher capture replaces it
+// should one arrive during the slide. Only the strip under the panel is
+// drawn (a small cropped bitmap), not the whole page, so showing it costs
+// little. A split view has two pages (panes), each captured on its own.
 
-/** Where the page area is (window CSS px) and which page it shows. */
-interface PageGeometry {
+/** A page on screen (window CSS px) and which page it shows. */
+export interface UnderlayPane {
+  tabId: string;
+  /** Tab and URL: a capture of another page is never used. */
   key: string;
   left: number;
   top: number;
   width: number;
   height: number;
 }
-let page: PageGeometry = { key: '', left: 0, top: 0, width: 0, height: 0 };
 
-/** BrowserViewport reports the page on screen and its rectangle. */
-export function setUnderlayPage(next: PageGeometry): void {
-  if (next.key !== page.key) {
-    dropCapture();
-    pageChangedAt = performance.now();
-  }
-  page = next;
+interface Capture {
+  key: string;
+  at: number;
+  /** When the capture was asked for (it shows the page as it was then). */
+  startedAt: number;
+  /** Decoded once; panels crop their strip from it. */
+  bitmap: ImageBitmap;
 }
 
-/** When the page last changed (scrolled, loaded): older captures are stale. */
-let pageChangedAt = 0;
+let panes: readonly UnderlayPane[] = [];
+const captures = new Map<string, Capture>();
+const inflight = new Map<string, { p: Promise<Capture | null>; at: number }>();
+/** When each page last changed (scrolled, loaded): older captures are stale. */
+const changedAt = new Map<string, number>();
+const releaseTimers = new Map<string, number>();
 
-/** The page on screen changed (scroll settled, load finished): capture it again. */
-export function refreshPageCapture(): void {
-  pageChangedAt = performance.now();
-  void capturePage();
+/** A capture this recent is used as is, even if the page changed since. */
+const FRESH_MS = 400;
+/** Older ones (same page) are used while a fresh one is taken. */
+const STALE_MS = 60000;
+
+function dropCapture(tabId: string) {
+  captures.get(tabId)?.bitmap.close();
+  captures.delete(tabId);
+}
+
+/** BrowserViewport reports the pages on screen and where they are. */
+export function setUnderlayPanes(next: readonly UnderlayPane[]): void {
+  const now = performance.now();
+  for (const old of panes) {
+    const still = next.find((p) => p.tabId === old.tabId);
+    if (!still || still.key !== old.key) dropCapture(old.tabId);
+  }
+  for (const p of next) {
+    const old = panes.find((o) => o.tabId === p.tabId);
+    if (!old || old.key !== p.key) changedAt.set(p.tabId, now);
+  }
+  panes = next;
 }
 
 export interface Underlay {
   id: string;
+  /** The panel it is drawn for (one entry per page it covers). */
+  group: string;
   /** Window CSS px. */
   rect: HoleRect;
   bitmap: ImageBitmap;
@@ -189,10 +215,12 @@ function publish(next: readonly Underlay[]) {
   underlayListeners.forEach((l) => l());
 }
 
-/** Removes the capture drawn under one panel (`null` id: all of them). */
-export function setPageUnderlay(id: string | null): void {
-  const keep = id === null ? [] : underlays.filter((u) => u.id !== id);
-  if (keep.length !== underlays.length) publish(keep);
+/** Removes the captures drawn under one panel (`null`: all of them). */
+export function setPageUnderlay(group: string | null): void {
+  const keep = group === null ? [] : underlays.filter((u) => u.group !== group);
+  if (keep.length === underlays.length) return;
+  for (const u of underlays) if (!keep.includes(u)) u.bitmap.close();
+  publish(keep);
 }
 
 export function usePageUnderlays(): readonly Underlay[] {
@@ -208,154 +236,196 @@ export function usePageUnderlays(): readonly Underlay[] {
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const twoFrames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
-interface Capture {
-  key: string;
-  at: number;
-  /** When the capture was asked for (it shows the page as it was then). */
-  startedAt: number;
-  /** Decoded once; panels crop their strip from it. */
-  bitmap: ImageBitmap;
-}
-
-// One page capture at a time, shared; the latest is kept for reuse.
-let inflight: Promise<Capture | null> | null = null;
-let inflightAt = 0;
-let lastCapture: Capture | null = null;
-let releaseTimer = 0;
-
-function dropCapture() {
-  lastCapture?.bitmap.close();
-  lastCapture = null;
-}
-
-async function decodeCapture(dataUrl: string): Promise<ImageBitmap | null> {
+async function decodeCapture(url: string): Promise<ImageBitmap | null> {
   try {
-    const blob = await (await fetch(dataUrl)).blob();
+    const blob = await (await fetch(url)).blob();
     return await createImageBitmap(blob);
   } catch {
     return null;
   }
 }
 
-function capturePage(): Promise<Capture | null> {
+function paneOf(tabId: string): UnderlayPane | undefined {
+  return panes.find((p) => p.tabId === tabId);
+}
+
+function capturePage(tabId: string): Promise<Capture | null> {
   // One in flight that started after the page last changed will do. A stuck
   // one (a capture can stall while the page is hidden) is given up on.
-  if (inflight && inflightAt >= pageChangedAt && performance.now() - inflightAt < 3000) return inflight;
-  const p = window.serica?.captureViewport?.();
-  if (!p) return Promise.resolve(null);
-  const key = page.key;
+  const running = inflight.get(tabId);
+  if (running && running.at >= (changedAt.get(tabId) ?? 0) && performance.now() - running.at < 3000) return running.p;
+  const pane = paneOf(tabId);
+  const call = pane && window.serica?.captureViewport?.(tabId);
+  if (!pane || !call) return Promise.resolve(null);
+  const key = pane.key;
   const startedAt = performance.now();
-  inflightAt = startedAt;
-  inflight = p
+  const p = call
     .catch(() => null)
     .then(async (img): Promise<Capture | null> => {
-      if (!img || key !== page.key) return null;
+      if (!img || paneOf(tabId)?.key !== key) return null;
       const bitmap = await decodeCapture(img);
       if (!bitmap) return null;
-      if (key !== page.key) {
+      if (paneOf(tabId)?.key !== key) {
         bitmap.close();
         return null;
       }
       // A later capture may have finished first.
-      if (lastCapture && lastCapture.key === key && lastCapture.startedAt > startedAt) {
+      const last = captures.get(tabId);
+      if (last && last.key === key && last.startedAt > startedAt) {
         bitmap.close();
-        return lastCapture;
+        return last;
       }
-      lastCapture?.bitmap.close();
-      lastCapture = { key, at: performance.now(), startedAt, bitmap };
+      last?.bitmap.close();
+      const cap = { key, at: performance.now(), startedAt, bitmap };
+      captures.set(tabId, cap);
       // The decoded page is large: let it go once it is too old to use.
-      window.clearTimeout(releaseTimer);
-      releaseTimer = window.setTimeout(dropCapture, STALE_MS);
-      return lastCapture;
-    })
-  const mine = inflight;
-  void mine.finally(() => {
-    if (inflight === mine) inflight = null;
+      window.clearTimeout(releaseTimers.get(tabId));
+      releaseTimers.set(tabId, window.setTimeout(() => dropCapture(tabId), STALE_MS));
+      return cap;
+    });
+  const entry = { p, at: startedAt };
+  inflight.set(tabId, entry);
+  void p.finally(() => {
+    if (inflight.get(tabId) === entry) inflight.delete(tabId);
   });
-  return mine;
+  return p;
 }
 
-/** A capture this recent is used as is, even if the page changed since. */
-const FRESH_MS = 400;
-/** Older ones (same page) are used while a fresh one is taken. */
-const STALE_MS = 60000;
-
-function captureAge(): number {
-  return lastCapture && lastCapture.key === page.key ? performance.now() - lastCapture.at : Infinity;
+function captureAge(tabId: string): number {
+  const c = captures.get(tabId);
+  return c && c.key === paneOf(tabId)?.key ? performance.now() - c.at : Infinity;
 }
 
 /** A capture of the page as it is now (taken after its last change). */
-function currentCapture(): Capture | null {
-  if (!lastCapture || lastCapture.key !== page.key) return null;
-  return lastCapture.startedAt >= pageChangedAt || captureAge() < FRESH_MS ? lastCapture : null;
+function currentCapture(tabId: string): Capture | null {
+  const c = captures.get(tabId);
+  if (!c || c.key !== paneOf(tabId)?.key) return null;
+  return c.startedAt >= (changedAt.get(tabId) ?? 0) || captureAge(tabId) < FRESH_MS ? c : null;
 }
 
-/** Starts a page capture ahead of UI that is about to slide over the page. */
+/** A page on screen changed (scroll settled, load finished): capture it again. */
+export function refreshPageCapture(tabId?: string): void {
+  const now = performance.now();
+  for (const p of panes) {
+    if (tabId && p.tabId !== tabId) continue;
+    changedAt.set(p.tabId, now);
+    void capturePage(p.tabId);
+  }
+}
+
+/** Starts capturing the pages ahead of UI that is about to slide over them. */
 export function prewarmPageUnderlay(): void {
-  if (currentCapture()) return;
-  void capturePage();
+  for (const p of panes) if (!currentCapture(p.tabId)) void capturePage(p.tabId);
 }
 
-async function crop(cap: Capture, rect: HoleRect): Promise<ImageBitmap | null> {
-  const g = page;
-  if (g.width <= 0 || g.height <= 0) return null;
-  const kx = cap.bitmap.width / g.width;
-  const ky = cap.bitmap.height / g.height;
-  const x = Math.max(0, rect[0] - g.left);
-  const y = Math.max(0, rect[1] - g.top);
-  const w = Math.min(g.width - x, rect[2] - Math.max(0, g.left - rect[0]));
-  const h = Math.min(g.height - y, rect[3] - Math.max(0, g.top - rect[1]));
-  if (w <= 0 || h <= 0) return null;
+function intersect(a: HoleRect, p: UnderlayPane): HoleRect | null {
+  const x0 = Math.max(a[0], p.left);
+  const y0 = Math.max(a[1], p.top);
+  const x1 = Math.min(a[0] + a[2], p.left + p.width);
+  const y1 = Math.min(a[1] + a[3], p.top + p.height);
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
+}
+
+async function crop(cap: Capture, pane: UnderlayPane, r: HoleRect): Promise<ImageBitmap | null> {
+  if (pane.width <= 0 || pane.height <= 0) return null;
+  const kx = cap.bitmap.width / pane.width;
+  const ky = cap.bitmap.height / pane.height;
   try {
-    return await createImageBitmap(cap.bitmap, Math.round(x * kx), Math.round(y * ky), Math.max(1, Math.round(w * kx)), Math.max(1, Math.round(h * ky)));
+    return await createImageBitmap(
+      cap.bitmap,
+      Math.round((r[0] - pane.left) * kx),
+      Math.round((r[1] - pane.top) * ky),
+      Math.max(1, Math.round(r[2] * kx)),
+      Math.max(1, Math.round(r[3] * ky)),
+    );
   } catch {
     return null;
   }
 }
 
-async function show(id: string, rect: HoleRect, cap: Capture): Promise<boolean> {
-  const bitmap = await crop(cap, rect);
+async function show(group: string, pane: UnderlayPane, r: HoleRect, cap: Capture): Promise<boolean> {
+  const bitmap = await crop(cap, pane, r);
   if (!bitmap) return false;
-  const g = page;
-  // In window px: clamp to the page area.
-  const x = Math.max(rect[0], g.left);
-  const y = Math.max(rect[1], g.top);
-  const placed: HoleRect = [x, y, Math.min(rect[0] + rect[2], g.left + g.width) - x, Math.min(rect[1] + rect[3], g.top + g.height) - y];
+  if (paneOf(pane.tabId)?.key !== pane.key) {
+    bitmap.close();
+    return false;
+  }
+  const id = `${group}|${pane.tabId}`;
   underlays.find((u) => u.id === id)?.bitmap.close();
-  publish([...underlays.filter((u) => u.id !== id), { id, rect: placed, bitmap }]);
+  publish([...underlays.filter((u) => u.id !== id), { id, group, rect: r, bitmap }]);
+  return true;
+}
+
+/** Only a capture this recent will do (a page playing video: an older one
+ *  shows a frame from back then), waiting up to `waitMs` for one. */
+export interface FreshCapture {
+  maxAgeMs: number;
+  waitMs: number;
+}
+
+/** A capture taken within `fresh.maxAgeMs`, or null if none comes in time. */
+async function freshCapture(tabId: string, key: string, fresh: FreshCapture): Promise<Capture | null> {
+  const now = performance.now();
+  const ok = (c: Capture | null | undefined): c is Capture => !!c && c.key === key && performance.now() - c.startedAt <= fresh.maxAgeMs;
+  const have = captures.get(tabId);
+  if (ok(have)) return have;
+  // One started recently (as the pointer headed for the edge) is used;
+  // otherwise a new one is started now.
+  const running = inflight.get(tabId);
+  let p: Promise<Capture | null>;
+  if (running && now - running.at <= fresh.maxAgeMs) {
+    p = running.p;
+  } else {
+    changedAt.set(tabId, now);
+    p = capturePage(tabId);
+  }
+  const cap = await Promise.race([p, wait(fresh.waitMs).then(() => null)]);
+  return ok(cap) ? cap : null;
+}
+
+/** One page's part of `preparePageUnderlay`. */
+async function preparePane(group: string, pane: UnderlayPane, r: HoleRect, fresh?: FreshCapture): Promise<boolean> {
+  const tabId = pane.tabId;
+  if (fresh) {
+    const cap = await freshCapture(tabId, pane.key, fresh);
+    return !!cap && (await show(group, pane, r, cap));
+  }
+  let cap = currentCapture(tabId);
+  let stale = false;
+  if (!cap) {
+    // One in flight for a while (the pointer neared the edge) is nearly done.
+    const running = inflight.get(tabId);
+    const pending = !!running && running.at >= (changedAt.get(tabId) ?? 0) && performance.now() - running.at > 60;
+    const p = capturePage(tabId);
+    const limit = captureAge(tabId) < STALE_MS ? (pending ? 70 : 30) : 140;
+    cap = await Promise.race([p, wait(limit).then(() => null)]);
+    if (!cap && captureAge(tabId) < STALE_MS) {
+      cap = captures.get(tabId) ?? null;
+      stale = true;
+    }
+  }
+  if (!cap || !(await show(group, pane, r, cap))) return false;
+  if (stale) {
+    // A fresher one, if it comes while the panel is still sliding.
+    void capturePage(tabId).then((fresh) => {
+      if (fresh && underlays.some((u) => u.id === `${group}|${tabId}`)) void show(group, pane, r, fresh);
+    });
+  }
   return true;
 }
 
 /**
- * Draws a capture of the live page beneath the part of it `rect` (window CSS
- * px) is about to cover, for the panel `id`. Resolves true once painted, false
- * when there is no capture of this page to show (the panel then slides over
- * the page area's plain background). Never waits long for a capture.
+ * Draws captures of the live pages beneath the part of them `rect` (window
+ * CSS px) is about to cover, for the panel `group`. Resolves true once
+ * painted, false when there is no capture to show (the panel then slides
+ * over the page area's plain background). Never waits long for a capture.
  */
-export async function preparePageUnderlay(id: string, rect: HoleRect): Promise<boolean> {
-  const key = page.key;
-  let cap: Capture | null = currentCapture();
-  let stale = false;
-  if (!cap) {
-    // One in flight for a while (the pointer neared the edge) is nearly done.
-    const pending = inflight !== null && inflightAt >= pageChangedAt && performance.now() - inflightAt > 60;
-    const p = capturePage();
-    const limit = captureAge() < STALE_MS ? (pending ? 70 : 30) : 140;
-    cap = await Promise.race([p, wait(limit).then(() => null)]);
-    if (!cap && captureAge() < STALE_MS) {
-      cap = lastCapture;
-      stale = true;
-    }
-  }
-  if (!cap || key !== page.key) return false;
-  if (!(await show(id, rect, cap))) return false;
+export async function preparePageUnderlay(group: string, rect: HoleRect, fresh?: FreshCapture): Promise<boolean> {
+  const jobs = panes.map((p) => [p, intersect(rect, p)] as const).filter((j): j is readonly [UnderlayPane, HoleRect] => j[1] !== null);
+  if (!jobs.length) return false;
+  const shown = await Promise.all(jobs.map(([p, r]) => preparePane(group, p, r, fresh)));
+  if (!shown.some(Boolean)) return false;
   await twoFrames();
-  if (stale) {
-    // A fresher one, if it comes while the panel is still sliding.
-    void capturePage().then((fresh) => {
-      if (fresh && fresh.key === page.key && underlays.some((u) => u.id === id)) void show(id, rect, fresh);
-    });
-  }
   return true;
 }
 
@@ -382,8 +452,24 @@ export function setViewportHole(id: string, rect: HoleRect, opts?: HoleOptions):
   return p ? p.catch(() => undefined) : Promise.resolve();
 }
 
-export function removeViewportHole(id: string): void {
-  void setViewportHole(id, [0, 0, 0, 0], { remove: true });
+export function removeViewportHole(id: string): Promise<void> {
+  return setViewportHole(id, [0, 0, 0, 0], { remove: true });
+}
+
+/**
+ * Every cut-out the UI makes. The backend keeps them until they are removed;
+ * a UI that reloads (a UI patch applied with "Reload now") never runs its
+ * cleanup, so a popup's cut-out stayed cut into every page. A fresh UI
+ * removes them all once before it cuts its own.
+ */
+const UI_HOLE_IDS = [
+  'sidebar', 'topbar', 'dock', 'dock-menu', 'app-context-menu', 'page-context-menu', 'permission-prompt',
+  'sidebar-folder-menu', 'sidebar-menu', 'sidebar-space-menu', 'tab-preview', 'top-tab-menu',
+  'ui-patch-notice', 'update-notice', 'whats-new', 'guide-widgets', 'guide-sidebar',
+];
+
+export function clearStaleViewportHoles(): Promise<unknown> {
+  return Promise.all(UI_HOLE_IDS.map((id) => removeViewportHole(id).catch(() => undefined)));
 }
 
 /**

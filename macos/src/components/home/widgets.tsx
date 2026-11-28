@@ -375,7 +375,7 @@ const NotesWidget: React.FC<{ ctx: WidgetContext }> = ({ ctx }) => {
         value={draft}
         placeholder="Write something down…"
         maxLength={4000}
-        spellCheck
+        spellCheck={false}
         disabled={ctx.editing}
         onFocus={() => (focused.current = true)}
         onBlur={() => {
