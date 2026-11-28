@@ -48,7 +48,7 @@ jobs:
 
   macos:
     name: macOS
-    runs-on: macos-14
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: macos

@@ -113,7 +113,7 @@ jobs:
   macos:
     name: macOS (Universal DMG)
     needs: version
-    runs-on: macos-14
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: macos
