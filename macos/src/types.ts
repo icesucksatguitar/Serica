@@ -1,0 +1,571 @@
+import type {
+  BrowserSettings,
+  PerformanceStatus,
+  ReducedEffectsMode,
+  SpaceTheme,
+  SpaceThemesMap,
+} from './shared/settings';
+import type {
+  CustomSpaceThemePreset,
+  SpaceThemeMode,
+  SpaceThemePoint,
+  SpaceThemePreset,
+  ThemePalette,
+} from './shared/spaceTheme';
+
+export type {
+  BrowserSettings,
+  CustomSpaceThemePreset,
+  PerformanceStatus,
+  ReducedEffectsMode,
+  SpaceTheme,
+  SpaceThemesMap,
+  SpaceThemeMode,
+  SpaceThemePoint,
+  SpaceThemePreset,
+  ThemePalette,
+};
+
+import type { FavoriteEntry, FolderRecord, TabSection } from './shared/profileTypes';
+import type { LayoutSection, MoveOp } from './shared/layout';
+
+export type { FavoriteEntry, FolderRecord, TabSection, LayoutSection, MoveOp };
+
+export interface Space {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  /** Owning profile (R1.10). Absent only in the renderer's pre-IPC placeholder state. */
+  profileId?: string;
+  /** Position within the owning profile's spaces in the Space_Switcher. */
+  order?: number;
+}
+
+/** A profile as sent by the main process, with its session partition (R1.1). */
+export interface Profile {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Set by `listProfiles`/`createProfile`/`renameProfile`; not part of `state-update`. */
+  partition?: string;
+}
+
+export interface ProfileList {
+  profiles: Profile[];
+  spaces: Space[];
+  activeProfileId: string;
+  activeSpaceId: string;
+}
+
+/** Common result of the profile/space/layout IPC; `error` is a short code such as `last-space`. */
+export type IpcResult<T = {}> = ({ ok: true } & T) | { ok: false; error: string };
+
+export interface SpacePatch {
+  name?: string;
+  color?: string;
+  icon?: string;
+}
+
+/** Sent when a tab must remount its webview in another profile's session (R1.12, R17.5). */
+export interface TabPartitionChange {
+  tabId: string;
+  partition: string;
+  url: string;
+}
+
+/** Sidebar UI preferences persisted through the settings IPC. */
+export type SidebarState = Pick<
+  BrowserSettings,
+  'sidebarExpanded' | 'sidebarAutoHide' | 'sidebarWidth' | 'rightPinsDockVisible' | 'archiveIntervalHours'
+>;
+
+export type SpaceState = Space;
+
+export interface TabState {
+  id: string;
+  spaceId: string;
+  title: string;
+  url: string;
+  favicon?: string;
+  isLoading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isPinned: boolean;
+  isSleeping: boolean;
+  hasActiveMedia?: boolean;
+  blockedCount: number;
+  zoomFactor?: number;
+  previewImage?: string;
+  /** Session partition of the profile that owns the tab's space (R1.2). */
+  partition?: string;
+  /** Sidebar section; `isPinned` mirrors `section === 'pinned'`. */
+  section?: TabSection;
+  /** Closed pinned tab: entry kept, page not loaded (R15.3). */
+  unloaded?: boolean;
+  /** Epoch ms of the last time this tab was active (R16.4). */
+  lastActiveAt?: number;
+  /** Optional folder in the pinned section of this space. */
+  folderId?: string | null;
+  /** Private (InPrivate) tab: nothing is kept once it closes. */
+  private?: boolean;
+}
+
+export interface ActiveMediaState {
+  tabId: string;
+  tabTitle: string;
+  url: string;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  hasVideo: boolean;
+  /** The tab's video is showing in a native picture-in-picture window. */
+  inPip?: boolean;
+}
+
+export interface ShieldStats {
+  totalBlocked: number;
+  adsBlocked: number;
+  trackersBlocked: number;
+  analyticsBlocked: number;
+  fingerprintersBlocked: number;
+  dataSavedKb: number;
+}
+
+export interface ResourceStats {
+  memorySavedMb: number;
+  sleepingCount: number;
+}
+
+export interface BlockedTrackerItem {
+  url: string;
+  domain: string;
+  category?: string;
+  rule?: string;
+  timestamp: number;
+}
+
+export interface BrowserAppState {
+  spaces: Space[];
+  activeSpaceId: string;
+  tabs: TabState[];
+  activeTabId: string | null;
+  shieldStats: ShieldStats;
+  resourceStats: ResourceStats;
+  /** Absent until the first `state-update` from the main process. */
+  profiles?: Profile[];
+  activeProfileId?: string;
+  favorites?: FavoriteEntry[];
+  folders?: FolderRecord[];
+}
+
+export interface ThemeConfig {
+  id: string;
+  name: string;
+  mode: 'dark' | 'light';
+  bgApp: string;
+  bgSidebar: string;
+  bgCard: string;
+  bgInput: string;
+  accent: string;
+  textMain: string;
+  textMuted: string;
+  borderSubtle: string;
+  fontSize?: number;
+}
+
+/** Sent when Google refuses a sign-in inside Serica (see src/main/authHandoff.ts). */
+export interface AuthHandoffNotice {
+  handoffId: string;
+  provider: 'google';
+  reason: 'browser-not-secure' | 'disallowed-useragent';
+  siteHost: string;
+  isPopup: boolean;
+}
+
+export type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from './shared/ipcTypes';
+export type {
+  VpnMode,
+  DohProviderId,
+  ProxyProtocol,
+  VpnConfig,
+  VpnStatus,
+  VpnIpCheckResult,
+} from './shared/ipcTypes';
+import type { HistoryEntry, HistoryClearRange, HistoryQueryOptions } from './shared/ipcTypes';
+import type { VpnConfig, VpnStatus, VpnIpCheckResult } from './shared/ipcTypes';
+
+export type AuthHandoffResult = { ok: true; siteHost: string } | { ok: false; error: string };
+
+export type DownloadState = 'inProgress' | 'paused' | 'completed' | 'canceled' | 'failed';
+
+/** A download tracked by the download manager (src-tauri/src/downloads.rs). */
+export interface DownloadItem {
+  id: string;
+  url: string;
+  filename: string;
+  path: string;
+  mime: string;
+  /** -1 when unknown. */
+  totalBytes: number;
+  receivedBytes: number;
+  bytesPerSec: number;
+  state: DownloadState;
+  error?: string | null;
+  canResume: boolean;
+  startedAt: number;
+  endedAt?: number | null;
+  tabId?: string | null;
+  fileExists: boolean;
+}
+
+export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove' | 'retry';
+
+/** A browser extension installed from the Chrome Web Store (src-tauri/src/extensions.rs). */
+export interface ExtensionInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  icon?: string | null;
+  popup?: string | null;
+  options?: string | null;
+  permissions: string[];
+  source: string;
+  installedAt: number;
+  /** How WebKit runs it: its extension runtime (macOS 15.4+), only its content scripts, or not at all. */
+  runtime?: 'webkit' | 'content-scripts' | 'unsupported';
+  /** One line about that, for the panel. */
+  runtimeStatus?: string;
+}
+
+export type SiteAction = 'back' | 'forward' | 'reload' | 'hard-reload' | 'stop' | 'home' | 'open-find';
+
+export interface SericaAPI {
+  isElectron: boolean;
+  isTauri?: boolean;
+  // Native tab viewport (Rust tab host)
+  siteAction?: (action: SiteAction) => Promise<void>;
+  setViewport?: (x: number, y: number, width: number, height: number) => Promise<void>;
+  captureViewport?: () => Promise<string | null>;
+  setViewportHole?: (
+    id: string,
+    rect: [number, number, number, number],
+    opts?: { from?: [number, number, number, number]; ms?: number; ease?: [number, number, number, number]; remove?: boolean; lead?: number; radius?: number },
+  ) => Promise<void>;
+  /** Cursor over the app window: `[x, y, clientWidth]` in physical px, or null when outside. */
+  uiCursor?: () => Promise<[number, number, number] | null>;
+  freezeViewport?: (capture?: boolean) => Promise<string | null>;
+  thawViewport?: () => Promise<void>;
+  findInPage?: (query: string | null, options?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
+  onFindResult?: (cb: (r: { tabId: string; activeMatch: number; totalMatches: number }) => void) => () => void;
+  onPageColor?: (cb: (r: { tabId: string; themeColor: string | null }) => void) => () => void;
+  onEdgeApproach?: (cb: (edge: 'left' | 'top' | 'right') => void) => () => void;
+  onPageSettled?: (cb: (tabId: string) => void) => () => void;
+  /** New-tab widget data (fetched by the backend, straight from the source). */
+  widgetGithub?: (user: string) => Promise<GithubContributions>;
+  widgetGeocode?: (query: string) => Promise<GeoPlace>;
+  widgetWeather?: (lat: number, lon: number, fahrenheit: boolean) => Promise<WeatherNow>;
+  /** Dark PDFs: whether they apply at all (setting + dark theme) and for this tab. */
+  getPdfDarkTab?: (tabId: string) => Promise<{ available: boolean; dark: boolean }>;
+  setPdfDarkTab?: (tabId: string, dark: boolean) => Promise<void>;
+  /** Right-click in a page: Serica draws the menu (see PageContextMenu). */
+  onPageContextMenu?: (cb: (m: PageContextMenuRequest) => void) => () => void;
+  /** Ends a page menu with the picked engine command or Serica entry; neither dismisses it. */
+  pageMenuSelect?: (id: number, pick: { command?: number; custom?: number; refocus?: boolean }) => Promise<void>;
+  onHtmlFullscreen?: (cb: (isFullscreen: boolean) => void) => () => void;
+  onPageDialog?: (cb: (d: PageDialogRequest) => void) => () => void;
+  getMediaState?: (tabId: string) => Promise<Omit<ActiveMediaState, 'tabId' | 'url'> | null>;
+  openDevtools?: () => Promise<void>;
+  historySuggest?: (text: string, limit?: number) => Promise<HistoryEntry[]>;
+  getShieldsInfo?: () => Promise<{ engine: string; lists: string[]; lastUpdated: number | null; updating: boolean; lastError: string | null }>;
+  updateFilterLists?: () => Promise<void>;
+  mcpServerStatus?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
+  mcpRegenerateToken?: () => Promise<{ enabled: boolean; running: boolean; port: number; url: string; token: string; error?: string | null }>;
+  listDownloads?: () => Promise<DownloadItem[]>;
+  downloadAction?: (id: string, action: DownloadAction) => Promise<boolean>;
+  startDownloadDrag?: (ids: string[]) => Promise<boolean>;
+  clearDownloads?: () => Promise<DownloadItem[]>;
+  openDownloadsFolder?: () => Promise<void>;
+  /** Native "Open file" picker; chosen files (PDFs…) open in new tabs. */
+  openFile?: () => Promise<void>;
+  readClipboardText?: () => Promise<string | null>;
+  cookieSites?: () => Promise<{ ok: boolean; error?: string; sites?: { site: string; count: number }[] }>;
+  deleteCookies?: (site?: string) => Promise<{ ok: boolean; error?: string; deleted?: number }>;
+  onDownloadStarted?: (cb: (item: DownloadItem) => void) => () => void;
+  onDownloadUpdated?: (cb: (item: DownloadItem) => void) => () => void;
+  onDownloadsChanged?: (cb: (list: DownloadItem[]) => void) => () => void;
+  onOpenDownloads?: (cb: () => void) => () => void;
+  listExtensions?: () => Promise<ExtensionInfo[]>;
+  installExtension?: (input: string) => Promise<ExtensionInfo>;
+  setExtensionEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
+  removeExtension?: (id: string) => Promise<boolean>;
+  openExtensionPage?: (id: string, page: 'popup' | 'options') => Promise<boolean>;
+  onExtensionsUpdated?: (cb: (list: ExtensionInfo[]) => void) => () => void;
+  onExtensionInstalled?: (cb: (ext: ExtensionInfo) => void) => () => void;
+  assistantOpen?: (url: string, x: number, y: number, width: number, height: number) => Promise<void>;
+  assistantBounds?: (x: number, y: number, width: number, height: number) => Promise<void>;
+  assistantClose?: () => Promise<void>;
+  assistantInsertText?: (text: string) => Promise<boolean>;
+  navigate: (url: string) => Promise<void>;
+  goBack: () => Promise<void>;
+  goForward: () => Promise<void>;
+  reload: () => Promise<void>;
+  hardReload?: () => Promise<void>;
+  stopLoading?: () => Promise<void>;
+  reopenClosedTab?: () => Promise<TabState | null>;
+  cycleTab?: (direction: 1 | -1) => Promise<TabState | null>;
+  openExternalUrl?: (url: string) => Promise<boolean>;
+  answerPageDialog?: (id: number, accept: boolean, text?: string) => Promise<void>;
+  onSiteAction?: (cb: (payload: { action: SiteAction; source?: string }) => void) => () => void;
+  onSpaceSwitched?: (cb: (payload: { spaceId: string; spaceName: string }) => void) => () => void;
+  getState?: () => Promise<BrowserAppState>;
+  createTab: (url?: string, spaceId?: string) => Promise<TabState>;
+  updateTab?: (tabId: string, partial: Partial<TabState>) => Promise<void>;
+  closeTab: (tabId: string) => Promise<void>;
+  selectTab: (tabId: string) => Promise<void>;
+  togglePinTab: (tabId: string) => Promise<void>;
+  toggleSleepTab: (tabId: string) => Promise<void>;
+  selectSpace: (spaceId: string, keepUiFocus?: boolean) => Promise<void>;
+  focusPage?: (focus?: boolean) => Promise<void>;
+  createSpace?: (name: string, color?: string, profileId?: string) => Promise<Space | null>;
+  deleteSpace?: (spaceId: string) => Promise<IpcResult>;
+  updateSpace?: (spaceId: string, patch: SpacePatch) => Promise<IpcResult<{ space: Space }>>;
+  reorderSpace?: (spaceId: string, toIndex: number) => Promise<IpcResult>;
+
+  listProfiles?: () => Promise<ProfileList>;
+  createProfile?: (name?: string) => Promise<IpcResult<{ profile: Profile; space: Space }>>;
+  renameProfile?: (profileId: string, name: string) => Promise<IpcResult<{ profile: Profile }>>;
+  deleteProfile?: (profileId: string) => Promise<IpcResult>;
+  onTabPartitionChanged?: (cb: (change: TabPartitionChange) => void) => () => void;
+
+  moveTab?: (op: MoveOp) => Promise<IpcResult<{ needsReload: boolean }>>;
+  pinTab?: (tabId: string) => Promise<IpcResult>;
+  unpinTab?: (tabId: string) => Promise<IpcResult>;
+  addPinnedSites?: (sites: { url: string; title: string }[], spaceId?: string) => Promise<number>;
+  addFavorite?: (tabId: string) => Promise<IpcResult>;
+  removeFavorite?: (favoriteId: string) => Promise<IpcResult>;
+  duplicateTab?: (id: string, spaceId?: string) => Promise<IpcResult<{ tab: TabState }>>;
+
+  createFolder?: (spaceId: string, name: string) => Promise<IpcResult<{ folder: FolderRecord }>>;
+  updateFolder?: (folderId: string, patch: Partial<FolderRecord>) => Promise<IpcResult<{ folder: FolderRecord }>>;
+  deleteFolder?: (folderId: string) => Promise<IpcResult>;
+  moveTabToFolder?: (tabId: string, folderId: string | null) => Promise<IpcResult>;
+
+  updateSidebarState?: (patch: Partial<SidebarState>) => Promise<BrowserSettings>;
+  reorderTabs?: (draggedTabId: string, targetTabId: string) => Promise<void>;
+  setZoomFactor?: (factor: number) => Promise<void>;
+  onZoomUpdated?: (cb: (data: { tabId?: string; zoomFactor: number }) => void) => () => void;
+  toggleShields: () => Promise<boolean>;
+  toggleSiteWhitelist?: (domainOrUrl: string) => Promise<{ domain: string; whitelisted: boolean; shieldWhitelist: string[] }>;
+  resetShieldStats?: () => Promise<ShieldStats>;
+  zenOptimize: () => Promise<{ memorySavedMb: number; sleepingCount: number }>;
+  getShieldStats: () => Promise<ShieldStats>;
+  callMcp: (method: string, params?: unknown) => Promise<any>;
+  getMcpLogs: () => Promise<any[]>;
+  mediaControl?: (action: string, params?: any) => Promise<any>;
+  captureTabPreview?: (tabUrl: string) => Promise<string | null>;
+  captureTabPreviewById?: (tabId: string) => Promise<string | null>;
+  getTabPreview?: (tabId: string) => Promise<string | null>;
+  registerTabWebview?: (tabId: string, webContentsId: number) => Promise<boolean>;
+  sampleTabTopColor?: (tabId: string) => Promise<{ r: number; g: number; b: number; a: number } | null>;
+  windowControl: (action: 'minimize' | 'maximize' | 'close' | 'fullscreen' | 'drag' | 'titlebar-double-click') => Promise<void>;
+  getWindowState?: () => Promise<{ fullscreen: boolean }>;
+  onWindowState?: (cb: (s: { fullscreen: boolean }) => void) => () => void;
+  setTrafficLights?: (visible: boolean) => Promise<void>;
+  setThemeMode?: (mode: 'dark' | 'light' | 'system') => Promise<{ success: boolean; isDark?: boolean }>;
+  getSettings?: () => Promise<BrowserSettings>;
+  getPerformanceStatus?: () => Promise<PerformanceStatus>;
+  updateSettings?: (patch: Partial<BrowserSettings>) => Promise<BrowserSettings>;
+  onSettingsUpdated?: (cb: (settings: BrowserSettings) => void) => () => void;
+  onPerformanceStatusUpdated?: (cb: (status: PerformanceStatus) => void) => () => void;
+  onOpenSettings?: (cb: (page?: string) => void) => () => void;
+  onStateUpdate: (cb: (state: BrowserAppState) => void) => () => void;
+  onTrackerBlocked: (cb: (item: BlockedTrackerItem) => void) => () => void;
+  onCloseActiveTab?: (cb: () => void) => () => void;
+  onOpenCommandBar?: (cb: (opts?: { newTab?: boolean }) => void) => () => void;
+  onToggleTabs?: (cb: () => void) => () => void;
+  onEscapePressed?: (cb: () => void) => () => void;
+  onAuthHandoffRequired?: (cb: (notice: AuthHandoffNotice) => void) => () => void;
+  openAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
+  copyAuthHandoffLink?: (handoffId: string) => Promise<AuthHandoffResult>;
+  dismissAuthHandoff?: (handoffId: string) => Promise<AuthHandoffResult>;
+  getHistory?: (options?: HistoryQueryOptions) => Promise<HistoryEntry[]>;
+  deleteHistoryEntry?: (target: { id?: string; url?: string; timestamp?: number }) => Promise<boolean>;
+  clearHistory?: (range?: HistoryClearRange) => Promise<number>;
+  onHistoryUpdated?: (cb: (entries: HistoryEntry[]) => void) => () => void;
+  onOpenHistory?: (cb: () => void) => () => void;
+  getVpnStatus?: () => Promise<VpnStatus>;
+  connectVpn?: (patch?: Partial<VpnConfig>) => Promise<VpnStatus>;
+  disconnectVpn?: () => Promise<VpnStatus>;
+  updateVpnConfig?: (patch: Partial<VpnConfig>) => Promise<VpnStatus>;
+  checkVpnIp?: () => Promise<VpnIpCheckResult | { error: string }>;
+  onVpnStatusUpdated?: (cb: (status: VpnStatus) => void) => () => void;
+
+  listArchive?: () => Promise<ArchiveListEntry[]>;
+  restoreArchivedTab?: (archivedId: string) => Promise<IpcResult<{ tab: TabState }>>;
+  onArchiveUpdated?: (cb: (entries: ArchiveListEntry[]) => void) => () => void;
+  getPasswordStatus?: () => Promise<PasswordStatusResult>;
+  listPasswords?: () => Promise<CredentialListItem[]>;
+  editPassword?: (
+    credentialId: string,
+    patch: { username?: string; password?: string },
+  ) => Promise<PasswordEditResult>;
+  deletePassword?: (credentialId: string) => Promise<PasswordSimpleResult>;
+  revealPassword?: (credentialId: string) => Promise<RevealResult | PasswordIpcErrorStatus>;
+  copyPassword?: (credentialId: string) => Promise<CopyResult | PasswordIpcErrorStatus>;
+  confirmPasswordAction?: (
+    confirmId: string,
+    accepted: boolean,
+  ) => Promise<RevealResult | CopyResult | PasswordIpcErrorStatus>;
+  getPasswordNeverList?: () => Promise<string[]>;
+  removeFromPasswordNeverList?: (origin: string) => Promise<string[]>;
+  importPasswordsCsv?: () => Promise<PasswordImportStartResult>;
+  importPasswordsFromBrowser?: () => Promise<PasswordImportStartResult>;
+  commitPasswordImport?: (
+    importId: string,
+    choices?: Record<number, ConflictChoice>,
+  ) => Promise<CommitImportResult | PasswordIpcError>;
+  cancelPasswordImport?: (importId: string) => Promise<PasswordSimpleResult>;
+  onPasswordPrompt?: (cb: (prompt: PromptInfo) => void) => () => void;
+  onPasswordPromptClosed?: (cb: (payload: { promptId: string }) => void) => () => void;
+  respondToPasswordPrompt?: (
+    promptId: string,
+    action: PromptAction,
+  ) => Promise<PromptResult | PasswordIpcError>;
+  [key: string]: any;
+}
+
+declare global {
+  interface Window {
+    serica?: SericaAPI;
+    neutrino?: SericaAPI;
+  }
+}
+
+// --- Password manager IPC shapes (src/main/index.ts registerPasswordIpc) ---
+export type {
+  CredentialListItem,
+  RevealResult,
+  CopyResult,
+  ConflictChoice,
+  CommitImportResult,
+  PrepareImportResult,
+  ImportConflictInfo,
+  NotPossibleCause,
+  CsvExportSteps,
+  DirectImportNotPossible,
+};
+import type { CredentialListItem } from './shared/ipcTypes';
+import type {
+  RevealResult,
+  CopyResult,
+  ConflictChoice,
+  CommitImportResult,
+  PrepareImportResult,
+  ImportConflictInfo,
+} from './shared/ipcTypes';
+import type { NotPossibleCause, CsvExportSteps, DirectImportNotPossible } from './shared/ipcTypes';
+
+/** Gate and parse failures from the IPC layer (`forbidden`, `invalid-input`) or the manager. */
+export interface PasswordIpcError {
+  ok: false;
+  error: string;
+  message: string;
+}
+export type PasswordIpcErrorStatus = { status: 'error' } & PasswordIpcError;
+export type PasswordStatusResult = { ok: true; encryptionAvailable: boolean } | PasswordIpcError;
+export type PasswordSimpleResult = { ok: true } | PasswordIpcError;
+export type PasswordEditResult = { ok: true; credential: CredentialListItem } | PasswordIpcError;
+/** CSV or direct import: prepared (counts, conflicts, no passwords), not possible, or an error. */
+export type PasswordImportStartResult =
+  | (PrepareImportResult & { browsers?: Array<'chrome' | 'edge'> })
+  | DirectImportNotPossible
+  | PasswordIpcError;
+
+/** An archived tab in the archive list, with the name of its space (null when the space was deleted). */
+export type { ArchiveListEntry } from './shared/ipcTypes';
+import type { ArchiveListEntry } from './shared/ipcTypes';
+
+/** Password save/update prompt shapes (src/main/passwords/manager.ts). No password field. */
+export type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';
+import type { PromptInfo, PromptAction, PromptResult } from './shared/ipcTypes';
+
+/** A page's alert/confirm/prompt/"Leave site?" dialog, or a request to open a link in another app. */
+export interface PageDialogRequest {
+  id: number;
+  tabId: string;
+  kind: 'alert' | 'confirm' | 'prompt' | 'beforeunload' | 'external';
+  /** Host of the page that asked (without www.). */
+  origin: string;
+  /** Dialog text; for `external`, the link being opened. */
+  message: string;
+  defaultText?: string;
+  /** For `external`: the link's scheme, e.g. "mailto" or "spotify". */
+  scheme?: string;
+}
+
+/** One entry of a page context menu, as sent by the tab host. */
+export type PageMenuItem =
+  | { type: 'separator' }
+  | { type: 'custom'; index: number; label: string; name: string }
+  | {
+      type: 'command' | 'submenu';
+      id: number;
+      name: string;
+      label: string;
+      shortcut: string;
+      enabled: boolean;
+      checked: boolean;
+      children: PageMenuItem[];
+    };
+
+export interface PageContextMenuRequest {
+  id: number;
+  tabId: string;
+  /** Physical pixels in the window's client area. */
+  x: number;
+  y: number;
+  /** The client area's width in the same physical pixels. */
+  clientWidth?: number;
+  context: 'page' | 'link' | 'image' | 'selection' | 'editable';
+  link: string | null;
+  image: string | null;
+  selection: string | null;
+  items: PageMenuItem[];
+}
+
+export interface GithubContributions {
+  user: string;
+  total: number;
+  /** Oldest first; `level` is GitHub's 0-4 shading. */
+  days: { date: string; level: number; count: number }[];
+}
+
+export interface GeoPlace {
+  name: string;
+  country?: string;
+  lat: number;
+  lon: number;
+}
+
+export interface WeatherNow {
+  temperature: number;
+  /** WMO weather code. */
+  code: number;
+  isDay: boolean;
+  max: number | null;
+  min: number | null;
+}
+
+/** Saved by the 0.4 onboarding: the name the greeting used. Kept for older profiles. */
+export interface UserProfile {
+  name: string;
+  /** Always null: Serica keeps no account. */
+  email: string | null;
+  isGuest: boolean;
+  theme: 'obsidian' | 'charcoal' | 'slate';
+  mode: 'minimal' | 'architect';
+}

@@ -1,0 +1,12 @@
+Serica Special: three French Revolution-era paintings, re-painted in an oil-pastel
+medium for Serica's new-tab background (stroke-by-stroke rendering, Serica 2026).
+
+The source paintings are in the public domain (their authors died more than 200
+years ago); the reproductions used are from Wikimedia Commons.
+
+1. Jean-Pierre Houël, "Prise de la Bastille" (1789). Bibliothèque nationale de France.
+   https://commons.wikimedia.org/wiki/File:Prise_de_la_Bastille.jpg
+2. Hubert Robert, "La Bastille dans les premiers jours de sa démolition" (1789). Musée Carnavalet, Paris.
+   https://commons.wikimedia.org/wiki/File:The_Bastille_in_the_first_days_of_its_demolition,_by_Hubert_Robert.jpg
+3. Attributed to Pierre-Antoine Demachy, "Fête de l'Être suprême au Champ-de-Mars" (1794). Musée Carnavalet, Paris.
+   https://commons.wikimedia.org/wiki/File:F%C3%AAte_de_l%27Etre_supr%C3%AAme_2.jpg

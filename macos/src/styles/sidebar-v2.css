@@ -1,0 +1,453 @@
+/* ==========================================================================
+   Sidebar, visual layer (loaded after sidebar.css, which keeps the layout
+   mechanics: auto-hide slide, swipe track, drag ghost, resizer).
+
+   One calm surface with a hairline edge. Rows are 30px with a soft hover
+   and a selected fill; no glow, no colored side bars. Section labels are
+   sentence case. Secondary actions appear on hover. Every size follows
+   --sb-scale (Settings > Appearance > Sizes > Sidebar).
+   ========================================================================== */
+
+.nsb {
+  --sb: var(--sb-scale, 1);
+  --sb-row: calc(30px * var(--sb));
+  --sb-font: calc(13px * var(--sb));
+  --sb-small: calc(11.5px * var(--sb));
+  --sb-icon: calc(16px * var(--sb));
+  --nsb-hover: var(--ui-hover);
+  --nsb-border: var(--ui-line);
+  padding: calc(10px * var(--sb)) calc(8px * var(--sb)) calc(8px * var(--sb));
+  gap: calc(8px * var(--sb));
+  font-size: var(--sb-font);
+  color: var(--ui-fg);
+}
+
+.nsb.autohide,
+[data-theme='light'] .nsb.autohide {
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-line-strong);
+  box-shadow: 12px 0 32px rgba(0, 0, 0, 0.18);
+}
+
+/* Resizer: a hairline that appears on hover, not a colored slab. */
+.nsb-resizer:hover,
+.nsb-resizer.active {
+  background: linear-gradient(to right, transparent 3px, var(--ui-line-strong) 3px, var(--ui-line-strong) 4px, transparent 4px);
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Header: the space as a tinted icon tile and its name; actions on hover.
+   -------------------------------------------------------------------------- */
+
+.nsb-header {
+  min-height: calc(32px * var(--sb));
+  padding: 0 2px 0 4px;
+  gap: 8px;
+}
+
+.nsb-space-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  border-radius: 6px;
+}
+
+.nsb-space-title .nsb-space-icon {
+  width: calc(24px * var(--sb));
+  height: calc(24px * var(--sb));
+  border-radius: calc(7px * var(--sb));
+  background: color-mix(in srgb, var(--nsb-space-color) 18%, transparent);
+}
+
+.nsb-space-title .nsb-space-icon svg {
+  width: calc(14px * var(--sb));
+  height: calc(14px * var(--sb));
+}
+
+.nsb-space-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(14px * var(--sb));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ui-fg);
+}
+
+.nsb-profile-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: none;
+  background: var(--ui-hover);
+  color: var(--ui-fg-muted);
+  font-size: var(--sb-small);
+}
+
+.nsb-header-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.nsb:hover .nsb-header-actions,
+.nsb-header-actions:focus-within,
+.nsb-header-actions .nsb-icon-btn.active {
+  opacity: 1;
+}
+
+.nsb-icon-btn {
+  display: grid;
+  place-items: center;
+  width: calc(26px * var(--sb));
+  height: calc(26px * var(--sb));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-fg-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.nsb-icon-btn:hover {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+/* --------------------------------------------------------------------------
+   Favorites: square tiles, four to a row.
+   -------------------------------------------------------------------------- */
+
+.nsb-favorites {
+  gap: calc(6px * var(--sb));
+  padding: 0 0 2px;
+}
+
+.nsb-fav {
+  height: calc(38px * var(--sb));
+  border-radius: calc(9px * var(--sb));
+  border: 1px solid var(--ui-line);
+  background: transparent;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+
+.nsb-fav:hover,
+.nsb-fav:focus-visible {
+  background: var(--ui-hover);
+}
+
+.nsb-fav.active {
+  border-color: var(--ui-line-strong);
+  background: var(--ui-selected);
+}
+
+.nsb-fav .nsb-favicon {
+  width: calc(18px * var(--sb));
+  height: calc(18px * var(--sb));
+}
+
+/* --------------------------------------------------------------------------
+   Sections and rows
+   -------------------------------------------------------------------------- */
+
+.nsb-pane {
+  gap: 2px;
+}
+
+.nsb-pinned-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nsb-pinned-section-header,
+.nsb-today-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: calc(26px * var(--sb));
+  margin-top: calc(6px * var(--sb));
+  padding: 0 4px 0 8px;
+}
+
+.nsb-pinned-section-label {
+  font-size: var(--sb-small);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ui-fg-faint);
+}
+
+.nsb-folder-add-btn {
+  display: grid;
+  place-items: center;
+  width: calc(22px * var(--sb));
+  height: calc(22px * var(--sb));
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ui-fg-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) ease, background-color var(--dur-fast) ease;
+}
+
+.nsb-pinned-section-header:hover .nsb-folder-add-btn,
+.nsb-folder-add-btn:focus-visible {
+  opacity: 1;
+}
+
+.nsb-folder-add-btn:hover {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+.nsb-divider {
+  margin: calc(6px * var(--sb)) 8px 0;
+  background: var(--ui-line);
+}
+
+.nsb-tab,
+.nsb-new-tab,
+.nsb-folder-header {
+  height: var(--sb-row);
+  gap: calc(9px * var(--sb));
+  padding: 0 6px 0 8px;
+  border-radius: 7px;
+  font-size: var(--sb-font);
+}
+
+.nsb-tab {
+  color: var(--ui-fg-muted);
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.nsb-tab:hover,
+.nsb-tab:focus-visible {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+.nsb-tab.active,
+[data-theme='light'] .nsb-tab.active {
+  background: var(--ui-selected);
+  color: var(--ui-fg);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--ui-line);
+}
+
+/* No colored bar: the fill marks the current tab. */
+.nsb-tab.active::before {
+  content: none;
+}
+
+.nsb-tab-favicon,
+.nsb-tab .nsb-favicon {
+  width: var(--sb-icon);
+  height: var(--sb-icon);
+}
+
+.nsb-tab-title {
+  font-size: var(--sb-font);
+}
+
+.nsb-tab-close {
+  width: calc(20px * var(--sb));
+  height: calc(20px * var(--sb));
+  border-radius: 5px;
+  color: var(--ui-fg-faint);
+  opacity: 0;
+}
+
+.nsb-tab:hover .nsb-tab-close,
+.nsb-tab:focus-within .nsb-tab-close {
+  opacity: 1;
+}
+
+.nsb-tab-close:hover {
+  background: var(--ui-press);
+  color: var(--ui-fg);
+}
+
+/* New tab: a row like the others, quieter. */
+.nsb-new-tab {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ui-fg-faint);
+  font: inherit;
+  font-size: var(--sb-font);
+  cursor: pointer;
+}
+
+.nsb-new-tab:hover {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+.nsb-new-tab-kbd {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--sb-small);
+  color: var(--ui-fg-faint);
+  opacity: 0;
+}
+
+.nsb-new-tab:hover .nsb-new-tab-kbd {
+  opacity: 1;
+}
+
+.nsb-section-empty-hint,
+.nsb-folder-empty-hint {
+  padding: 4px 8px;
+  font-size: var(--sb-small);
+  color: var(--ui-fg-faint);
+}
+
+/* --------------------------------------------------------------------------
+   Folders: a row with a chevron; contents indented along a guide line.
+   -------------------------------------------------------------------------- */
+
+.nsb-folder-header {
+  display: flex;
+  align-items: center;
+  color: var(--ui-fg-muted);
+  cursor: pointer;
+}
+
+.nsb-folder-header:hover {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+.nsb-folder-chevron-btn {
+  width: calc(16px * var(--sb));
+  margin: 0 -4px 0 -4px;
+  color: var(--ui-fg-faint);
+}
+
+.nsb-folder-icon {
+  color: var(--ui-fg-muted);
+}
+
+.nsb-folder-title {
+  font-size: var(--sb-font);
+  font-weight: 500;
+}
+
+.nsb-folder-badge {
+  margin-left: auto;
+  padding: 0 5px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-fg-faint);
+  font-size: var(--sb-small);
+}
+
+.nsb-folder-menu-trigger {
+  opacity: 0;
+  color: var(--ui-fg-faint);
+}
+
+.nsb-folder-header:hover .nsb-folder-menu-trigger,
+.nsb-folder-menu-trigger:focus-visible {
+  opacity: 1;
+}
+
+.nsb-folder-children {
+  margin: 1px 0 2px calc(15px * var(--sb));
+  padding: 0 0 0 calc(6px * var(--sb));
+  border-left: 1px solid var(--ui-line);
+}
+
+.nsb-folder-rename-input,
+.nsb-folder-create-input {
+  height: calc(24px * var(--sb));
+  border: 1px solid var(--ui-focus);
+  border-radius: 5px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font: inherit;
+  font-size: var(--sb-font);
+}
+
+/* --------------------------------------------------------------------------
+   Space switcher: small tiles; the current space is tinted in its color.
+   -------------------------------------------------------------------------- */
+
+.nsb-switcher {
+  gap: 2px;
+  padding-top: calc(8px * var(--sb));
+  border-top: 1px solid var(--ui-line);
+}
+
+.nsb-switcher-group {
+  gap: 2px;
+}
+
+.nsb-space-btn {
+  width: calc(30px * var(--sb));
+  height: calc(30px * var(--sb));
+  border-radius: calc(8px * var(--sb));
+  opacity: 0.6;
+}
+
+.nsb-space-btn:hover,
+.nsb-space-btn:focus-visible {
+  background: var(--ui-hover);
+  opacity: 1;
+}
+
+.nsb-space-btn.active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--nsb-btn-color) 20%, transparent);
+  box-shadow: none;
+}
+
+.nsb-space-btn svg {
+  width: calc(15px * var(--sb));
+  height: calc(15px * var(--sb));
+}
+
+.nsb-space-add {
+  width: calc(30px * var(--sb));
+  height: calc(30px * var(--sb));
+  margin-left: auto;
+  border: none;
+  border-radius: calc(8px * var(--sb));
+  background: transparent;
+}
+
+.nsb-space-add:hover {
+  border: none;
+}
+
+/* Drag feedback stays visible but quiet. */
+.nsb-tab.nsb-drop-indicator::after {
+  background: var(--ui-fg);
+}
+
+.nsb-drag-ghost {
+  border-radius: 7px;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-float);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nsb-header-actions,
+  .nsb-tab,
+  .nsb-folder-add-btn {
+    transition: none;
+  }
+}

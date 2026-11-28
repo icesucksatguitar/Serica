@@ -1,0 +1,611 @@
+/* ==========================================================================
+   Settings
+   A fixed-size dialog: nothing in it changes size when switching pages or
+   toggling a control. No blur behind it (blurring the page re-rendered the
+   whole window on every frame and shifted when the page snapshot arrived),
+   no scale-in: it fades in. The scrollbar's room is always reserved.
+   Loaded after system.css.
+   ========================================================================== */
+
+.settings-overlay {
+  background-color: var(--ui-scrim);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: var(--space-6);
+  animation: ui-fade-in var(--dur-enter) ease both;
+}
+
+.settings-panel-card {
+  width: min(880px, calc(100vw - 48px));
+  min-width: 0;
+  max-width: none;
+  height: min(640px, calc(100vh - 48px));
+  min-height: 0;
+  max-height: none;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--ui-line-strong);
+  background-color: var(--ui-surface);
+  box-shadow: var(--ui-shadow-float);
+  animation: none;
+  contain: layout paint;
+}
+
+.settings-nav-sidebar {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  padding: var(--space-4) var(--space-2);
+  gap: var(--space-3);
+  background: color-mix(in srgb, var(--ui-bg) 55%, var(--ui-surface));
+  border-right: 1px solid var(--ui-line);
+}
+
+.settings-nav-title {
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ui-fg-faint);
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ui-fg-muted);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.settings-nav-tab:hover {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+.settings-nav-tab.active {
+  background: var(--ui-selected);
+  color: var(--ui-fg);
+  font-weight: 500;
+  border: none;
+  box-shadow: none;
+}
+
+.settings-nav-tab .settings-tab-icon,
+.settings-nav-tab.active .settings-tab-icon {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.settings-content-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  flex: none;
+  padding: 0 var(--space-3) 0 var(--space-6);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.settings-pane-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ui-fg);
+  letter-spacing: -0.005em;
+}
+
+.settings-content-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+  display: block;
+  overscroll-behavior: contain;
+}
+
+.settings-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* A group: small label, then rows separated by hairlines. No card fill. */
+.settings-group,
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.settings-group-label,
+.settings-section-title,
+.settings-group-title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ui-fg-faint);
+}
+
+.settings-group-rows,
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--ui-line);
+  border-radius: 0;
+  transition: none;
+}
+
+.settings-card:hover {
+  border-color: var(--ui-line);
+}
+
+.settings-group-rows > .settings-row,
+.settings-card > .settings-row,
+.widget-settings > .settings-row {
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.settings-card > .settings-divider {
+  display: none;
+}
+
+.settings-group-rows > .widget-settings {
+  display: contents;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 52px;
+  padding: var(--space-2) 0;
+}
+
+.settings-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-row-label {
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--ui-fg);
+}
+
+.settings-hint {
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--ui-fg-muted);
+}
+
+.settings-row-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-row-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--ui-hover);
+  color: var(--ui-fg-muted);
+}
+
+/* A setting that belongs to the row above (widget username, place). */
+.settings-subrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: 0 0 var(--space-3) 0;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.settings-sublabel {
+  min-width: 72px;
+  font-size: var(--text-sm);
+  color: var(--ui-fg-muted);
+}
+
+.settings-subrow .settings-input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 260px;
+}
+
+.settings-footnote,
+.settings-prose {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ui-fg-muted);
+}
+
+.settings-prose {
+  font-size: var(--text-md);
+  max-width: 60ch;
+}
+
+.settings-error {
+  font-size: var(--text-sm);
+  color: var(--ui-danger);
+}
+
+/* Controls */
+.settings-segmented {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--ui-hover);
+  border: none;
+}
+
+.settings-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ui-fg-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.settings-segment:hover {
+  color: var(--ui-fg);
+}
+
+.settings-segment.active {
+  background: var(--ui-surface);
+  color: var(--ui-fg);
+  box-shadow: 0 0 0 1px var(--ui-line-strong);
+}
+
+/* The knob moves with a transform; nothing around it changes size. */
+.settings-switch {
+  width: 34px;
+  height: 20px;
+  flex: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--ui-line-strong);
+  transition: background-color var(--dur-fast) ease;
+}
+
+.settings-switch-thumb {
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.settings-switch.on {
+  background: var(--ui-success);
+  border: none;
+}
+
+.settings-switch.on .settings-switch-thumb {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+.settings-switch:disabled {
+  opacity: 0.45;
+}
+
+.settings-input,
+.settings-name-input {
+  height: var(--control-h-sm);
+  padding: 0 10px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font: inherit;
+  font-size: var(--text-md);
+  outline: none;
+  transition: border-color var(--dur-fast) ease;
+}
+
+.settings-name-input {
+  width: 200px;
+}
+
+.settings-input:focus {
+  border-color: var(--ui-focus);
+}
+
+.settings-input.invalid {
+  border-color: var(--ui-danger);
+}
+
+.settings-button,
+.settings-icon-button {
+  height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ui-fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.settings-icon-button {
+  padding: 0;
+  width: var(--control-h-sm);
+}
+
+.settings-button:hover:not(:disabled),
+.settings-icon-button:hover:not(:disabled) {
+  background: var(--ui-hover);
+}
+
+.settings-button-danger {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ui-danger) 14%, transparent);
+  color: var(--ui-danger);
+}
+
+.settings-panel-card button:focus-visible,
+.settings-panel-card input:focus-visible,
+.settings-panel-card select:focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Appearance: a live preview beside the theme controls.
+   -------------------------------------------------------------------------- */
+
+.appearance-hero {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  gap: var(--space-5);
+  align-items: center;
+}
+
+.appearance-hero-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.appearance-colors {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.appearance-swatches {
+  display: inline-flex;
+}
+
+.appearance-swatches > span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ui-surface);
+}
+
+.appearance-swatches > span + span {
+  margin-left: -5px;
+}
+
+.appearance-preview {
+  display: flex;
+  flex-direction: column;
+  height: 140px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-bg);
+}
+
+.ap-topbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  flex: none;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.ap-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--theme-c1, var(--ui-accent));
+}
+
+.ap-ctrl {
+  width: 8px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+
+.appearance-preview.pills .ap-ctrl,
+.appearance-preview.pills .ap-url {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ui-line-strong);
+}
+
+.ap-url {
+  flex: 1;
+  height: 9px;
+  margin: 0 18px;
+  border-radius: 3px;
+  background: var(--ui-hover);
+}
+
+.ap-tabstrip {
+  display: flex;
+  gap: 4px;
+  height: 14px;
+  flex: none;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.ap-tab {
+  width: 34px;
+  border-radius: 2px;
+  background: var(--ui-hover);
+}
+
+.ap-tab.active {
+  background: var(--ui-line-strong);
+}
+
+.ap-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.ap-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 58px;
+  padding: 7px 6px;
+  border-right: 1px solid var(--ui-line);
+}
+
+.ap-row {
+  height: 6px;
+  border-radius: 2px;
+  background: var(--ui-hover);
+}
+
+.ap-row.active {
+  background: var(--ui-line-strong);
+}
+
+.ap-row.short {
+  width: 60%;
+}
+
+.ap-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--theme-c1, transparent) 35%, transparent), transparent 60%),
+    radial-gradient(120% 90% at 100% 100%, color-mix(in srgb, var(--theme-c2, transparent) 30%, transparent), transparent 60%),
+    var(--ui-surface);
+}
+
+.ap-line {
+  height: 5px;
+  width: 55%;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+
+.ap-line.wide {
+  width: 75%;
+  height: 7px;
+}
+
+.ap-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+  border-left: 1px solid var(--ui-line);
+}
+
+.ap-dock > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+
+@media (max-width: 720px) {
+  .settings-panel-card {
+    flex-direction: column;
+  }
+  .settings-nav-sidebar {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--ui-line);
+    padding: var(--space-2);
+  }
+  .settings-nav-title {
+    display: none;
+  }
+  .settings-nav-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .settings-nav-tab .settings-tab-label {
+    white-space: nowrap;
+  }
+  .appearance-hero {
+    grid-template-columns: 1fr;
+  }
+  .settings-row {
+    flex-wrap: wrap;
+  }
+}
