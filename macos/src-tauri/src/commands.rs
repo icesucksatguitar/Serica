@@ -66,6 +66,13 @@ pub async fn select_tab(tab_id: String, app: State<'_, Shared>) -> R<()> {
     Ok(())
 }
 
+/// Moves Serica into Applications (it was opened from a disk image or
+/// Downloads, where it can't update itself) and relaunches it from there.
+#[tauri::command]
+pub async fn move_to_applications(app: tauri::AppHandle) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::app_location::move_to_applications(&app)).await.map_err(|e| e.to_string())?
+}
+
 /// Split view: shows `dragged` beside `target` (`left`: on its left).
 #[tauri::command]
 pub async fn split_tabs(dragged: String, target: String, left: bool, app: State<'_, Shared>) -> R<bool> {

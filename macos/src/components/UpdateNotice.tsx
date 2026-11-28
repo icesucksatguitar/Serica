@@ -52,8 +52,11 @@ export const UpdateNotice: React.FC = () => {
     return tauriBridge.onUpdateStatus(setStatus);
   }, []);
 
-  const version = status?.newVersion ?? '';
-  const ready = !!status && (status.state === 'ready' || status.state === 'installing');
+  // Running from a disk image or Downloads: updates can't install until
+  // Serica is in Applications, so the reminder offers the move instead.
+  const needsMove = status?.state === 'needs-move';
+  const version = needsMove ? 'move-to-applications' : status?.newVersion ?? '';
+  const ready = !!status && (needsMove || status.state === 'ready' || status.state === 'installing');
   const snoozed = !!snooze && snooze.version === version && snooze.until > now;
 
   // While snoozed, look again when the window is used (and once a minute).
@@ -84,7 +87,7 @@ export const UpdateNotice: React.FC = () => {
 
   if (!presence.mounted || !status) return null;
   const installing = status.state === 'installing';
-  const lines = summary(status.notes);
+  const lines = needsMove ? [] : summary(status.notes);
 
   return (
     <div className="presence" data-state={presence.state}>
@@ -95,10 +98,12 @@ export const UpdateNotice: React.FC = () => {
         </span>
         <div className="update-notice-body">
           <p className="update-notice-title" id="update-notice-title">
-            Serica {version} is ready
+            {needsMove ? 'Move Serica to Applications' : `Serica ${version} is ready`}
           </p>
           <p className="update-notice-text" id="update-notice-text">
-            {installing ? 'Installing… Serica will reopen when it’s done.' : 'Restart now, or it installs when you close Serica. Your tabs will be right where you left them.'}
+            {needsMove
+              ? 'It’s running from a disk image or your Downloads folder, where it can’t update itself. Serica will reopen from Applications, with your tabs.'
+              : installing ? 'Installing… Serica will reopen when it’s done.' : 'Restart now, or it installs when you close Serica. Your tabs will be right where you left them.'}
           </p>
         </div>
         {!installing && (
@@ -120,9 +125,15 @@ export const UpdateNotice: React.FC = () => {
             Remind me later
           </button>
         )}
-        <button type="button" className="update-notice-primary" disabled={installing} onClick={() => void tauriBridge.installUpdate().catch(() => {})}>
-          {installing ? 'Restarting…' : 'Restart now'}
-        </button>
+        {needsMove ? (
+          <button type="button" className="update-notice-primary" onClick={() => void tauriBridge.moveToApplications().catch(() => {})}>
+            Move to Applications
+          </button>
+        ) : (
+          <button type="button" className="update-notice-primary" disabled={installing} onClick={() => void tauriBridge.installUpdate().catch(() => {})}>
+            {installing ? 'Restarting…' : 'Restart now'}
+          </button>
+        )}
       </div>
     </div>
     </div>

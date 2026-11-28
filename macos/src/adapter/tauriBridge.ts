@@ -8,7 +8,7 @@ import type { GeoPlace, GithubContributions, PageContextMenuRequest, PageDialogR
 type Unsubscribe = () => void;
 
 export interface UpdateStatus {
-  state: 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'ready' | 'installing' | 'error';
+  state: 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'ready' | 'installing' | 'error' | 'needs-move';
   currentVersion: string;
   newVersion?: string | null;
   notes?: string | null;
@@ -231,6 +231,7 @@ export const tauriBridge = {
   getUpdateStatus: () => invoke<UpdateStatus>('get_update_status'),
   checkForUpdate: () => invoke<UpdateStatus>('check_for_update'),
   installUpdate: () => invoke<void>('install_update'),
+  moveToApplications: () => invoke<void>('move_to_applications'),
   getUiPatchStatus: () => invoke<UiPatchStatus>('get_ui_patch_status'),
   confirmUiPatch: () => invoke<void>('confirm_ui_patch'),
   applyUiPatch: () => invoke<void>('apply_ui_patch'),
