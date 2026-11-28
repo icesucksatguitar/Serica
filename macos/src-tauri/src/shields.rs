@@ -176,6 +176,9 @@ pub struct Shields {
     tab_counts: Mutex<HashMap<String, i64>>,
     pub info: Mutex<ShieldsInfo>,
     dir: PathBuf,
+    /// `$media,redirect=` filters by site (see media_redirect.rs), parsed in
+    /// the background whenever the lists change.
+    media: RwLock<Arc<crate::media_redirect::MediaRules>>,
 }
 
 fn parse_opts(trusted: bool) -> ParseOptions {
@@ -203,8 +206,10 @@ impl Shields {
             tab_counts: Mutex::new(HashMap::new()),
             info: Mutex::new(ShieldsInfo { engine: "builtin".into(), ..Default::default() }),
             dir,
+            media: RwLock::new(Arc::new(Default::default())),
         });
         s.load_cached();
+        s.refresh_media();
         s
     }
 
@@ -252,7 +257,24 @@ impl Shields {
         if !self.active_for(url) {
             return None;
         }
-        Some(self.engine.read().clone().url_cosmetic_resources(url))
+        let mut res = self.engine.read().clone().url_cosmetic_resources(url);
+        // Media redirects WebKit's content blockers can't do (Spotify's audio ads).
+        let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+        if let Some(script) = self.media.read().script_for(&host) {
+            res.injected_script.push_str(&script);
+        }
+        Some(res)
+    }
+
+    /// Re-reads the `$media,redirect=` filters from the lists, off the
+    /// calling thread (parsing every list takes a moment).
+    fn refresh_media(self: &Arc<Self>) {
+        let this = Arc::clone(self);
+        let _ = std::thread::Builder::new().name("serica-media-rules".into()).spawn(move || {
+            let texts = this.list_texts();
+            let rules = crate::media_redirect::MediaRules::parse(texts.iter().map(|(t, _)| t.as_str()));
+            *this.media.write() = Arc::new(rules);
+        });
     }
 
     pub fn class_id_selectors(&self, classes: &[String], ids: &[String], exceptions: &HashSet<String>) -> Vec<String> {
@@ -438,6 +460,7 @@ impl Shields {
         .await
         .map_err(|e| e.to_string())?;
         *self.engine.write() = Arc::new(engine);
+        self.refresh_media();
         let now = now_ms();
         let _ = crate::store::write_atomic(&self.dir.join("meta.json"), serde_json::json!({ "updatedAt": now, "builtinVersion": BUILTIN_VERSION }).to_string().as_bytes());
         let mut info = self.info.lock();

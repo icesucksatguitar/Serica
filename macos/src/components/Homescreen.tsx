@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { HelpCircle, Image as ImageIcon, LayoutGrid, Plus, SlidersHorizontal } from 'lucide-react';
+import { HelpCircle, Image as ImageIcon, LayoutGrid, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import {
+  buildSearchUrl,
+  SEARCH_ENGINES,
+  type SearchEngineId,
   DEFAULT_HOME_BACKGROUND,
   DEFAULT_HOME_WIDGETS,
   DEFAULT_UI_SCALE,
@@ -26,7 +29,54 @@ interface HomescreenProps {
   dockVisible?: boolean;
   /** The name the greeting uses. */
   userName?: string;
+  /** ⌘T opens real tabs (Settings › New tab): a search box in the middle
+   *  of the page, focused, that loads into this tab. */
+  searchBox?: boolean;
+  searchEngine?: SearchEngineId;
 }
+
+/** What was typed, as an address: a URL, a host, or a search. */
+function toAddress(input: string, engine: SearchEngineId): string {
+  const t = input.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(about|serica|neutrino):/i.test(t)) return t;
+  if (!/\s/.test(t) && (/^[^/]+\.[a-z]{2,}(?::\d+)?(\/.*)?$/i.test(t) || /^localhost(:\d+)?(\/.*)?$/i.test(t))) return `https://${t}`;
+  return buildSearchUrl(engine, t);
+}
+
+const HomeSearch: React.FC<{ engine: SearchEngineId; onNavigate: (url: string) => void }> = ({ engine, onNavigate }) => {
+  const [value, setValue] = useState('');
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // Focus once the page is on screen (it may mount mid-transition).
+    const id = requestAnimationFrame(() => ref.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const label = (SEARCH_ENGINES[engine] ?? SEARCH_ENGINES.google).label;
+  return (
+    <form
+      className="home2-search"
+      role="search"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value.trim()) onNavigate(toAddress(value, engine));
+      }}
+    >
+      <Search size={17} strokeWidth={2} aria-hidden="true" />
+      <input
+        ref={ref}
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={`Search ${label} or type an address`}
+        aria-label="Search or type an address"
+        spellCheck={false}
+        autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
+      />
+    </form>
+  );
+};
 
 /** The bundled Serica Special artworks (oil-pastel re-paintings of 1789-1794 scenes). */
 export const SPECIAL_ART = [
@@ -228,6 +278,8 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   uiScale = DEFAULT_UI_SCALE,
   dockVisible = false,
   userName,
+  searchBox = false,
+  searchEngine = 'google',
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -236,9 +288,10 @@ export const Homescreen: React.FC<HomescreenProps> = ({
   const themeDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') !== 'light';
   const lightInk = wantsLightInk(background, themeDark);
 
-  // Typing anywhere on the page goes to the address bar.
+  // Typing anywhere on the page goes to the address bar (the search box
+  // takes it itself when it is there).
   useEffect(() => {
-    if (editing) return;
+    if (editing || searchBox) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
@@ -246,7 +299,7 @@ export const Homescreen: React.FC<HomescreenProps> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editing, onOpenCommandBar]);
+  }, [editing, onOpenCommandBar, searchBox]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -284,7 +337,9 @@ export const Homescreen: React.FC<HomescreenProps> = ({
         </div>
       )}
 
-      {widgets.items.length === 0 && !editing && onUpdateWidgets && (
+      {searchBox && !editing && <HomeSearch engine={searchEngine} onNavigate={onNavigate} />}
+
+      {widgets.items.length === 0 && !editing && onUpdateWidgets && !searchBox && (
         <button type="button" className="home2-empty" onClick={() => { setEditing(true); setGalleryOpen(true); }}>
           <Plus size={14} aria-hidden="true" />
           Add a widget

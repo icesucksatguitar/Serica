@@ -77,6 +77,10 @@ export function resolveReducedEffectsActive(
 
 export type TabLayout = 'sidebar' | 'top';
 
+/** What ⌘T does: the floating address bar (a tab opens once you pick a
+ *  page), or a real new tab at once, with a search box on its page. */
+export type NewTabStyle = 'floating' | 'page';
+
 /** Look of the top bar's controls: rounded bordered pills, or flat borderless buttons. */
 export type TopBarStyle = 'pill' | 'flat';
 
@@ -107,6 +111,7 @@ export interface BrowserSettings {
   topBarStyle: TopBarStyle;
   /** On web pages, hide the top bar until the pointer reaches the top edge. */
   topBarAutoHide: boolean;
+  newTabStyle: NewTabStyle;
   /** Block cookies from sites other than the one in the address bar. */
   blockThirdPartyCookies: boolean;
   /** Delete cookies when Serica closes, except for `cookieKeepSites`. */
@@ -406,6 +411,7 @@ export const DEFAULT_SETTINGS: Readonly<BrowserSettings> = Object.freeze({
   tabLayout: 'sidebar' as TabLayout,
   topBarStyle: 'flat' as TopBarStyle,
   topBarAutoHide: false,
+  newTabStyle: 'floating' as NewTabStyle,
   blockThirdPartyCookies: false,
   clearCookiesOnExit: false,
   cookieKeepSites: [] as string[],
@@ -544,6 +550,7 @@ export function normalizeSettings(raw: unknown): BrowserSettings {
     topBarStyle: source.topBarStyle === 'pill' ? 'pill' : 'flat',
     topBarAutoHide:
       typeof source.topBarAutoHide === 'boolean' ? source.topBarAutoHide : DEFAULT_SETTINGS.topBarAutoHide,
+    newTabStyle: source.newTabStyle === 'page' ? 'page' : 'floating',
     blockThirdPartyCookies: source.blockThirdPartyCookies === true,
     clearCookiesOnExit: source.clearCookiesOnExit === true,
     cookieKeepSites: Array.isArray(source.cookieKeepSites)

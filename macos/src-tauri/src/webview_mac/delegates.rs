@@ -188,8 +188,9 @@ define_class!(
     unsafe impl NSObjectProtocol for SericaUIDelegate {}
 
     unsafe impl WKUIDelegate for SericaUIDelegate {
-        /// `target=_blank` links and `window.open`: Tauri's `on_new_window`
-        /// (a tab, or a real popup for sized OAuth windows).
+        /// `target=_blank` links and `window.open`: a real popup window for
+        /// sign-in / payment windows and blank windows the page steers
+        /// (`popup.rs`); otherwise Tauri's `on_new_window`, a new tab.
         #[unsafe(method_id(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:))]
         fn create_web_view(
             &self,
@@ -198,11 +199,15 @@ define_class!(
             action: &WKNavigationAction,
             features: &WKWindowFeatures,
         ) -> Option<Retained<WKWebView>> {
-            match self.ivars().inner.as_ref() {
+            if super::popup::wants_popup(action, features) {
+                super::popup::open(wv, config, features)
+            } else {
+                match self.ivars().inner.as_ref() {
                 Some(inner) if responds(&**inner, sel!(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:)) => unsafe {
                     msg_send![&**inner, webView: wv, createWebViewWithConfiguration: config, forNavigationAction: action, windowFeatures: features]
                 },
                 _ => None,
+                }
             }
         }
 

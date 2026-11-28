@@ -23,6 +23,7 @@ import {
   Palette,
   PanelLeft,
   PanelTop,
+  Plus,
   Puzzle,
   RotateCcw,
   Search,
@@ -407,6 +408,19 @@ export const Settings2: React.FC<Settings2Props> = ({ onClose, settings, onUpdat
             <Group title="Window" icon={Monitor}>
               <Row id="appearance.layout" icon={topTabs ? PanelTop : PanelLeft} title="Tabs" detail="Down the side, or across the top">
                 <Segmented label="Tabs" value={topTabs ? 'top' : 'sidebar'} options={[{ value: 'sidebar', label: 'Sidebar' }, { value: 'top', label: 'Top' }]} onChange={(tabLayout) => onUpdateSettings({ tabLayout })} />
+              </Row>
+              <Row
+                id="appearance.newtab"
+                icon={Plus}
+                title="New tab (⌘T)"
+                detail={settings.newTabStyle === 'page' ? 'Opens a tab at once, with a search box on its page' : 'A floating address bar; the tab opens once you choose a page'}
+              >
+                <Segmented
+                  label="New tab"
+                  value={settings.newTabStyle === 'page' ? 'page' : 'floating'}
+                  options={[{ value: 'floating', label: 'Floating bar' }, { value: 'page', label: 'New tab page' }]}
+                  onChange={(newTabStyle) => onUpdateSettings({ newTabStyle })}
+                />
               </Row>
               <Row id="appearance.topbar" icon={PanelTop} title="Top bar buttons" detail="Flat, or outlined">
                 <Segmented label="Top bar buttons" value={settings.topBarStyle === 'pill' ? 'pill' : 'flat'} options={[{ value: 'flat', label: 'Flat' }, { value: 'pill', label: 'Outlined' }]} onChange={(topBarStyle) => onUpdateSettings({ topBarStyle })} />
