@@ -4,7 +4,7 @@
 
 # Serica
 
-**An open-source, Arc-style browser for Windows.**
+**A browser for Windows.**
 
 [![Latest release](https://img.shields.io/github/v/release/icesucksatguitar/Serica?label=release)](https://github.com/icesucksatguitar/Serica/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -24,7 +24,7 @@ The installer adds Start menu and desktop shortcuts. Prefer not to install anyth
 
 ## Why Serica
 
-Arc stops working on **December 22, 2026**. Serica keeps the parts of Arc that people miss: Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes, and adds a Cold Turkey-style Focus Mode. It's open source and MIT-licensed, so it can't be sunset out from under you. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
+Serica gives you Spaces, a vertical sidebar with pinned and Today tabs, a command palette and per-space themes, plus a Cold Turkey-style Focus Mode. It's a native Rust app on Microsoft's WebView2, so sites render with the same Chromium engine as Edge and the installer is about 5 MB. Ad and tracker blocking is built in, and a local MCP endpoint lets AI agents like Claude drive your tabs when you allow it.
 
 ## Features
 
@@ -127,7 +127,6 @@ The endpoint is off by default and listens only on `127.0.0.1`. Every request ne
 
 - [x] Rust + Tauri v2 rewrite (the Electron prototype has been retired)
 - [x] Chrome Web Store extensions, download manager, MCP endpoint
-- [ ] Arc importer (Spaces, pinned tabs and folders)
 - [x] MSI installer with Start menu and desktop shortcuts
 - [x] Auto-update
 - [ ] Code signing, to remove the SmartScreen warning
