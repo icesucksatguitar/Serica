@@ -1,6 +1,6 @@
 [package]
 name = "serica-macos"
-version = "0.5.4"
+version = "0.5.5"
 description = "Serica Browser - macOS implementation (Rust + Tauri v2 + WebKit)"
 edition = "2021"
 rust-version = "1.80"
