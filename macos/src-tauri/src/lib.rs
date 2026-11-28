@@ -1,6 +1,7 @@
 //! Serica browser backend for macOS (Rust + Tauri v2 + WebKit).
 
 mod app;
+mod app_location;
 mod backgrounds;
 mod bookmarks;
 mod browser_import;
@@ -278,6 +279,7 @@ pub fn run() {
             commands::download_action,
             commands::start_download_drag,
             commands::split_tabs,
+            commands::move_to_applications,
             commands::detach_tab,
             commands::reattach_tab,
             commands::tab_action,

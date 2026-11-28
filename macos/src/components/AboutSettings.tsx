@@ -26,6 +26,8 @@ function describe(s: UpdateStatus): string {
       return `You’re up to date. ${checkedAgo(s.lastChecked)}`.trim();
     case 'error':
       return s.error ?? 'Couldn’t check for updates.';
+    case 'needs-move':
+      return 'Serica is running from a disk image or your Downloads folder, where it can’t update itself. Move it to Applications to get updates.';
     default:
       return 'Serica checks for updates automatically and installs them when you restart.';
   }
@@ -55,7 +57,11 @@ export const AboutSettings: React.FC<{ active: boolean }> = ({ active }) => {
               {status ? describe(status) : ' '}
             </span>
           </div>
-          {ready ? (
+          {status?.state === 'needs-move' ? (
+            <button type="button" className="settings-button" onClick={() => void tauriBridge.moveToApplications().catch(() => {})}>
+              Move to Applications
+            </button>
+          ) : ready ? (
             <button type="button" className="settings-button" onClick={() => void tauriBridge.installUpdate().catch(() => {})}>
               Restart to update
             </button>

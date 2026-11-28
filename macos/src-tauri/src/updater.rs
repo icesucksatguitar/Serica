@@ -25,6 +25,8 @@ const EVENT: &str = "serica:update-status";
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     /// idle | checking | up-to-date | downloading | ready | installing | error
+    /// | needs-move (running from a disk image or a translocated copy, where
+    /// updates can't be installed: see app_location.rs)
     pub state: String,
     pub current_version: String,
     pub new_version: Option<String>,
@@ -95,6 +97,15 @@ pub async fn check(handle: &AppHandle) -> UpdateStatus {
             return g.status.clone();
         }
         g.busy = true;
+    }
+    if crate::app_location::needs_move() {
+        inner().lock().busy = false;
+        publish(handle, |s| {
+            s.state = "needs-move".into();
+            s.error = Some("Serica is running from a disk image or your Downloads folder, where it can't update itself. Move it to Applications to get updates.".into());
+            s.progress = None;
+        });
+        return status(handle);
     }
     let result = check_inner(handle).await;
     inner().lock().busy = false;
