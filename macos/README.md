@@ -42,7 +42,23 @@ patches. Its log is written to `release/test/serica-test.log`.
 python3 build_mac.py                    # or --bump patch | minor | major, --fresh, --run, --universal
 ```
 
-**Shipping to users:**
+**Shipping to users (both systems at once):** Windows and macOS share one
+version and one GitHub release. From the repository root:
+
+```bash
+python3 release.py patch     # bumps rust/ and macos/ together, commits, tags vX.Y.Z, pushes
+```
+
+The tag starts `.github/workflows/release.yml`: it checks both apps are on the
+tag's version, builds the Windows MSI and the Universal Mac disk image side by
+side, and puts both on the release `vX.Y.Z` with one `latest.json`
+(`windows-x86_64`, `darwin-aarch64`, `darwin-x86_64`). The release is a draft
+until you publish it on GitHub (or run the workflow by hand with *live*).
+It needs the `TAURI_SIGNING_PRIVATE_KEY` secret (the updater key); the
+`APPLE_*` secrets add Developer ID signing and notarization.
+`.github/workflows/ci.yml` builds and tests both apps on every push.
+
+**Shipping the Mac build by hand** (the same release, from this Mac):
 
 ```bash
 python3 build_mac.py -b patch --bundle            # .app + .dmg + signed update archive -> release/github

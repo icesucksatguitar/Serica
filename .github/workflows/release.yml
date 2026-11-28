@@ -1,0 +1,244 @@
+# One release for both systems. Pushing a tag vX.Y.Z (release.py does it)
+# builds the Windows installer and the Mac disk image side by side, then puts
+# both on one GitHub release with one latest.json, so installed copies on
+# Windows and on macOS update from the same release.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           required: the updater key (~/.tauri/serica-updater.key)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password, if it has one
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#                                       optional: Developer ID signing and notarization
+#                                       for the Mac app (ad-hoc signed without them)
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Publish at once and mark Latest (otherwise a draft to review)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Same version on Windows and macOS
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            v=$(python3 release.py --check --tag "${GITHUB_REF_NAME}")
+          else
+            v=$(python3 release.py --check)
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Releasing Serica $v for Windows and macOS" >> "$GITHUB_STEP_SUMMARY"
+      - name: Updater key is set
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY secret (the contents of ~/.tauri/serica-updater.key). Without it installed copies can't verify updates."
+            exit 1
+          fi
+
+  windows:
+    name: Windows (x64 MSI)
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: rust/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - name: Build the signed installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles msi
+      - name: Stage the release assets
+        run: |
+          t=src-tauri/target/release
+          msi="$t/bundle/msi/Serica_${VERSION}_x64_en-US.msi"
+          out=../out/windows
+          mkdir -p "$out"
+          cp "$msi" "$out/"
+          cp "$msi" "$out/Serica-Setup-x64.msi"
+          cp "$msi.sig" "$out/"
+          cp "$t/serica-rust.exe" "$out/Serica_${VERSION}_x64_portable.exe"
+          python - "$msi.sig" "$out/latest-windows.json" <<'EOF'
+          import json, os, sys
+          repo, v = os.environ["GITHUB_REPOSITORY"], os.environ["VERSION"]
+          entry = {
+              "signature": open(sys.argv[1], encoding="utf-8").read().strip(),
+              "url": f"https://github.com/{repo}/releases/download/v{v}/Serica_{v}_x64_en-US.msi",
+          }
+          json.dump({"windows-x86_64": entry}, open(sys.argv[2], "w"), indent=2)
+          EOF
+          ls -l "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/windows
+          if-no-files-found: error
+
+  macos:
+    name: macOS (Universal DMG)
+    needs: version
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: macos
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: macos/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: macos/src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - name: Build the app, disk image and update archive
+        env:
+          # No Finder session on the runner: the disk image is made without
+          # its window layout (as build_mac.py does without a desktop).
+          CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Empty secrets must not reach Tauri as empty values.
+          for k in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -z "${!k}" ] && unset "$k"
+          done
+          npx tauri build --target universal-apple-darwin --bundles app,dmg
+      - name: Check and stage the release assets
+        run: |
+          b=src-tauri/target/universal-apple-darwin/release/bundle
+          app="$b/macos/Serica.app"
+          dmg="$b/dmg/Serica_${VERSION}_universal.dmg"
+          codesign --verify --deep --strict "$app"
+          archs=$(lipo -archs "$app/Contents/MacOS/"*)
+          [[ "$archs" == *x86_64* && "$archs" == *arm64* ]] || { echo "::error::Not Universal: $archs"; exit 1; }
+          hdiutil verify "$dmg"
+          out=../out/macos
+          mkdir -p "$out"
+          cp "$dmg" "$out/"
+          cp "$dmg" "$out/Serica-macOS-universal.dmg"
+          cp "$b/macos/Serica.app.tar.gz" "$out/Serica_${VERSION}_universal.app.tar.gz"
+          cp "$b/macos/Serica.app.tar.gz.sig" "$out/Serica_${VERSION}_universal.app.tar.gz.sig"
+          python3 - "$out/Serica_${VERSION}_universal.app.tar.gz.sig" "$out/latest-macos.json" <<'EOF'
+          import json, os, sys
+          repo, v = os.environ["GITHUB_REPOSITORY"], os.environ["VERSION"]
+          entry = {
+              "signature": open(sys.argv[1], encoding="utf-8").read().strip(),
+              "url": f"https://github.com/{repo}/releases/download/v{v}/Serica_{v}_universal.app.tar.gz",
+          }
+          # One Universal app serves Apple Silicon and Intel Macs.
+          json.dump({"darwin-aarch64": entry, "darwin-x86_64": entry}, open(sys.argv[2], "w"), indent=2)
+          EOF
+          ls -l "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: out/macos
+          if-no-files-found: error
+
+  release:
+    name: GitHub release (both systems)
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+      - name: latest.json for Windows and macOS
+        run: |
+          python3 - <<'EOF'
+          import json, os, datetime, pathlib
+          repo, v = os.environ["GITHUB_REPOSITORY"], os.environ["VERSION"]
+          a = pathlib.Path("assets")
+          platforms = {}
+          for frag in ("windows/latest-windows.json", "macos/latest-macos.json"):
+              platforms.update(json.loads((a / frag).read_text()))
+              (a / frag).unlink()
+          latest = {
+              "version": v,
+              "notes": f"https://github.com/{repo}/releases/tag/v{v}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          pathlib.Path("latest.json").write_text(json.dumps(latest, indent=2) + "\n")
+          print(json.dumps(latest, indent=2))
+          EOF
+          cd assets/windows && sha256sum -- *.msi *.exe | sed 's/  / */' > SHA256SUMS.txt
+          cd ../macos && sha256sum -- *.dmg *.tar.gz | sed 's/  / */' > SHA256SUMS-macos.txt
+      - name: Create or update the release
+        run: |
+          tag="v${VERSION}"
+          files=(assets/windows/* assets/macos/*)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            # A draft first, so latest.json is never public before the installers.
+            gh release create "$tag" "${files[@]}" --draft --title "Serica $tag" \
+              --target "${GITHUB_SHA}" --generate-notes
+          fi
+          # latest.json last: it never points at a file still uploading.
+          gh release upload "$tag" latest.json --clobber
+      - name: Publish
+        if: ${{ inputs.live }}
+        run: gh release edit "v${VERSION}" --draft=false --latest
+      - name: Summary
+        run: |
+          {
+            echo "### Serica v${VERSION}: Windows + macOS"
+            echo
+            gh release view "v${VERSION}" --json url,isDraft,assets -q '"\(.url) (draft: \(.isDraft))\n" + ([.assets[].name] | map("- " + .) | join("\n"))'
+          } >> "$GITHUB_STEP_SUMMARY"
