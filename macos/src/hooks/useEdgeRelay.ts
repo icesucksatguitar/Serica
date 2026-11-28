@@ -47,6 +47,9 @@ export function useEdgeRelay(enabled: boolean): void {
     // once it moves away over the page) until it leaves the edge area.
     let engaged = false;
     let last = '';
+    // 16ms while the pointer moves; a resting pointer is read less and
+    // less often (up to 4 times a second) instead of 60 times a second.
+    let delay = 16;
     const poll = async () => {
       if (!alive) return;
       const c = await api.uiCursor!().catch(() => null);
@@ -62,6 +65,7 @@ export function useEdgeRelay(enabled: boolean): void {
         if (atEdge) engaged = true;
         const key = `${Math.round(x)},${Math.round(y)}`;
         if (engaged && key !== last) relay(x, y);
+        delay = key === last ? Math.min(delay * 1.5, 250) : 16;
         last = key;
         if (x < SIDE_BAND || x > w - SIDE_BAND || y < TOP_BAND) until = now + 400;
       }
@@ -72,10 +76,11 @@ export function useEdgeRelay(enabled: boolean): void {
         over = null;
         return;
       }
-      window.setTimeout(() => void poll(), 16);
+      window.setTimeout(() => void poll(), delay);
     };
     const off = api.onEdgeApproach(() => {
       until = performance.now() + 600;
+      delay = 16;
       if (!polling) {
         polling = true;
         void poll();

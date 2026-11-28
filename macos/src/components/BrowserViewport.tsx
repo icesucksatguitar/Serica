@@ -21,6 +21,9 @@ interface BrowserViewportProps {
   onMediaStateChange?: (state: ActiveMediaState | null) => void;
   mediaCommand?: { action: string; tabId?: string; value?: number; timestamp: number } | null;
   userName?: string;
+  /** New tab pages show a search box (Settings › New tab: a real tab). */
+  homeSearchBox?: boolean;
+  searchEngine?: import('../shared/settings').SearchEngineId;
   onTopHover?: (isHovering: boolean) => void;
   onFullscreenChange?: (isFullscreen: boolean) => void;
   /** Page color of the active tab for the top bar tint (theme-color meta). */
@@ -211,6 +214,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
   onMediaStateChange,
   mediaCommand,
   userName,
+  homeSearchBox,
+  searchEngine,
   onFullscreenChange,
   onPageColor,
   insetLeft = 0,
@@ -839,6 +844,8 @@ export const BrowserViewport: React.FC<BrowserViewportProps> = ({
           uiScale={uiScale}
           dockVisible={dockVisible}
           userName={userName}
+          searchBox={homeSearchBox}
+          searchEngine={searchEngine}
         />
       )}
     </div>

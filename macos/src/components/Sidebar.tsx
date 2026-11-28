@@ -798,6 +798,19 @@ const SidebarImpl: React.FC<SidebarProps> = ({
     let timer = 0;
     let armed = false;
     let outsideSince: number | null = null;
+    // Every 40ms while the pointer moves; a resting pointer is read less
+    // and less often (up to 4 times a second), so an open sidebar costs
+    // next to nothing while you read it. Moving inside it resets the pace.
+    let last = '';
+    let delay = 40;
+    const onMove = () => {
+      if (delay > 40) {
+        delay = 40;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(tick, 40);
+      }
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
     const insideUi = (x: number, y: number) => {
       if (x <= (sidebarWidth ?? 240) + 4) return true;
       for (const el of document.querySelectorAll('.nsb-menu, .nsb-preview')) {
@@ -812,6 +825,9 @@ const SidebarImpl: React.FC<SidebarProps> = ({
       const k = c && c[2] > 0 ? window.innerWidth / c[2] : 0;
       const inside = c !== null && k > 0 && insideUi(c[0] * k, c[1] * k);
       const now = performance.now();
+      const key = c ? `${Math.round(c[0])},${Math.round(c[1])}` : '';
+      delay = key === last && outsideSince === null ? Math.min(delay * 1.5, 250) : 40;
+      last = key;
       if (inside || busyRef.current) {
         armed = armed || inside;
         outsideSince = null;
@@ -824,12 +840,13 @@ const SidebarImpl: React.FC<SidebarProps> = ({
           return;
         }
       }
-      timer = window.setTimeout(tick, 40);
+      timer = window.setTimeout(tick, delay);
     };
     timer = window.setTimeout(tick, 40);
     return () => {
       alive = false;
       window.clearTimeout(timer);
+      window.removeEventListener('mousemove', onMove);
     };
   }, [autoHide, shown, livePage, sidebarWidth, dismiss]);
   const hidePreview = preview.hide;

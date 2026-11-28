@@ -105,8 +105,12 @@ pub fn edge_at(x: f64, y: f64, w: f64, h: f64) -> Option<&'static str> {
 fn run(app: Shared) {
     let mut inside: Option<&'static str> = None;
     let mut sent: [Option<Instant>; 3] = [None; 3];
+    // 16ms while the pointer moves; a resting pointer is checked less and
+    // less often (up to 10 times a second), so the thread mostly sleeps.
+    let mut last: Option<(f64, f64)> = None;
+    let mut pause = 16u64;
     loop {
-        std::thread::sleep(Duration::from_millis(16));
+        std::thread::sleep(Duration::from_millis(pause));
         let g = geometry();
         if !g.focused || g.minimized || g.w <= 0.0 {
             inside = None;
@@ -123,6 +127,8 @@ fn run(app: Shared) {
             continue;
         }
         let Some((cx, cy)) = cursor() else { continue };
+        pause = if last == Some((cx, cy)) { (pause * 3 / 2).min(100) } else { 16 };
+        last = Some((cx, cy));
         let edge = edge_at(cx - g.x, cy - g.y, g.w, g.h);
         if edge != inside {
             inside = edge;

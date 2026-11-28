@@ -447,6 +447,7 @@ mod delegates;
 mod dialogs;
 mod messages;
 mod nav;
+mod popup;
 pub mod api;
 pub mod menu;
 

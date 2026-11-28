@@ -197,10 +197,18 @@ export function App() {
     setIsCommandBarNewTab(false);
     setIsCommandBarOpen(true);
   }, [setIsCommandBarOpen]);
+  // ⌘T and the new tab buttons: the floating address bar (Arc), or a real
+  // tab at once with a search box on its page (Chrome), per Settings.
+  const newTabAsPage = settings.newTabStyle === 'page';
   const openNewTabCommandBar = useCallback(() => {
+    if (newTabAsPage) {
+      setIsCommandBarOpen(false);
+      void createTab(undefined, state.activeSpaceId);
+      return;
+    }
     setIsCommandBarNewTab(true);
     setIsCommandBarOpen(true);
-  }, [setIsCommandBarOpen]);
+  }, [setIsCommandBarOpen, newTabAsPage, createTab, state.activeSpaceId]);
   useEffect(() => {
     if (!isCommandBarOpen) setIsCommandBarNewTab(false);
   }, [isCommandBarOpen]);
@@ -1062,7 +1070,6 @@ const showSidebar = !isHtmlFullscreen && !topTabs;
   // The page runs to the window's edges: the pointer reaching an edge over
   // it is relayed to the UI instead of needing uncovered strips (see
   // useEdgeRelay), which showed as gaps at the sides and corners.
-  const pageInsetLeft = 0;
   const pageInsetRight = 0;
   useEdgeRelay(isWebpage && !isHtmlFullscreen);
 // The top bar on web pages: 30px, and (by default) hidden until the pointer
@@ -1101,6 +1108,12 @@ useEffect(() => {
     setSidebarWidth(saved);
   }
 }, [(settings as any).sidebarWidth]);
+
+// A sidebar pinned open (⌘S) sits beside the page, not over it: the page
+// (and its top bar) start at the sidebar's edge, so nothing on the site is
+// hidden under it. A sidebar that only slides out from the edge stays over
+// the page.
+const pageInsetLeft = showSidebar && sidebarOpen && isWebpage && !isHtmlFullscreen ? sidebarWidth : 0;
 
 // Stable props for the (memoized) sidebar, so unrelated app re-renders skip it.
 // useBrowser's commands are all useCallback-stable.
@@ -1512,6 +1525,8 @@ return (
           insetLeft={pageInsetLeft}
           insetRight={pageInsetRight}
           homeWidgets={settings.homeWidgets}
+          homeSearchBox={newTabAsPage}
+          searchEngine={settings.searchEngine}
           homeBackground={settings.homeBackground}
           dockVisible={settings.rightPinsDockVisible}
           uiScale={settings.uiScale}

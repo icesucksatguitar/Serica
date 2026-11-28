@@ -495,10 +495,28 @@ export function useElementHole(id: string, el: HTMLElement | null, pad = 0, posi
     });
     const ro = new ResizeObserver(() => void push());
     ro.observe(el);
+    // An element that glides to a new place (a CSS transition on left/top)
+    // was measured mid-way when its position changed: measure again where it
+    // ends. A window resize moves anchored elements without resizing them.
+    const settle = (e: Event) => {
+      if (e.target === el) void push();
+    };
+    let raf = 0;
+    const onResize = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => void push());
+    };
+    el.addEventListener('transitionend', settle);
+    el.addEventListener('transitioncancel', settle);
+    window.addEventListener('resize', onResize);
     return () => {
       alive = false;
       pushRef.current = null;
       ro.disconnect();
+      el.removeEventListener('transitionend', settle);
+      el.removeEventListener('transitioncancel', settle);
+      window.removeEventListener('resize', onResize);
+      cancelAnimationFrame(raf);
       removeViewportHole(id);
     };
   }, [id, el, pad]);

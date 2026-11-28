@@ -17,6 +17,7 @@ mod importer;
 mod local_ai;
 mod mcp;
 mod mcp_http;
+mod media_redirect;
 mod model;
 mod perf;
 mod previews;
