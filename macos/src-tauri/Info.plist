@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Tauri merges this into the bundle's Info.plist. -->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+
+	<!-- A web browser: http and https links can open in Serica. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Web site URL</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>http</string>
+				<string>https</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Documents Serica opens: web pages and PDFs. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
+				<string>public.xhtml</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.svg-image</string>
+				<string>org.webmproject.webp</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Websites ask for these through Serica; macOS shows the reason. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Websites you allow can use your camera for video calls and other features.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Websites you allow can use your microphone for calls, recordings and voice input.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Websites you allow can see your approximate location, for maps and local results.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Websites you allow can see your approximate location, for maps and local results.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Serica saves the files you download to your Downloads folder.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Serica opens and saves files on your Desktop when you choose to.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Serica opens and saves files in your Documents folder when you choose to.</string>
+
+	<!-- Pages are loaded over whatever the site uses (http included), as in any browser. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

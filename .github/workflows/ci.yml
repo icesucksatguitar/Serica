@@ -1,0 +1,71 @@
+# Every push and pull request: both apps build and pass their tests, and stay
+# on the same version (release.py --check), so a release never finds out late
+# that one of them is broken or behind.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  versions:
+    name: Same version on Windows and macOS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 release.py --check
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: rust/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm test
+      - run: cargo test
+        working-directory: rust/src-tauri
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: macos/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: macos/src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm test
+      - run: cargo test
+        working-directory: macos/src-tauri

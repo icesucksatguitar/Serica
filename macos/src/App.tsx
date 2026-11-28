@@ -1,0 +1,1774 @@
+import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { useBrowser } from './hooks/useBrowser';
+import { useProfiles } from './hooks/useProfiles';
+import { Sidebar } from './components/Sidebar';
+import { buildSidebarView } from './utils/sidebarModel';
+import { selectSpaceByIndex } from './shared/layout';
+import { FloatingUrlPill } from './components/FloatingUrlPill';
+import { BrowserViewport } from './components/BrowserViewport';
+import { RightPinsDock, type PinnedSite } from './components/RightPinsDock';
+import { TopTabStrip } from './components/TopTabStrip';
+import { ToolsMenu } from './components/ToolsMenu';
+import { AuthHandoffNotice } from './components/AuthHandoffNotice';
+import { UpdateNotice } from './components/UpdateNotice';
+import { UiPatchNotice } from './components/UiPatchNotice';
+import { WhatsNew } from './components/WhatsNew';
+import { PasswordPrompt } from './components/PasswordPrompt';
+import { PageDialog } from './components/PageDialog';
+import { PermissionPrompt } from './components/PermissionPrompt';
+import { DropZones } from './components/DropZones';
+import type { SidebarState, UserProfile } from './types';
+import { ProductTour } from './components/ProductTour';
+import { SafeBoundary } from './components/SafeBoundary';
+import { FocusButton } from './components/FocusButton';
+import { useSettings } from './hooks/useSettings';
+import { prewarmPageUnderlay, useLingering, useViewportOverlay, useViewportOverlayCount } from './hooks/useViewportOverlay';
+import { Presence } from './hooks/usePresence';
+import type { SettingsPage } from './components/settings/parts';
+import { TOP_BAR_HEIGHT, TOP_BAR_REVEAL_STRIP, useTopBarAutoHide } from './hooks/useTopBarAutoHide';
+import { installDragRegions, useMacWindowState, useSidebarCovering, useTrafficLights } from './hooks/useMacWindow';
+import { useEdgeRelay } from './hooks/useEdgeRelay';
+import { resolveSpaceTheme, resolveReducedEffectsActive, SETUP_VERSION } from './shared/settings';
+import { type SpaceTheme, getDefaultSpaceTheme } from './shared/spaceTheme';
+import { applySpaceThemeToRoot, getOsPrefersDark } from './utils/applySpaceTheme';
+import { computeTopBarTint, type PageColorReport, type TabPageColor } from './utils/topBarTint';
+import { ArrowLeft, ArrowRight, RotateCw, Home, X, Shield, Lock, Download, Plus, PanelLeft } from 'lucide-react';
+import { useDownloads, aggregateProgress, isActiveDownload } from './hooks/useDownloads';
+import {
+  TabState,
+  ActiveMediaState,
+  HistoryEntry,
+  HistoryClearRange,
+  VpnConfig,
+  VpnStatus,
+  SiteAction,
+  PerformanceStatus,
+} from './types';
+import { AppContextMenu } from './components/AppContextMenu';
+import { PageContextMenu } from './components/PageContextMenu';
+import { normalizePinnedTools, type ToolActions } from './shared/tools';
+import './styles/theme.css';
+import './styles/system.css';
+import './styles/settings.css';
+import './styles/panels.css';
+import './styles/sidebar-v2.css';
+import './styles/foundation.css';
+import './styles/features.css';
+import './styles/chrome.css';
+import './styles/home.css';
+import './styles/settings2.css';
+import './styles/ai.css';
+import './styles/setup.css';
+import './styles/focus-stats.css';
+import './styles/window-controls.css';
+import './styles/glass.css';
+import './styles/motion.css';
+import './styles/macos.css';
+
+// Panels load on first use. Their code is fetched and compiled while the
+// browser is idle after start, so the first opening has no hitch (the
+// command bar's first open took ~85 ms).
+const PANEL_LOADERS: (() => Promise<unknown>)[] = [];
+function panel<T>(load: () => Promise<T>): () => Promise<T> {
+  PANEL_LOADERS.push(load);
+  return load;
+}
+function preloadPanels(): void {
+  const idle = (cb: () => void) =>
+    typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 200);
+  const next = (i: number) => {
+    const load = PANEL_LOADERS[i];
+    if (!load) return;
+    idle(() => {
+      void load().catch(() => null).finally(() => next(i + 1));
+    });
+  };
+  next(0);
+}
+
+const ArchiveList = lazy(panel(() =>
+  import('./components/ArchiveList').then((m) => ({ default: m.ArchiveList }))
+));
+const CommandBar = lazy(panel(() =>
+  import('./components/CommandBar').then((m) => ({ default: m.CommandBar }))
+));
+const ShieldModal = lazy(panel(() =>
+  import('./components/ShieldModal').then((m) => ({ default: m.ShieldModal }))
+));
+const McpModal = lazy(panel(() =>
+  import('./components/McpModal').then((m) => ({ default: m.McpModal }))
+));
+const ThemeStudio = lazy(panel(() =>
+  import('./components/ThemeStudio').then((m) => ({ default: m.ThemeStudio }))
+));
+const MediaPlayer = lazy(panel(() =>
+  import('./components/MediaPlayer').then((m) => ({ default: m.MediaPlayer }))
+));
+const Setup = lazy(panel(() => import('./components/Setup').then((m) => ({ default: m.Setup }))));
+const Settings2 = lazy(panel(() =>
+  import('./components/settings/Settings2').then((m) => ({ default: m.Settings2 }))
+));
+const DownloadsPanel = lazy(panel(() =>
+  import('./components/DownloadsPanel').then((m) => ({ default: m.DownloadsPanel }))
+));
+const ExtensionsModal = lazy(panel(() =>
+  import('./components/ExtensionsModal').then((m) => ({ default: m.ExtensionsModal }))
+));
+const HistoryModal = lazy(panel(() =>
+  import('./components/HistoryModal').then((m) => ({ default: m.HistoryModal }))
+));
+const VpnModal = lazy(panel(() =>
+  import('./components/VpnModal').then((m) => ({ default: m.VpnModal }))
+));
+
+/** How long a panel takes to leave (keep in step with --dur-exit in foundation.css). */
+const PANEL_EXIT_MS = 240;
+
+export function App() {
+  // Panel code loads while idle once start-up has settled (see `panel`).
+  useEffect(() => {
+    const t = window.setTimeout(preloadPanels, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
+  const browser = useBrowser();
+  const {
+    state,
+    activeTab,
+    currentSpaceTabs,
+    blockedTrackers,
+    isCommandBarOpen,
+    setIsCommandBarOpen,
+    isShieldModalOpen,
+    setIsShieldModalOpen,
+    isMcpModalOpen,
+    setIsMcpModalOpen,
+    navigate,
+    createTab,
+    closeTab,
+    reopenClosedTab,
+    selectTab,
+    toggleSleepTab,
+    selectSpace,
+    createSpace,
+    deleteSpace,
+    reorderTabs,
+    toggleShields,
+    resetShieldStats,
+  } = browser;
+  const { activeProfile } = useProfiles();
+
+  const { settings, updateSettings, isLoaded: settingsLoaded } = useSettings();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('general');
+  const openSettings = useCallback((page?: SettingsPage) => {
+    setSettingsPage(page ?? 'general');
+    setIsSettingsOpen(true);
+  }, []);
+
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
+  const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
+  // Like Chrome's download bubble: a new download opens the panel.
+  const downloads = useDownloads(() => setIsDownloadsOpen(true));
+  const activeDownloads = downloads.filter(isActiveDownload);
+  const downloadProgress = aggregateProgress(downloads);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [isVpnModalOpen, setIsVpnModalOpen] = useState(false);
+  const [vpnStatus, setVpnStatus] = useState<VpnStatus | null>(null);
+  const [performanceStatus, setPerformanceStatus] = useState<PerformanceStatus | null>(null);
+  const [isCheckingVpnIp, setIsCheckingVpnIp] = useState(false);
+  const [vpnIpError, setVpnIpError] = useState<string | null>(null);
+
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+
+  // Sidebar: a full-height panel that floats over the page. It starts hidden and
+  // opens from the toolbar button, ⌘S / ⌘E or the left edge of the window.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const setSidebarExpanded = useCallback((next: boolean) => setSidebarOpen(next), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  // New tab control / ⌘T (R12.8): the Command_Bar opens in "new tab" mode and its
+  // submission creates a Today tab in the Active_Space instead of navigating the current tab.
+  const [isCommandBarNewTab, setIsCommandBarNewTab] = useState(false);
+  const openCommandBar = useCallback(() => {
+    setIsCommandBarNewTab(false);
+    setIsCommandBarOpen(true);
+  }, [setIsCommandBarOpen]);
+  const openNewTabCommandBar = useCallback(() => {
+    setIsCommandBarNewTab(true);
+    setIsCommandBarOpen(true);
+  }, [setIsCommandBarOpen]);
+  useEffect(() => {
+    if (!isCommandBarOpen) setIsCommandBarNewTab(false);
+  }, [isCommandBarOpen]);
+  // User Profile & First Launch Welcome Screen State
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    try {
+      const saved = (localStorage.getItem('serica_user_profile') || localStorage.getItem('neutrino_user_profile'));
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Setup: on first launch, and once after updating to a version with a new
+  // setup screen (settings.setupVersion). It never resets anything.
+  const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
+  const setupChecked = useRef(false);
+
+  // Display name edited in the Settings panel; same key and shape WelcomeModal writes.
+  const handleUserNameChange = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setUserProfile((prev) => {
+        const base: UserProfile = prev ?? {
+          name: trimmed,
+          email: null,
+          isGuest: true,
+          theme: 'obsidian',
+          mode: 'minimal',
+        };
+        const next: UserProfile = { ...base, name: trimmed };
+        try {
+          localStorage.setItem('serica_user_profile', JSON.stringify(next));
+        } catch { }
+        void updateSettings({ userProfile: next });
+        return next;
+      });
+    },
+    [updateSettings]
+  );
+
+  // Zen auto-sleep runs in the Rust backend (tabs idle for 10+ minutes); nothing to schedule here.
+
+  useEffect(() => {
+    void window.serica?.getPerformanceStatus?.().then((status) => {
+      if (status) setPerformanceStatus(status);
+    });
+    const unsubPerf = window.serica?.onPerformanceStatusUpdated?.((status) => {
+      if (status) setPerformanceStatus(status);
+    });
+    const syncHidden = () => {
+      document.documentElement.setAttribute('data-window-hidden', document.hidden ? 'true' : 'false');
+    };
+    syncHidden();
+    document.addEventListener('visibilitychange', syncHidden);
+    return () => {
+      unsubPerf?.();
+      document.removeEventListener('visibilitychange', syncHidden);
+    };
+  }, []);
+
+  const isReducedEffects = resolveReducedEffectsActive(
+    settings.reducedEffectsMode,
+    Boolean(performanceStatus?.gpuDisabledFlag),
+    performanceStatus?.gpuFeatureStatus ?? null
+  );
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-reduced-effects', isReducedEffects ? 'on' : 'off');
+  }, [isReducedEffects]);
+
+  // Glass panels: on unless switched off or effects are reduced.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-glass', settings.glassPanels !== false && !isReducedEffects ? 'on' : 'off');
+  }, [settings.glassPanels, isReducedEffects]);
+
+  // Active webpage detection: on web pages, the viewport is pulled down below the top bar
+  // so window controls, tabs, and site navigation controls never collide.
+  const isWebpage = Boolean(
+    activeTab?.url &&
+    activeTab.url !== 'serica://newtab' && activeTab.url !== 'neutrino://newtab' &&
+    activeTab.url !== 'about:blank'
+  );
+  const [isHtmlFullscreen, setIsHtmlFullscreen] = useState(false);
+
+  const shouldShowTopBar = !isHtmlFullscreen;
+
+  // Dia-style top bar tint (R20). BrowserViewport reports the active page's theme-color and
+  // sampled top color; reports for a tab that is no longer active are ignored. Internal pages,
+  // HTML fullscreen and undeterminable colors keep the default theme (R20.5, R20.6, R21.12).
+  const [pageColor, setPageColor] = useState<TabPageColor | null>(null);
+  // The active tab's split view, when both of its tabs show a web page
+  // (otherwise the backend shows the active tab alone).
+  const activeSplit = useMemo(() => {
+    const id = activeTab?.id;
+    const sp = id ? state.splits?.find((x) => x.left === id || x.right === id) : undefined;
+    if (!sp || !activeTab) return null;
+    const partner = state.tabs.find((t) => t.id === (sp.left === id ? sp.right : sp.left));
+    const live = (t?: TabState) =>
+      !!t && !!t.url && t.url !== 'about:blank' && !t.url.startsWith('serica://') && !t.url.startsWith('neutrino://') && !t.isSleeping && !t.unloaded;
+    return live(activeTab) && live(partner) ? { split: sp, partner: partner! } : null;
+  }, [state.splits, state.tabs, activeTab]);
+  const activeTabIdRef = useRef<string | undefined>(activeTab?.id);
+  activeTabIdRef.current = activeTab?.id;
+  const handlePageColor = useCallback((tabId: string, report: PageColorReport) => {
+    if (tabId !== activeTabIdRef.current) return;
+    setPageColor({ tabId, ...report });
+  }, []);
+  const topBarTint = computeTopBarTint({
+    activeTabId: activeTab?.id,
+    activeTabUrl: activeTab?.url,
+    activeTabIsSleeping: activeTab?.isSleeping,
+    report: pageColor,
+    suppressed: isHtmlFullscreen,
+  });
+  const isTopBarTinted = Boolean(topBarTint) && isWebpage;
+
+  // Track OS dark/light preference for Spaces configured in 'auto' mode
+  const [osPrefersDark, setOsPrefersDark] = useState<boolean>(() => getOsPrefersDark());
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (e: MediaQueryListEvent) => setOsPrefersDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const activeSpace = state.spaces.find((s) => s.id === state.activeSpaceId) || state.spaces[0];
+  const activeSpaceTheme = resolveSpaceTheme(settings, state.activeSpaceId);
+
+  const themeTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerThemeCrossFade = useCallback(() => {
+    if (themeTransitionTimerRef.current !== null) {
+      clearTimeout(themeTransitionTimerRef.current);
+    }
+    document.documentElement.classList.add('space-theme-transitioning');
+    themeTransitionTimerRef.current = setTimeout(() => {
+      themeTransitionTimerRef.current = null;
+      document.documentElement.classList.remove('space-theme-transitioning');
+    }, 520);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (themeTransitionTimerRef.current !== null) {
+        clearTimeout(themeTransitionTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Persistent Dark Theme state (kept in sync with active Space theme effective mode)
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = (localStorage.getItem('serica_dark_theme') || localStorage.getItem('neutrino_dark_theme'));
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const lastIpcThemeModeRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Onboarding previews its theme choice on the root; leave it alone until it finishes.
+    if (isWelcomeOpen) return;
+    const palette = applySpaceThemeToRoot(activeSpaceTheme, osPrefersDark);
+    const nextDark = palette.effectiveMode === 'dark';
+    setIsDarkMode((prev) => (prev === nextDark ? prev : nextDark));
+    try {
+      localStorage.setItem('serica_dark_theme', nextDark ? 'true' : 'false');
+    } catch { }
+
+    const desiredIpcMode: 'dark' | 'light' | 'system' =
+      activeSpaceTheme.mode === 'auto' ? 'system' : nextDark ? 'dark' : 'light';
+    if (lastIpcThemeModeRef.current !== desiredIpcMode) {
+      lastIpcThemeModeRef.current = desiredIpcMode;
+      void window.serica?.setThemeMode?.(desiredIpcMode);
+    }
+  }, [activeSpaceTheme, osPrefersDark, isWelcomeOpen]);
+
+  const handleChangeSpaceTheme = useCallback(
+    (nextTheme: SpaceTheme, options?: { immediateSave?: boolean; animateTransition?: boolean }) => {
+      if (options?.animateTransition) {
+        triggerThemeCrossFade();
+      }
+      const palette = applySpaceThemeToRoot(nextTheme, osPrefersDark);
+      if (options?.immediateSave !== false) {
+        void updateSettings({
+          theme: palette.effectiveMode,
+          spaceThemes: {
+            ...(settings.spaceThemes || {}),
+            [state.activeSpaceId]: nextTheme,
+          },
+        });
+      }
+    },
+    [osPrefersDark, settings.spaceThemes, state.activeSpaceId, triggerThemeCrossFade, updateSettings]
+  );
+
+  const handleResetSpaceTheme = useCallback(() => {
+    triggerThemeCrossFade();
+    const fallbackTheme = getDefaultSpaceTheme(state.activeSpaceId);
+    const palette = applySpaceThemeToRoot(fallbackTheme, osPrefersDark);
+    void updateSettings({
+      theme: palette.effectiveMode,
+      spaceThemes: {
+        ...(settings.spaceThemes || {}),
+        [state.activeSpaceId]: fallbackTheme,
+      },
+    });
+  }, [osPrefersDark, settings.spaceThemes, state.activeSpaceId, triggerThemeCrossFade, updateSettings]);
+
+  // Persist and apply a theme mode for the active Space; shared by top-bar toggle & Settings panel.
+  const setDarkMode = useCallback(
+    (next: boolean) => {
+      triggerThemeCrossFade();
+      const updatedTheme: SpaceTheme = {
+        ...activeSpaceTheme,
+        mode: next ? 'dark' : 'light',
+      };
+      applySpaceThemeToRoot(updatedTheme, osPrefersDark);
+      setIsDarkMode(next);
+      void window.serica?.setThemeMode?.(next ? 'dark' : 'light');
+      void updateSettings({
+        theme: next ? 'dark' : 'light',
+        spaceThemes: {
+          ...(settings.spaceThemes || {}),
+          [state.activeSpaceId]: updatedTheme,
+        },
+      });
+    },
+    [activeSpaceTheme, osPrefersDark, settings.spaceThemes, state.activeSpaceId, triggerThemeCrossFade, updateSettings]
+  );
+
+  const toggleDarkMode = () => {
+    setDarkMode(!isDarkMode);
+  };
+
+  const setSpaceMode = useCallback(
+    (mode: 'light' | 'dark' | 'auto') => {
+      if (mode !== 'auto') return setDarkMode(mode === 'dark');
+      triggerThemeCrossFade();
+      const updatedTheme: SpaceTheme = { ...activeSpaceTheme, mode: 'auto' };
+      const palette = applySpaceThemeToRoot(updatedTheme, osPrefersDark);
+      void window.serica?.setThemeMode?.('system');
+      void updateSettings({
+        theme: palette.effectiveMode,
+        spaceThemes: { ...(settings.spaceThemes || {}), [state.activeSpaceId]: updatedTheme },
+      });
+    },
+    [activeSpaceTheme, osPrefersDark, setDarkMode, settings.spaceThemes, state.activeSpaceId, triggerThemeCrossFade, updateSettings],
+  );
+
+  const applyThemeToAllSpaces = useCallback(
+    (theme: SpaceTheme) => {
+      const all = Object.fromEntries(state.spaces.map((sp) => [sp.id, { ...theme, points: theme.points.map((pt) => ({ ...pt })) }]));
+      void updateSettings({ spaceThemes: { ...(settings.spaceThemes || {}), ...all } });
+    },
+    [settings.spaceThemes, state.spaces, updateSettings],
+  );
+
+  // The space editor (and others) can ask for Theme Studio.
+  useEffect(() => {
+    const open = () => setIsThemeModalOpen(true);
+    window.addEventListener('serica:open-theme-studio', open);
+    return () => window.removeEventListener('serica:open-theme-studio', open);
+  }, []);
+
+  /** Setup's colour choice: the whole space-theme map, and the one shown now. */
+  const applySetupThemes = useCallback(
+    (themes: Record<string, unknown>, shown: SpaceTheme) => {
+      triggerThemeCrossFade();
+      const palette = applySpaceThemeToRoot(shown, osPrefersDark);
+      void window.serica?.setThemeMode?.(shown.mode === 'auto' ? 'system' : palette.effectiveMode);
+      setIsDarkMode(palette.effectiveMode === 'dark');
+      void updateSettings({ spaceThemes: themes as Record<string, SpaceTheme> });
+    },
+    [osPrefersDark, triggerThemeCrossFade, updateSettings],
+  );
+  const setupSpaceThemes = useMemo(
+    () => (isWelcomeOpen ? Object.fromEntries(state.spaces.map((sp) => [sp.id, resolveSpaceTheme(settings, sp.id)])) : {}),
+    // Taken when setup opens; Setup keeps its own copy from then on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isWelcomeOpen],
+  );
+
+  const upgrading = useMemo(() => {
+    try {
+      return settings.onboardingCompleted === true || !!settings.userProfile || localStorage.getItem('serica_onboarding_completed') !== null || localStorage.getItem('neutrino_onboarding_completed') !== null;
+    } catch {
+      return settings.onboardingCompleted === true;
+    }
+  }, [settings.onboardingCompleted, settings.userProfile]);
+
+  const finishSetup = useCallback(() => {
+    setIsWelcomeOpen(false);
+    try {
+      localStorage.setItem('serica_onboarding_completed', 'true');
+    } catch {
+      // Private window: the settings file still records it.
+    }
+    void updateSettings({ setupVersion: SETUP_VERSION, onboardingCompleted: true });
+    // The tour starts once setup has left the screen.
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent('serica:start-tour')), PANEL_EXIT_MS + 260);
+  }, [updateSettings]);
+
+  // Reconcile cached main-process settings (`browser-state.json`) once loaded on startup
+  const hydratedFromMainRef = useRef(false);
+  useEffect(() => {
+    if (!settingsLoaded || hydratedFromMainRef.current) return;
+    hydratedFromMainRef.current = true;
+
+    const migrationPatch: Record<string, unknown> = {};
+
+    if (settings.theme !== 'dark' && settings.theme !== 'light') {
+      migrationPatch.theme = isDarkMode ? 'dark' : 'light';
+    }
+
+    const persistedProfile = settings.userProfile as UserProfile | undefined;
+    if (persistedProfile && typeof persistedProfile === 'object' && typeof persistedProfile.name === 'string') {
+      setUserProfile(persistedProfile);
+      try {
+        localStorage.setItem('serica_user_profile', JSON.stringify(persistedProfile));
+        localStorage.setItem('serica_onboarding_completed', 'true');
+      } catch { }
+    } else if (settings.onboardingCompleted === true) {
+      try {
+        localStorage.setItem('serica_onboarding_completed', 'true');
+      } catch { }
+    } else if (userProfile) {
+      migrationPatch.userProfile = userProfile;
+      migrationPatch.onboardingCompleted = true;
+    }
+
+    if (!settings.customTheme) {
+      try {
+        const savedTheme = (localStorage.getItem('serica_simple_theme_v5') || localStorage.getItem('neutrino_simple_theme_v5'));
+        if (savedTheme) migrationPatch.customTheme = JSON.parse(savedTheme);
+      } catch { }
+    }
+
+    if (!Array.isArray(settings.pinnedSites)) {
+      try {
+        const savedPins = (localStorage.getItem('serica_pinned_sites') || localStorage.getItem('neutrino_pinned_sites'));
+        if (savedPins) migrationPatch.pinnedSites = JSON.parse(savedPins);
+      } catch { }
+    }
+
+    if (Object.keys(migrationPatch).length > 0) {
+      void updateSettings(migrationPatch);
+    }
+  }, [settingsLoaded, settings, isDarkMode, userProfile, updateSettings]);
+
+  useEffect(() => {
+    if (!settingsLoaded || setupChecked.current) return;
+    setupChecked.current = true;
+    if ((settings.setupVersion ?? 0) < SETUP_VERSION) setIsWelcomeOpen(true);
+  }, [settingsLoaded, settings.setupVersion]);
+
+  // Clean up any legacy zoom locks or invalid custom themes
+  useEffect(() => {
+    try {
+      localStorage.removeItem('serica_browser_zoom'); localStorage.removeItem('neutrino_browser_zoom');
+      localStorage.removeItem('serica_homescreen_scale'); localStorage.removeItem('neutrino_homescreen_scale');
+      const validAccents = new Set(['#FFFFFF', '#1C1917', '#E4E4E7', '#71717A', '#38BDF8', '#10B981']);
+      const savedTheme = (localStorage.getItem('serica_simple_theme_v5') || localStorage.getItem('neutrino_simple_theme_v5'));
+      if (savedTheme) {
+        try {
+          const parsed = JSON.parse(savedTheme);
+          if (parsed.accent && !validAccents.has(String(parsed.accent).toUpperCase())) {
+            localStorage.removeItem('serica_simple_theme_v5'); localStorage.removeItem('neutrino_simple_theme_v5');
+          }
+        } catch {
+          localStorage.removeItem('serica_simple_theme_v5'); localStorage.removeItem('neutrino_simple_theme_v5');
+        }
+      }
+      document.documentElement.style.zoom = '';
+    } catch { }
+  }, []);
+
+  // Persistent Media Player state (PiP when backgrounded)
+  const [activeMediaState, setActiveMediaState] = useState<ActiveMediaState | null>(null);
+  const [mediaCommand, setMediaCommand] = useState<{
+    action: string;
+    tabId?: string;
+    value?: number;
+    timestamp: number;
+  } | null>(null);
+  const dismissedMediaTabsRef = useRef<Set<string>>(new Set());
+  // Closing the mini player hides it for that tab until the user goes back to
+  // the tab; after that it shows again the next time they leave it playing.
+  useEffect(() => {
+    if (state.activeTabId) dismissedMediaTabsRef.current.delete(state.activeTabId);
+  }, [state.activeTabId]);
+
+  // MCP Initial Tab state
+  const [mcpInitialTab, setMcpInitialTab] = useState<'assistants' | 'local' | 'tools'>('assistants');
+
+  // Media state change with dismissal memory to prevent unwanted popups
+  const handleMediaStateChange = useCallback((newState: ActiveMediaState | null) => {
+    if (newState && dismissedMediaTabsRef.current.has(newState.tabId)) {
+      return;
+    }
+    setActiveMediaState(newState);
+  }, []);
+
+  // Space_Switcher order (profiles in creation order, then each profile's spaces), used by ⌘1..9.
+  const spaceSwitcherOrder = useMemo(() => buildSidebarView(state).spaceOrder, [state]);
+  const pageDialogTabIds = useMemo(() => state.tabs.map((t) => t.id), [state.tabs]);
+
+  // Space switching is immediate: the UI state and the backend switch in the
+  // same tick, so the sidebar, the top bar and the page never disagree about
+  // which space is active. Only the theme colors cross-fade.
+  const activeSpaceIdRef = useRef(state.activeSpaceId);
+  activeSpaceIdRef.current = state.activeSpaceId;
+  const handleSelectSpace = useCallback(
+    (spaceId: string, opts?: { keepUiFocus?: boolean }) => {
+      if (spaceId === activeSpaceIdRef.current) return;
+      activeSpaceIdRef.current = spaceId;
+      triggerThemeCrossFade();
+      void selectSpace(spaceId, opts);
+    },
+    [selectSpace, triggerThemeCrossFade],
+  );
+
+  const handleCreateSpace = useCallback(
+    async (name: string, color?: string) => {
+      const created = await createSpace(name, color);
+      if (created) triggerThemeCrossFade();
+      return created;
+    },
+    [createSpace, triggerThemeCrossFade],
+  );
+
+  // Keyboard shortcuts & events
+  useEffect(() => {
+    const handleOpenCommandBar = () => openCommandBar();
+    const handleCloseCommandBar = () => setIsCommandBarOpen(false);
+    const handleToggleTabs = (e: any) => {
+      const open = e?.detail?.open;
+      if (typeof open === 'boolean') setSidebarExpanded(open);
+      else toggleSidebar();
+    };
+    const handleCloseActiveTab = () => {
+      if (state.activeTabId) {
+        closeTab(state.activeTabId);
+      }
+    };
+
+    // Native Electron IPC listeners (authoritative single-dispatch from main process)
+    const unsubIpcToggle = window.serica?.onToggleTabs?.(() => {
+      toggleSidebar();
+    });
+    // ⌘T arrives as `{ newTab: true }` (R12.8); ⌘K/L/F6 open the bar normally.
+    const unsubIpcCmd = window.serica?.onOpenCommandBar?.((opts) => {
+      if (opts?.newTab) openNewTabCommandBar();
+      else openCommandBar();
+    });
+    const unsubIpcEsc = window.serica?.onEscapePressed?.(() => {
+      setIsCommandBarOpen(false);
+      setIsArchiveOpen(false);
+      setIsSettingsOpen(false);
+      setIsThemeModalOpen(false);
+      setIsHistoryModalOpen(false);
+      setIsExtensionsOpen(false);
+      setIsDownloadsOpen(false);
+      setIsVpnModalOpen(false);
+    });
+    // ⌘, (or Serica › Settings… / About Serica in the menu bar), from the backend.
+    const unsubIpcSettings = window.serica?.onOpenSettings?.((page) => {
+      if (page === 'about') openSettings('about');
+      else setIsSettingsOpen(true);
+    });
+    const unsubIpcHistory = window.serica?.onOpenHistory?.(() => {
+      setIsHistoryModalOpen(true);
+    });
+    const unsubIpcSpaceSwitched = window.serica?.onSpaceSwitched?.(() => {
+      triggerThemeCrossFade();
+    });
+    // neutrino://settings, neutrino://history, neutrino://vpn from useBrowser.navigate
+    const handleOpenSettingsEvent = (e: Event) => {
+      const page = (e as CustomEvent).detail;
+      openSettings(typeof page === 'string' ? (page as SettingsPage) : undefined);
+    };
+    const handleOpenMcpEvent = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      setMcpInitialTab(tab === 'tools' || tab === 'local' ? tab : 'assistants');
+      setIsMcpModalOpen(true);
+    };
+    window.addEventListener('serica:open-mcp', handleOpenMcpEvent);
+    const handleOpenHistoryEvent = () => setIsHistoryModalOpen(true);
+    const handleOpenVpnEvent = () => setIsVpnModalOpen(true);
+    const handleOpenExtensionsEvent = () => setIsExtensionsOpen(true);
+    window.addEventListener('serica:open-extensions', handleOpenExtensionsEvent);
+    const handleOpenDownloadsEvent = () => setIsDownloadsOpen(true);
+    // The sidebar guide needs the sidebar on screen.
+    const handleGuideEvent = (e: Event) => {
+      if ((e as CustomEvent).detail === 'sidebar') setSidebarExpanded(true);
+    };
+    window.addEventListener('serica:guide', handleGuideEvent);
+    window.addEventListener('serica:open-downloads', handleOpenDownloadsEvent);
+    const unsubIpcDownloads = window.serica?.onOpenDownloads?.(() => setIsDownloadsOpen(true));
+
+    window.addEventListener('serica:open-settings', handleOpenSettingsEvent);
+    window.addEventListener('serica:open-history', handleOpenHistoryEvent);
+    window.addEventListener('serica:open-vpn', handleOpenVpnEvent);
+    window.addEventListener('serica:open-command-bar', handleOpenCommandBar);
+    window.addEventListener('serica:close-command-bar', handleCloseCommandBar);
+    window.addEventListener('serica:toggle-tabs', handleToggleTabs);
+    window.addEventListener('serica:close-active-tab', handleCloseActiveTab);
+
+    // Fallback when running renderer standalone outside Electron (main process owns shortcuts in Electron)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (window.serica?.isElectron) return;
+      // ⌘1…9: the Nth space in Space_Switcher order; fewer than N keeps the current one (R13.4/13.5).
+      if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.length === 1 && e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const nextId = selectSpaceByIndex(spaceSwitcherOrder, Number(e.key), state.activeSpaceId);
+        if (nextId !== state.activeSpaceId) {
+          handleSelectSpace(nextId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      unsubIpcToggle?.();
+      unsubIpcCmd?.();
+      unsubIpcEsc?.();
+      unsubIpcSettings?.();
+      unsubIpcHistory?.();
+      unsubIpcSpaceSwitched?.();
+      window.removeEventListener('serica:open-settings', handleOpenSettingsEvent);
+      window.removeEventListener('serica:open-mcp', handleOpenMcpEvent);
+      window.removeEventListener('serica:open-history', handleOpenHistoryEvent);
+      window.removeEventListener('serica:open-vpn', handleOpenVpnEvent);
+      window.removeEventListener('serica:open-extensions', handleOpenExtensionsEvent);
+      window.removeEventListener('serica:open-downloads', handleOpenDownloadsEvent);
+      window.removeEventListener('serica:guide', handleGuideEvent);
+      unsubIpcDownloads?.();
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('serica:open-command-bar', handleOpenCommandBar);
+      window.removeEventListener('serica:close-command-bar', handleCloseCommandBar);
+      window.removeEventListener('serica:toggle-tabs', handleToggleTabs);
+      window.removeEventListener('serica:close-active-tab', handleCloseActiveTab);
+    };
+}, [state.activeTabId, state.activeSpaceId, spaceSwitcherOrder, activeTab, closeTab, handleSelectSpace, setIsCommandBarOpen, setIsMcpModalOpen, triggerThemeCrossFade, toggleSidebar, setSidebarExpanded, openCommandBar, openNewTabCommandBar, openSettings]);
+
+// Built-in VPN state hydration & lazy History hydration (only fetch 500 history entries when open)
+useEffect(() => {
+  void window.serica?.getVpnStatus?.().then((status) => {
+    if (status) setVpnStatus(status);
+  });
+  const unsubVpn = window.serica?.onVpnStatusUpdated?.((status) => {
+    if (status) setVpnStatus(status);
+  });
+
+  return () => {
+    unsubVpn?.();
+  };
+}, []);
+
+const historyShown = useLingering(isHistoryModalOpen, PANEL_EXIT_MS);
+useEffect(() => {
+  if (!historyShown) {
+    setHistoryEntries((prev) => (prev.length > 0 ? [] : prev));
+    return;
+  }
+  if (!isHistoryModalOpen) return;
+  void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
+    if (Array.isArray(list)) setHistoryEntries(list);
+  });
+  // The backend pings on changes; refetch, at most a few times a second.
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const unsubHistory = window.serica?.onHistoryUpdated?.(() => {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void window.serica?.getHistory?.({ limit: 500 }).then((list) => {
+        if (Array.isArray(list)) setHistoryEntries(list);
+      });
+    }, 250);
+  });
+  return () => {
+    if (timer) clearTimeout(timer);
+    unsubHistory?.();
+  };
+}, [isHistoryModalOpen]);
+
+useEffect(() => {
+  if (!isVpnModalOpen) return;
+  void window.serica?.getVpnStatus?.().then((status) => {
+    if (status) setVpnStatus(status);
+  });
+}, [isVpnModalOpen]);
+
+const handleUpdateTab = (tabId: string, partial: Partial<TabState>) => {
+  window.serica?.updateTab?.(tabId, partial);
+};
+
+// Media Controls
+const handleMediaPlayPause = () => {
+  if (!activeMediaState) return;
+  const action = activeMediaState.isPlaying ? 'pause' : 'play';
+  setMediaCommand({ action, tabId: activeMediaState.tabId, timestamp: Date.now() });
+  setActiveMediaState((prev) => (prev ? { ...prev, isPlaying: !prev.isPlaying } : null));
+};
+
+const handleMediaSeek = (time: number) => {
+  if (!activeMediaState) return;
+  setMediaCommand({ action: 'seek', tabId: activeMediaState.tabId, value: time, timestamp: Date.now() });
+  setActiveMediaState((prev) => (prev ? { ...prev, currentTime: time } : null));
+};
+
+const handleMediaVolume = (vol: number) => {
+  if (!activeMediaState) return;
+  setMediaCommand({ action: 'volume', tabId: activeMediaState.tabId, value: vol, timestamp: Date.now() });
+  setActiveMediaState((prev) => (prev ? { ...prev, volume: vol } : null));
+};
+
+const handleGoToMediaTab = (tabId: string) => {
+  selectTab(tabId);
+};
+
+const handleCloseMediaPlayer = () => {
+  if (activeMediaState) {
+    dismissedMediaTabsRef.current.add(activeMediaState.tabId);
+    try {
+      setMediaCommand({ action: 'pause', tabId: activeMediaState.tabId, timestamp: Date.now() });
+    } catch { }
+  }
+  setActiveMediaState(null);
+};
+
+const dispatchSiteAction = useCallback((action: SiteAction) => {
+  window.dispatchEvent(new CustomEvent('neutrino:site-action', { detail: { action, source: 'ui' } }));
+}, []);
+
+// Fallback Capturing Keyboard Shortcuts (only outside Electron where before-input-event is unavailable)
+useEffect(() => {
+  const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (window.serica?.isElectron) return;
+    if (e.key === 'Escape' && !e.defaultPrevented) {
+      // Close the topmost panel; the command bar handles its own Escape.
+      setIsArchiveOpen(false);
+      setIsSettingsOpen(false);
+      setIsThemeModalOpen(false);
+      setIsHistoryModalOpen(false);
+      setIsExtensionsOpen(false);
+      setIsDownloadsOpen(false);
+      setIsVpnModalOpen(false);
+      setIsShieldModalOpen(false);
+      setIsMcpModalOpen(false);
+      return;
+    }
+    // Control keys belong to text editing on the Mac (⌃A, ⌃E, ⌃K, ⌃T…),
+    // except Control-Tab and Control-Page Down / Up, which change tabs.
+    if (e.ctrlKey && !e.metaKey) {
+      const key = e.key.toLowerCase();
+      if (key === 'tab' || key === 'pagedown' || key === 'pageup') {
+        e.preventDefault();
+        const back = (key === 'tab' && e.shiftKey) || key === 'pageup';
+        void window.serica?.cycleTab?.(back ? -1 : 1);
+      }
+      return;
+    }
+    // ⌥⌘ combinations (⌥⌘I: Web Inspector) are the menu bar's.
+    if (e.metaKey && !e.altKey) {
+      const key = e.key.toLowerCase();
+      const inText = (() => {
+        const t = e.target as HTMLElement | null;
+        return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      })();
+      if (key === 'w' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (state.activeTabId) {
+          closeTab(state.activeTabId);
+        }
+      } else if (key === 'n' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void window.serica?.createPrivateTab?.();
+      } else if (key === 't' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void reopenClosedTab();
+      } else if (key === 't') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        openNewTabCommandBar();
+      } else if ((key === 'k' || key === 'l') && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen((prev) => !prev);
+      } else if ((key === 'e' || key === 's') && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        toggleSidebar();
+      } else if (key === 'r') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        dispatchSiteAction(e.shiftKey ? 'hard-reload' : 'reload');
+      } else if (key === ',') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        setIsSettingsOpen(true);
+      } else if (key === 'o' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        void window.serica?.openFile?.().catch(() => {});
+      } else if (key === 'j') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        setIsDownloadsOpen((prev) => !prev);
+      } else if ((key === 'y' || key === 'h') && !e.shiftKey) {
+        // ⌘Y and ⌘H: History (⇧⌘H, Home, is the menu bar's).
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsCommandBarOpen(false);
+        setIsHistoryModalOpen((prev) => !prev);
+      } else if (key === 'f' && !e.shiftKey) {
+        e.preventDefault();
+        dispatchSiteAction('open-find');
+      } else if (key === '[' || key === ']') {
+        e.preventDefault();
+        dispatchSiteAction(key === '[' ? 'back' : 'forward');
+      } else if (key === '{' || key === '}') {
+        // ⇧⌘[ / ⇧⌘]: previous / next tab, as in Safari.
+        e.preventDefault();
+        void window.serica?.cycleTab?.(key === '{' ? -1 : 1);
+      } else if ((key === 'arrowleft' || key === 'arrowright') && !e.shiftKey && !inText) {
+        // ⌘← / ⌘→ go back / forward, except in text (start / end of the line).
+        e.preventDefault();
+        dispatchSiteAction(key === 'arrowleft' ? 'back' : 'forward');
+      } else if (key === '=' || key === '+') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'in' }));
+      } else if (key === '-') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'out' }));
+      } else if (key === '0') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'reset' }));
+      } else if (e.key === 'F5') {
+        e.preventDefault();
+        dispatchSiteAction('hard-reload');
+      }
+    } else if (e.key === 'F5') {
+      e.preventDefault();
+      dispatchSiteAction(e.metaKey || e.shiftKey ? 'hard-reload' : 'reload');
+    } else if (e.key === 'F12') {
+      e.preventDefault();
+      void window.serica?.openDevtools?.();
+    }
+  };
+
+  window.addEventListener('keydown', handleGlobalKeyDown, true);
+  return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+}, [state.activeTabId, closeTab, openNewTabCommandBar, toggleSidebar, reopenClosedTab, dispatchSiteAction]);
+
+
+const shieldsBlockedCount =
+  state.shieldStats.totalBlocked || (state.shieldStats.trackersBlocked + state.shieldStats.adsBlocked);
+
+const handleOpenHistoryUrl = useCallback(
+  (url: string, options?: { newTab?: boolean }) => {
+    if (options?.newTab || !activeTab) {
+      void createTab(url, state.activeSpaceId);
+    } else {
+      navigate(url);
+    }
+  },
+  [activeTab, createTab, navigate, state.activeSpaceId],
+);
+
+const handleDeleteHistoryEntry = useCallback(async (entry: HistoryEntry) => {
+  await window.serica?.deleteHistoryEntry?.({
+    id: entry.id,
+    url: entry.url,
+    timestamp: entry.timestamp,
+  });
+}, []);
+
+const handleClearHistory = useCallback(async (range: HistoryClearRange) => {
+  await window.serica?.clearHistory?.(range);
+}, []);
+
+const handleVpnConnect = useCallback(async (patch?: Partial<VpnConfig>) => {
+  const next = await window.serica?.connectVpn?.(patch);
+  if (next) setVpnStatus(next);
+}, []);
+
+const handleVpnDisconnect = useCallback(async () => {
+  const next = await window.serica?.disconnectVpn?.();
+  if (next) setVpnStatus(next);
+}, []);
+
+const handleVpnUpdateConfig = useCallback(async (patch: Partial<VpnConfig>) => {
+  const next = await window.serica?.updateVpnConfig?.(patch);
+  if (next) setVpnStatus(next);
+}, []);
+
+const handleVpnCheckIp = useCallback(async () => {
+  setIsCheckingVpnIp(true);
+  setVpnIpError(null);
+  try {
+    const res = await window.serica?.checkVpnIp?.();
+    if (res && 'error' in res) {
+      setVpnIpError(res.error);
+    }
+  } finally {
+    setIsCheckingVpnIp(false);
+  }
+}, []);
+
+// The controls panel stands in for the video; hide it while the video has its own PiP window.
+const shouldShowMiniPlayer =
+  activeMediaState &&
+  activeMediaState.isPlaying &&
+  !activeMediaState.inPip &&
+  activeMediaState.tabId !== state.activeTabId;
+
+// Command_Bar submission: in new-tab mode (⌘T / sidebar new tab control) a URL or search
+// opens a Today tab in the Active_Space (R12.8); serica:// panel URLs still open their panel.
+const handleCommandBarNavigate = (url: string) => {
+  if (isCommandBarNewTab && !/^(?:serica|neutrino):\/\/(settings|history|vpn)$/i.test(url.trim())) {
+    void createTab(url, state.activeSpaceId);
+    return;
+  }
+  navigate(url);
+};
+
+// Assistant drawer webviews follow the Active_Profile's session (R3.3, A3). The active tab's
+// partition comes with every state-update; listProfiles covers a space with no tab yet.
+const activeTabInSpace = activeTab && activeTab.spaceId === state.activeSpaceId ? activeTab : undefined;
+const activeProfilePartition = activeTabInSpace?.partition ?? activeProfile?.partition;
+
+// Tab layout: Arc-style sidebar (default) or a horizontal strip under the top bar.
+const topTabs = settings.tabLayout === 'top';
+const showTopTabs = topTabs && !isHtmlFullscreen;
+// Sidebar placement: docked (not auto-hide) pushes the web canvas right; hidden in HTML fullscreen.
+const showSidebar = !isHtmlFullscreen && !topTabs;
+  // The page's insets from the window edges: the strip the sidebar slides
+  // out of, and the one the dock waits in on websites. The top bar on a
+  // website takes the same width as the page.
+  // The page runs to the window's edges: the pointer reaching an edge over
+  // it is relayed to the UI instead of needing uncovered strips (see
+  // useEdgeRelay), which showed as gaps at the sides and corners.
+  const pageInsetLeft = 0;
+  const pageInsetRight = 0;
+  useEdgeRelay(isWebpage && !isHtmlFullscreen);
+// The top bar on web pages: 30px, and (by default) hidden until the pointer
+// reaches the top edge. The tab strip of top-tabs mode keeps it shown.
+const TOP_TAB_STRIP_HEIGHT = 38;
+const topBarAutoHideOn = isWebpage && !showTopTabs && !isHtmlFullscreen && settings.topBarAutoHide === true;
+const overlayCount = useViewportOverlayCount();
+// The sidebar and the top bar show and hide on their own: opening the
+// sidebar no longer brings the auto-hidden top bar down with it. If the bar
+// is revealed while the sidebar is open, its left controls still sit in the
+// sidebar's toolbar row.
+const topBar = useTopBarAutoHide(topBarAutoHideOn, toolsOpen || overlayCount > 0);
+// macOS window chrome: drag regions, full screen, and the traffic lights,
+// which hide with an auto-hidden top bar (and show with it or the sidebar).
+useEffect(() => installDragRegions(), []);
+const macWindow = useMacWindowState();
+const sidebarCovering = useSidebarCovering();
+useTrafficLights(!isHtmlFullscreen && (!topBarAutoHideOn || topBar.shown || sidebarCovering));
+// Where web pages start: below the top bar, plus the tab strip in top-tabs mode.
+const contentTop = isHtmlFullscreen
+  ? 0
+  : showTopTabs
+    ? TOP_BAR_HEIGHT + TOP_TAB_STRIP_HEIGHT
+    : topBarAutoHideOn
+      ? 0
+      : TOP_BAR_HEIGHT;
+
+const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+  const saved = (settings as any).sidebarWidth;
+  return typeof saved === 'number' && saved >= 160 && saved <= 520 ? saved : 240;
+});
+
+useEffect(() => {
+  const saved = (settings as any).sidebarWidth;
+  if (typeof saved === 'number' && saved >= 160 && saved <= 520 && saved !== sidebarWidth) {
+    setSidebarWidth(saved);
+  }
+}, [(settings as any).sidebarWidth]);
+
+// Stable props for the (memoized) sidebar, so unrelated app re-renders skip it.
+// useBrowser's commands are all useCallback-stable.
+const sidebarActions = useMemo(
+  () => ({
+    selectTab: browser.selectTab,
+    selectSpace: handleSelectSpace,
+    createTab: browser.createTab,
+    closeTab: browser.closeTab,
+    pinTab: browser.pinTab,
+    unpinTab: browser.unpinTab,
+    addFavorite: browser.addFavorite,
+    removeFavorite: browser.removeFavorite,
+    duplicateTab: browser.duplicateTab,
+    moveTab: browser.moveTab,
+    createFolder: browser.createFolder,
+    updateFolder: browser.updateFolder,
+    deleteFolder: browser.deleteFolder,
+    moveTabToFolder: browser.moveTabToFolder,
+    createSpace: handleCreateSpace,
+    updateSpace: browser.updateSpace,
+    deleteSpace: browser.deleteSpace,
+    reorderSpace: browser.reorderSpace,
+    openCommandBar: openNewTabCommandBar,
+  }),
+  [
+    browser.selectTab,
+    handleSelectSpace,
+    browser.createTab,
+    browser.closeTab,
+    browser.pinTab,
+    browser.unpinTab,
+    browser.addFavorite,
+    browser.removeFavorite,
+    browser.duplicateTab,
+    browser.moveTab,
+    browser.createFolder,
+    browser.updateFolder,
+    browser.deleteFolder,
+    browser.moveTabToFolder,
+    handleCreateSpace,
+    browser.updateSpace,
+    browser.deleteSpace,
+    browser.reorderSpace,
+    openNewTabCommandBar,
+  ],
+);
+const updateSettingsRef = useRef(updateSettings);
+updateSettingsRef.current = updateSettings;
+const updateSidebarSettings = useCallback((patch: Partial<SidebarState>) => {
+  void updateSettingsRef.current(patch);
+}, []);
+
+// Sidebar control absorption (chrome.css): how far the site buttons glide
+// left when the space pill folds to its icon, and whether the new-tab button
+// still fits on a narrow sidebar. Measured only when the pill's size changes.
+const clusterRef = useRef<HTMLElement>(null);
+const [absorbCompact, setAbsorbCompact] = useState(false);
+// The traffic lights sit at the top bar's left end: its controls start
+// clear of them (none in full screen, where they live in the menu bar).
+useLayoutEffect(() => {
+  const cluster = clusterRef.current;
+  const bar = cluster?.parentElement;
+  if (!cluster || !bar) return;
+  const place = () => {
+    const start = bar.getBoundingClientRect().left + (parseFloat(getComputedStyle(bar).paddingLeft) || 0);
+    const inset = macWindow.fullscreen ? 0 : Math.max(0, Math.ceil(macWindow.trafficLightsRight + 10 - start));
+    cluster.style.setProperty('--traffic-lights-inset', `${inset}px`);
+  };
+  place();
+  const ro = new ResizeObserver(place);
+  ro.observe(bar);
+  return () => ro.disconnect();
+}, [macWindow.fullscreen, macWindow.trafficLightsRight, isWebpage, topTabs, pageInsetLeft]);
+useLayoutEffect(() => {
+  const cluster = clusterRef.current;
+  const pill = cluster?.querySelector<HTMLElement>('.macos-tabs-toggle-pill');
+  if (!cluster || !pill) return;
+  const measure = () => {
+    const shift = Math.max(0, pill.offsetWidth - 28);
+    cluster.style.setProperty('--pill-shift', `${shift}px`);
+    const left = cluster.offsetLeft + (cluster.offsetParent as HTMLElement | null ?? cluster).offsetLeft;
+    const compact = left + cluster.scrollWidth - shift + 6 > sidebarWidth;
+    setAbsorbCompact(compact);
+    // Spread the six controls across the sidebar's toolbar row: the room left
+    // up to the sidebar's right padding, shared out over the five gaps.
+    const room = sidebarWidth - 8 - (left + cluster.scrollWidth - shift);
+    const gap = compact ? 0 : Math.max(0, Math.floor(room / 5));
+    cluster.style.setProperty('--absorb-gap', `${gap}px`);
+  };
+  measure();
+  const ro = new ResizeObserver(measure);
+  ro.observe(pill);
+  ro.observe(cluster);
+  return () => ro.disconnect();
+}, [sidebarWidth, topTabs, isWebpage, macWindow.fullscreen, macWindow.trafficLightsRight, pageInsetLeft]);
+
+// Native page views paint above HTML; freeze the page while any of these cover it.
+useViewportOverlay(
+  useLingering(
+    isCommandBarOpen ||
+      isShieldModalOpen ||
+      isMcpModalOpen ||
+      isThemeModalOpen ||
+      isSettingsOpen ||
+      isHistoryModalOpen ||
+      isExtensionsOpen ||
+      isDownloadsOpen ||
+      isVpnModalOpen ||
+      isArchiveOpen ||
+      isWelcomeOpen,
+    PANEL_EXIT_MS,
+  ),
+);
+
+// Browser tools, run from the top bar's menu (when pinned) or from Settings.
+const toolActions: ToolActions = {
+  history: () => setIsHistoryModalOpen(true),
+  downloads: () => setIsDownloadsOpen(true),
+  'open-file': () => void window.serica?.openFile?.().catch(() => {}),
+  ai: () => {
+    setMcpInitialTab('assistants');
+    setIsMcpModalOpen(true);
+  },
+  vpn: () => setIsVpnModalOpen(true),
+  theme: () => setIsThemeModalOpen(true),
+};
+
+const shellStyle = {
+  '--topbar-h': `${TOP_BAR_HEIGHT}px`,
+  // Where the page starts on web pages: below the top bar, plus the tab strip in top-tabs mode.
+  '--app-content-top': `${contentTop}px`,
+} as React.CSSProperties;
+
+return (
+  <div className={`arc-app-shell radical-minimalism-shell${showTopTabs ? ' top-tabs-mode' : ''}`} style={shellStyle}>
+    {/* Frameless Top Drag Bar (only where the top bar is on screen) */}
+    {!isHtmlFullscreen && topBar.shown && (
+      <div className={`macos-window-drag-bar ${isWebpage ? 'on-webpage' : ''}`} />
+    )}
+    {/* Pointer at the top edge reveals the auto-hidden top bar. */}
+    {topBarAutoHideOn && !topBar.shown && (
+      <div className="topbar-reveal-strip" onPointerEnter={topBar.revealNow} aria-hidden="true" />
+    )}
+
+    {showTopTabs && (
+      <TopTabStrip
+        state={state}
+        onWebpage={isWebpage}
+        tint={isWebpage && isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : undefined}
+        onSelectTab={(id) => browser.selectTab(id)}
+        onCloseTab={(id) => closeTab(id)}
+        onSelectSpace={handleSelectSpace}
+        onNewTab={openNewTabCommandBar}
+        actions={browser}
+      />
+    )}
+
+    {/* Arc-style Sidebar: favorites, pinned, Today and Space_Switcher (R12.1) */}
+    {showSidebar && (
+      <Sidebar
+        className="app-sidebar"
+        state={state}
+        actions={sidebarActions}
+        expanded
+        autoHide
+        pinnedOpen={sidebarOpen}
+        onRequestClose={closeSidebar}
+        livePage={isWebpage && !activeTab?.unloaded}
+        sidebarWidth={sidebarWidth}
+        onUpdateSidebarWidth={setSidebarWidth}
+        onUpdateSidebarState={updateSidebarSettings}
+        scale={settings.uiScale?.sidebar ?? 1}
+      />
+    )}
+
+    {/* Top Chrome Header Bar (Solid dedicated header on web pages, floating on newtab) */}
+    <div
+      className={`floating-top-chrome-capsule ${isWebpage ? 'on-webpage' : ''} ${isTopBarTinted ? 'topbar-tinted' : ''} ${shouldShowTopBar ? 'visible' : 'autohidden'}${toolsOpen ? ' tools-open' : ''} topbar-style-${settings.topBarStyle === 'pill' ? 'pill' : 'flat'}${topBarAutoHideOn ? ` topbar-autohide${topBar.shown ? ' topbar-shown' : ''}` : ''}`}
+      style={
+        {
+          ...(isTopBarTinted && topBarTint ? (topBarTint.vars as React.CSSProperties) : {}),
+          ...(isWebpage ? { left: pageInsetLeft, right: pageInsetRight, '--bar-inset-l': `${pageInsetLeft}px` } : {}),
+        } as React.CSSProperties
+      }
+      data-topbar-tint={isTopBarTinted && topBarTint ? topBarTint.source : 'default'}
+    >
+      {/* Top left: sidebar toggle, site navigation and new tab */}
+      <aside ref={clusterRef} className={`macos-window-controls-cluster${absorbCompact ? ' absorb-compact' : ''}`} aria-label="Navigation">
+        {!topTabs && (
+        <button
+          className={`macos-tabs-toggle-pill ${sidebarOpen ? 'active' : ''}`}
+          data-sidebar-toggle
+          onPointerEnter={isWebpage ? prewarmPageUnderlay : undefined}
+          onClick={toggleSidebar}
+          title={sidebarOpen ? 'Hide sidebar (⌘S)' : 'Show sidebar (⌘S)'}
+          aria-label="Toggle sidebar"
+          aria-pressed={sidebarOpen}
+        >
+          <PanelLeft size={14} strokeWidth={2} aria-hidden="true" />
+          <span
+            className="macos-tabs-space-dot"
+            style={{ backgroundColor: activeSpace?.color || '#E4E4E7' }}
+          />
+          <span className="macos-tabs-space-name" data-testid="active-space-indicator">
+            {activeSpace?.name || 'Study'}
+          </span>
+          <span className="macos-tabs-count" data-testid="active-space-tab-count">
+            {currentSpaceTabs.length}
+          </span>
+        </button>
+        )}
+
+        {/* Compact Site Navigation Controls */}
+        <div className="site-nav-controls" role="group" aria-label="Site controls">
+          <button
+            type="button"
+            className="site-nav-btn"
+            onClick={() => dispatchSiteAction('back')}
+            disabled={!isWebpage || !activeTab?.canGoBack}
+            title="Back (⌘[ / Two-finger Swipe Right)"
+            aria-label="Go Back"
+          >
+            <ArrowLeft size={14} strokeWidth={2.1} />
+          </button>
+          <button
+            type="button"
+            className="site-nav-btn"
+            onClick={() => dispatchSiteAction('forward')}
+            disabled={!isWebpage || !activeTab?.canGoForward}
+            title="Forward (⌘] / Two-finger Swipe Left)"
+            aria-label="Go Forward"
+          >
+            <ArrowRight size={14} strokeWidth={2.1} />
+          </button>
+          <button
+            type="button"
+            className="site-nav-btn"
+            onClick={() => dispatchSiteAction(activeTab?.isLoading ? 'stop' : 'reload')}
+            disabled={!isWebpage}
+            title={activeTab?.isLoading ? 'Stop Loading (Esc)' : 'Reload Page (⌘R)'}
+            aria-label={activeTab?.isLoading ? 'Stop Loading' : 'Reload Page'}
+          >
+            {activeTab?.isLoading ? (
+              <X size={14} strokeWidth={2.2} />
+            ) : (
+              <RotateCw size={13.5} strokeWidth={2.1} />
+            )}
+          </button>
+          <button
+            type="button"
+            className="site-nav-btn"
+            onClick={() => dispatchSiteAction('home')}
+            disabled={!isWebpage}
+            title="Homescreen (⇧⌘H)"
+            aria-label="Home"
+          >
+            <Home size={13.5} strokeWidth={2.1} />
+          </button>
+        </div>
+        <button
+          type="button"
+          className="minimal-icon-btn topbar-new-tab-btn"
+          onClick={openNewTabCommandBar}
+          title="New tab (⌘T)"
+          aria-label="New tab"
+        >
+          <Plus size={16} />
+        </button>
+      </aside>
+
+      {/* Top Center Floating URL Pill */}
+      <FloatingUrlPill
+        url={activeTab?.url}
+        isLoading={activeTab?.isLoading}
+        zoomFactor={activeTab?.zoomFactor}
+        defaultZoom={settings.textScale}
+        onClick={() => setIsCommandBarOpen(true)}
+        onResetZoom={() => window.dispatchEvent(new CustomEvent('neutrino:zoom-action', { detail: 'reset' }))}
+        onOpenFind={() => dispatchSiteAction('open-find')}
+        tabId={activeTab?.id}
+        pdfDarkKey={`${isDarkMode}-${settings.pdfDarkMode}`}
+        isPrivate={activeTab?.private === true}
+      />
+
+      {/* Top right: status pills and the browser menu, then the window controls */}
+      <div className="minimal-top-right-cluster">
+        {vpnStatus?.state === 'connected' && (
+          <button
+            className="minimal-pill-btn vpn-top-pill vpn-connected"
+            onClick={() => setIsVpnModalOpen(!isVpnModalOpen)}
+            title={`VPN Tunnel Active (${vpnStatus.activeProxyRule || vpnStatus.config.mode})`}
+            aria-label="Built-in VPN"
+          >
+            <Lock size={13} className="modern-btn-icon" />
+            <span>VPN ON</span>
+          </button>
+        )}
+
+        <FocusButton onOpen={() => openSettings('focus')} />
+
+        {(() => {
+          const activeHost = (() => {
+            try {
+              const parsed = activeTab?.url ? new URL(activeTab.url) : null;
+              return parsed && (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+                ? parsed.hostname.toLowerCase()
+                : '';
+            } catch {
+              return '';
+            }
+          })();
+          const isSiteWhitelisted =
+            !!activeHost &&
+            (settings.shieldWhitelist ?? []).some(
+              (allowed) => activeHost === allowed || activeHost.endsWith(`.${allowed}`),
+            );
+          return (
+            <button
+              className="minimal-pill-btn"
+              onClick={() => setIsShieldModalOpen(!isShieldModalOpen)}
+              title={
+                !settings.adblockEnabled
+                  ? `Shields off: ${shieldsBlockedCount} blocked`
+                  : isSiteWhitelisted
+                    ? `Shields paused on ${activeHost}`
+                    : `Shields active: ${shieldsBlockedCount} blocked`
+              }
+              aria-label="Shields"
+              style={
+                !settings.adblockEnabled
+                  ? { opacity: 0.55 }
+                  : isSiteWhitelisted
+                    ? { color: '#f59e0b' }
+                    : undefined
+              }
+            >
+              <Shield size={14} className="modern-btn-icon" />
+              <span>{shieldsBlockedCount}</span>
+            </button>
+          );
+        })()}
+
+        {downloads.length > 0 && (
+          <button
+            className={`minimal-icon-btn downloads-top-btn${activeDownloads.length > 0 ? ' active' : ''}`}
+            onClick={() => setIsDownloadsOpen((prev) => !prev)}
+            title={
+              activeDownloads.length > 0
+                ? `Downloads: ${activeDownloads.length} in progress${downloadProgress !== null ? ` (${Math.round(downloadProgress * 100)}%)` : ''} (⌘J)`
+                : 'Downloads (⌘J)'
+            }
+            aria-label="Downloads"
+          >
+            {activeDownloads.length > 0 && (
+              <svg className="downloads-ring" viewBox="0 0 24 24" aria-hidden="true">
+                <circle className="downloads-ring-track" cx="12" cy="12" r="10.5" />
+                <circle
+                  className={`downloads-ring-fill${downloadProgress === null ? ' indeterminate' : ''}`}
+                  cx="12"
+                  cy="12"
+                  r="10.5"
+                  pathLength={100}
+                  strokeDasharray={downloadProgress === null ? '25 75' : `${Math.max(2, downloadProgress * 100)} 100`}
+                />
+              </svg>
+            )}
+            <Download size={14} />
+          </button>
+        )}
+
+        <ToolsMenu
+          isDarkMode={isDarkMode}
+          vpnOn={vpnStatus?.state === 'connected'}
+          pinned={normalizePinnedTools(settings.pinnedTools)}
+          actions={toolActions}
+          onToggleDarkMode={toggleDarkMode}
+          onSettings={() => openSettings()}
+          onOpenChange={setToolsOpen}
+        />
+
+      </div>
+    </div>
+
+    {/* Edge-to-Edge Web Canvas Viewport (pulled down on web pages so site controls never collide;
+        pushed right of a docked sidebar) */}
+    <main className={`arc-viewport-container edge-to-edge ${isWebpage && !isHtmlFullscreen ? 'with-site-top-offset' : ''}`}>
+      <div className="arc-web-canvas-frame seamless">
+        <BrowserViewport
+          activeTab={activeTab}
+          split={activeSplit?.split ?? null}
+          partnerTab={activeSplit?.partner}
+          tabs={state.tabs}
+          spaces={state.spaces}
+          activeSpaceId={state.activeSpaceId}
+          isDarkMode={isDarkMode}
+          isSidebarOpen={false}
+          onSelectSpace={handleSelectSpace}
+          onUpdateTab={handleUpdateTab}
+          onNavigate={navigate}
+          onOpenCommandBar={() => setIsCommandBarOpen(true)}
+          onMediaStateChange={handleMediaStateChange}
+          mediaCommand={mediaCommand}
+          userName={userProfile?.name}
+          onFullscreenChange={setIsHtmlFullscreen}
+          onPageColor={handlePageColor}
+          defaultZoom={settings.textScale}
+          contentTop={contentTop}
+          insetLeft={pageInsetLeft}
+          insetRight={pageInsetRight}
+          homeWidgets={settings.homeWidgets}
+          homeBackground={settings.homeBackground}
+          dockVisible={settings.rightPinsDockVisible}
+          uiScale={settings.uiScale}
+          captureAhead={showSidebar || topBarAutoHideOn}
+          onUpdateHomeWidgets={(homeWidgets) => void updateSettings({ homeWidgets })}
+        />
+      </div>
+    </main>
+
+    {/* Google sign-in refused in-app: offer to continue in the default browser */}
+    <AuthHandoffNotice />
+
+    {/* A downloaded update is ready: offer to restart into it */}
+    <UpdateNotice />
+    <UiPatchNotice />
+    <AppContextMenu />
+    <PageContextMenu />
+    <WhatsNew onboarded={!settingsLoaded ? null : !isWelcomeOpen && (settings.setupVersion ?? 0) >= SETUP_VERSION} />
+
+    {/* Save/update password prompts from login form submissions (R6.2, R6.3, R7.2) */}
+    <PasswordPrompt />
+
+    {/* Page alert/confirm/prompt, "Leave site?" and "Open in app?" in Serica's style */}
+    <PageDialog activeTabId={state.activeTabId} tabIds={pageDialogTabIds} />
+
+    {/* Camera, microphone, location... asked in Serica's own prompt */}
+    <PermissionPrompt activeTabId={state.activeTabId} tabIds={pageDialogTabIds} />
+
+    {/* Files, links and text dropped on Serica's own interface */}
+    <DropZones
+      onNewTabPage={!isWebpage}
+      spaceName={activeSpace?.name}
+      onOpenInNewTab={(url) => void createTab(url, state.activeSpaceId)}
+      onOpenHere={(url) => navigate(url)}
+    />
+
+    {/* Vertical Pinned Websites Dock (Right Side with macOS Magnification) */}
+    {/* Hidden by the Settings toggle; stored pinnedSites stay untouched (R19.2, R19.3) */}
+    {settings.rightPinsDockVisible && (
+      <RightPinsDock
+        onNavigate={(url) => void createTab(url, state.activeSpaceId)}
+        isOnWebpage={isWebpage}
+        persistedPins={Array.isArray(settings.pinnedSites) ? (settings.pinnedSites as PinnedSite[]) : undefined}
+        onPersistPins={(pins) => void updateSettings({ pinnedSites: pins })}
+        onHideDock={() => void updateSettings({ rightPinsDockVisible: false })}
+        dockScale={settings.uiScale?.dock ?? 1}
+      />
+    )}
+
+    {/* Floating Media Player (PiP) */}
+    {shouldShowMiniPlayer && (
+      <Suspense fallback={null}>
+        <MediaPlayer
+          mediaState={activeMediaState}
+          onPlayPause={handleMediaPlayPause}
+          onSeek={handleMediaSeek}
+          onVolume={handleMediaVolume}
+          onGoToTab={handleGoToMediaTab}
+          onClose={handleCloseMediaPlayer}
+          onPictureInPicture={() =>
+            setMediaCommand({ action: 'pip', tabId: activeMediaState!.tabId, timestamp: Date.now() })
+          }
+          dockOverPage={isWebpage}
+        />
+      </Suspense>
+    )}
+
+    {/* Centered Floating Command Bar (⌘T / ⌘K / ⌘L) */}
+    <Presence open={isCommandBarOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <CommandBar
+          isOpen
+          tabs={state.tabs}
+          spaces={state.spaces}
+          onClose={() => setIsCommandBarOpen(false)}
+          onNavigate={handleCommandBarNavigate}
+          onSelectTab={selectTab}
+          onCreateTab={(url) => void createTab(url, state.activeSpaceId)}
+          onToggleShields={toggleShields}
+          onSelectSpace={handleSelectSpace}
+          onToggleTheme={toggleDarkMode}
+          onOpenMcp={() => setIsMcpModalOpen(true)}
+          onOpenTheme={() => setIsThemeModalOpen(true)}
+          onOpenShields={() => setIsShieldModalOpen(true)}
+          searchEngine={settings.searchEngine}
+          onOpenSettings={openSettings}
+          onOpenHistory={() => setIsHistoryModalOpen(true)}
+          onOpenVpn={() => setIsVpnModalOpen(true)}
+          onGoBack={() => dispatchSiteAction('back')}
+          onGoForward={() => dispatchSiteAction('forward')}
+          onReload={() => dispatchSiteAction('reload')}
+          onCloseActiveTab={() => {
+            if (activeTab?.id) closeTab(activeTab.id);
+          }}
+          onReopenClosedTab={() => void reopenClosedTab()}
+          onOpenFind={() => dispatchSiteAction('open-find')}
+          onOpenArchive={() => setIsArchiveOpen(true)}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Archived Today tabs of the Active_Profile (R16.7, R16.8); opened from the Command_Bar */}
+    <Presence open={isArchiveOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <ArchiveList isOpen onClose={() => setIsArchiveOpen(false)} />
+      </Suspense>
+    </Presence>
+
+    {/* Built-in VPN / Privacy Tunnel Modal */}
+    <Presence open={isVpnModalOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <VpnModal
+          isOpen
+          onClose={() => setIsVpnModalOpen(false)}
+          status={vpnStatus}
+          onConnect={handleVpnConnect}
+          onDisconnect={handleVpnDisconnect}
+          onUpdateConfig={handleVpnUpdateConfig}
+          onCheckIp={handleVpnCheckIp}
+          isCheckingIp={isCheckingVpnIp}
+          ipCheckError={vpnIpError}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Browsing History Modal */}
+    <Presence open={isHistoryModalOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <HistoryModal
+          isOpen
+          onClose={() => setIsHistoryModalOpen(false)}
+          entries={historyEntries}
+          onOpenUrl={handleOpenHistoryUrl}
+          onDeleteEntry={handleDeleteHistoryEntry}
+          onClearHistory={handleClearHistory}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Downloads (top bar / ⌘J / neutrino://downloads) */}
+    <Presence open={isDownloadsOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <DownloadsPanel isOpen onClose={() => setIsDownloadsOpen(false)} downloads={downloads} />
+      </Suspense>
+    </Presence>
+
+    {/* Extensions (neutrino://extensions / Command Bar) */}
+    <Presence open={isExtensionsOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <ExtensionsModal
+          isOpen
+          onClose={() => setIsExtensionsOpen(false)}
+          onOpenUrl={(url) => {
+            setIsExtensionsOpen(false);
+            void createTab(url, state.activeSpaceId);
+          }}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Shield Modal Flyout */}
+    <Presence open={isShieldModalOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <ShieldModal
+          isOpen
+          onClose={() => setIsShieldModalOpen(false)}
+          stats={state.shieldStats}
+          blockedItems={blockedTrackers}
+          onToggleShields={toggleShields}
+          enabled={settings.adblockEnabled}
+          activeUrl={activeTab?.url}
+          whitelist={settings.shieldWhitelist ?? []}
+          onToggleSiteWhitelist={(domainOrUrl) => {
+            void window.serica?.toggleSiteWhitelist?.(domainOrUrl);
+          }}
+          onResetStats={resetShieldStats}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Browser Settings Panel (gear / ⌘, / Command Bar / neutrino://settings) */}
+    <Presence open={isSettingsOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <Settings2
+          onClose={() => setIsSettingsOpen(false)}
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          mode={activeSpaceTheme.mode}
+          onSetMode={setSpaceMode}
+          onOpenThemeStudio={() => setIsThemeModalOpen(true)}
+          tabs={state.tabs}
+          initialPage={settingsPage}
+          toolActions={toolActions}
+          onRunSetup={() => setIsWelcomeOpen(true)}
+          onStartTour={() => window.dispatchEvent(new CustomEvent('serica:start-tour'))}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* MCP Drawer (Right-Side) */}
+    <Presence open={isMcpModalOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <McpModal
+          isOpen={isMcpModalOpen}
+          onClose={() => setIsMcpModalOpen(false)}
+          activeTab={activeTab}
+          onNavigate={navigate}
+          initialTab={mcpInitialTab}
+          partition={activeProfilePartition}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Theme Studio Popover */}
+    <Presence open={isThemeModalOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <ThemeStudio
+          isOpen
+          onClose={() => setIsThemeModalOpen(false)}
+          activeSpace={activeSpace}
+          spaceTheme={activeSpaceTheme}
+          onChangeSpaceTheme={handleChangeSpaceTheme}
+          onApplyToAllSpaces={applyThemeToAllSpaces}
+          sidebarLayout={!topTabs}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* Setup: first launch, and once after updating to a new setup version */}
+    <Presence open={isWelcomeOpen} exitMs={PANEL_EXIT_MS}>
+      <Suspense fallback={null}>
+        <Setup
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          upgrading={upgrading}
+          spaceThemes={setupSpaceThemes}
+          activeSpaceId={state.activeSpaceId}
+          osDark={osPrefersDark}
+          onApplyThemes={applySetupThemes}
+          onFinish={finishSetup}
+        />
+      </Suspense>
+    </Presence>
+
+    {/* The first-run tour (after setup; replayed from Settings › About) */}
+    <SafeBoundary>
+    <ProductTour
+      topTabs={topTabs}
+      onNewTab={!isWebpage}
+      setSidebarOpen={setSidebarExpanded}
+      onDone={() => {
+        if (!settings.tourDone) void updateSettings({ tourDone: true });
+      }}
+    />
+    </SafeBoundary>
+  </div>
+);
+}
+
+export default App;

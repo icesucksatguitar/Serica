@@ -1,0 +1,139 @@
+/* Toolbar of a tab in a window of its own (components/DetachedWindow.tsx).
+   40px tall: the page starts right below (detached.rs TOOLBAR_H). */
+
+:root {
+  --dwin-bg: #18181b;
+  --dwin-fg: #e4e4e7;
+  --dwin-muted: #a1a1aa;
+  --dwin-hover: rgba(255, 255, 255, 0.07);
+  --dwin-field: rgba(255, 255, 255, 0.06);
+  --dwin-line: rgba(255, 255, 255, 0.09);
+  --dwin-focus: rgba(255, 255, 255, 0.32);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --dwin-bg: #f4f4f5;
+    --dwin-fg: #18181b;
+    --dwin-muted: #52525b;
+    --dwin-hover: rgba(0, 0, 0, 0.06);
+    --dwin-field: rgba(0, 0, 0, 0.05);
+    --dwin-line: rgba(0, 0, 0, 0.09);
+    --dwin-focus: rgba(0, 0, 0, 0.3);
+  }
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--dwin-bg);
+}
+
+.dwin-bar {
+  box-sizing: border-box;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Room for the traffic lights, and the controls centred on their line
+     (16px from the top: the title bar's own middle, see detached.rs). */
+  padding: 0 8px 8px 80px;
+  background: var(--dwin-bg);
+  color: var(--dwin-fg);
+  border-bottom: 1px solid var(--dwin-line);
+  font: 500 12px/1 'Inter Variable', -apple-system, system-ui, sans-serif;
+  user-select: none;
+}
+
+.dwin-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dwin-fg);
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out, ease-out);
+}
+.dwin-btn:hover:not(:disabled) {
+  background: var(--dwin-hover);
+}
+.dwin-btn:disabled {
+  color: var(--dwin-muted);
+  opacity: 0.45;
+  cursor: default;
+}
+.dwin-btn:focus-visible,
+.dwin-back:focus-visible {
+  outline: 2px solid var(--dwin-focus);
+  outline-offset: 1px;
+}
+
+.dwin-address {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0 4px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  background: var(--dwin-field);
+  color: var(--dwin-muted);
+  cursor: text;
+}
+.dwin-address.editing {
+  box-shadow: inset 0 0 0 1px var(--dwin-focus);
+}
+.dwin-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dwin-fg);
+  font-weight: 450;
+}
+.dwin-address input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--dwin-fg);
+  font: inherit;
+  font-weight: 450;
+}
+
+.dwin-back {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--dwin-line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dwin-fg);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out, ease-out);
+}
+.dwin-back:hover {
+  background: var(--dwin-hover);
+}
+
+@media (max-width: 520px) {
+  .dwin-back span {
+    display: none;
+  }
+}

@@ -1,0 +1,862 @@
+//! Application core: owns every backend service and keeps the UI, the
+//! native tab webviews and the disk in sync.
+//!
+//! Locking rules (important, WebKit delegate callbacks run on the main thread):
+//! * `store`/`history` locks are held only for in-memory work. Never call a
+//!   webview API (which may wait for the UI thread) while holding them.
+//! * UI-thread callbacks never take the `host` lock.
+
+use crate::downloads::Downloads;
+use crate::extensions::Extensions;
+use crate::history::History;
+use crate::model::*;
+use crate::settings::BrowserSettings;
+use crate::shields::Shields;
+use crate::store::Store;
+use crate::tabhost::TabHost;
+use crate::vpn::Vpn;
+use parking_lot::Mutex;
+use serde_json::Value;
+use std::collections::VecDeque;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
+
+pub type Shared = Arc<App>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Notice {
+    /// Tab/space state changed: broadcast and reconcile webviews.
+    State,
+    /// Settings changed: broadcast and reconfigure services.
+    Settings,
+    History,
+    /// Requests were blocked: refresh counters only (no reconcile, no save).
+    Blocked,
+    Quit,
+}
+
+/// Events reported by a tab's webview (from the UI thread).
+#[derive(Debug, Clone)]
+pub enum TabEvent {
+    NavigationStarting(String),
+    UrlChanged(String),
+    History { back: bool, forward: bool },
+    Loaded { url: String, success: bool },
+    Title(String),
+    Favicon(String),
+    Audio(bool),
+    Zoom(f64),
+}
+
+/// Browser-level shortcut pressed while a web page had keyboard focus.
+#[derive(Debug, Clone, Copy)]
+pub enum Shortcut {
+    NewTab,
+    OpenCommandBar,
+    CloseTab,
+    ReopenTab,
+    CycleTab(i32),
+    ToggleSidebar,
+    Find,
+    History,
+    Downloads,
+    Settings,
+    SpaceIndex(usize),
+    NewPrivateTab,
+    Escape,
+    Home,
+    OpenFile,
+    // WebView2 handled these by itself; WebKit leaves them to the browser.
+    Reload,
+    HardReload,
+    Stop,
+    Print,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    DevTools,
+    FindNext,
+    FindPrevious,
+    Back,
+    Forward,
+    /// Settings › About (the app menu's About and Check for Updates).
+    About,
+}
+
+static GLOBAL: std::sync::OnceLock<Shared> = std::sync::OnceLock::new();
+
+/// The app, for AppKit callbacks that only have the main thread to go on
+/// (menu items, key handling in page views).
+pub fn global() -> Option<&'static Shared> {
+    GLOBAL.get()
+}
+
+pub fn set_global(app: Shared) {
+    let _ = GLOBAL.set(app);
+}
+
+pub struct App {
+    pub handle: AppHandle,
+    pub store: Mutex<Store>,
+    pub history: Mutex<History>,
+    pub bookmarks: Mutex<crate::bookmarks::Bookmarks>,
+    pub shields: Arc<Shields>,
+    pub vpn: Arc<Vpn>,
+    pub extensions: Extensions,
+    pub downloads: Downloads,
+    pub mcp_http: crate::mcp_http::McpHttp,
+    pub focus: crate::focus::Focus,
+    pub focus_stats: crate::focus_stats::Stats,
+    /// Saved passwords (WebKit has no password manager of its own).
+    pub passwords: crate::passwords::Passwords,
+    pub host: Mutex<TabHost>,
+    /// Page captures served to the UI over `sericacap` (see previews.rs).
+    pub previews: crate::previews::Previews,
+    pub mcp_logs: Mutex<VecDeque<Value>>,
+    blocked_queue: Mutex<Vec<BlockedTrackerItem>>,
+    tx: Mutex<mpsc::Sender<Notice>>,
+    /// Serializes saves (the sync loop and the updater may save at once).
+    save_lock: Mutex<()>,
+    /// Hash of what each saved file last held, to skip rewriting it unchanged.
+    written: Mutex<std::collections::HashMap<std::path::PathBuf, u64>>,
+    /// Dark-PDF state the open pages were last told about (setting and theme).
+    pdf_dark: std::sync::atomic::AtomicBool,
+    /// The UI shows a dark theme (dark PDFs follow it; light mode never gets them).
+    ui_dark: std::sync::atomic::AtomicBool,
+    /// Tabs whose PDF was switched back to its own colors from the top bar.
+    pdf_light_tabs: Mutex<std::collections::HashSet<String>>,
+    /// Profiles whose cookies were already swept this session ("clear cookies
+    /// when Serica closes" also runs at start, in case it could not at exit).
+    cookie_swept: Mutex<std::collections::HashSet<String>>,
+    /// The tab whose page holds keyboard focus (WebView2 GotFocus/LostFocus).
+    pub focused_page: Mutex<Option<String>>,
+}
+
+/// Emits to the app UI only, never to web pages in tab webviews.
+pub fn ui_emit<S: serde::Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
+    if let Some(n) = crate::perf::span("emit").map(|_| serde_json::to_string(&payload).map(|j| j.len()).unwrap_or(0)) {
+        crate::perf::count(if event == "serica:state-update" { "emit.state.bytes" } else { "emit.other.bytes" }, n as u64);
+    }
+    // Tabs in windows of their own: their toolbars follow the tab's state.
+    if event == "serica:state-update" {
+        for label in crate::detached::ui_labels() {
+            let _ = handle.emit_to(label.as_str(), event, payload.clone());
+        }
+    }
+    let _ = handle.emit_to("main", event, payload);
+}
+
+/// Tells the UI whether the window is in macOS full screen (the traffic
+/// lights are hidden there, so the top bar takes their room back).
+pub fn ui_emit_window_state(w: &tauri::Window) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    // 0 = not sent yet; sent again only when it changes (resizes are many).
+    static LAST: AtomicU8 = AtomicU8::new(0);
+    let fs = w.is_fullscreen().unwrap_or(false);
+    if LAST.swap(if fs { 2 } else { 1 }, Ordering::Relaxed) == if fs { 2 } else { 1 } {
+        return;
+    }
+    ui_emit(w.app_handle(), "serica:window-state", serde_json::json!({ "fullscreen": fs }));
+}
+
+/// Percent of physical memory in use system-wide, if known: wired, active
+/// and compressed pages (what macOS can't simply drop) against the total
+/// (`host_statistics64` + `hw.memsize`), the share Activity Monitor calls
+/// "Memory Used".
+pub fn memory_load_percent() -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let mut total: u64 = 0;
+        let mut len = std::mem::size_of::<u64>();
+        let name = c"hw.memsize";
+        if libc::sysctlbyname(name.as_ptr(), &mut total as *mut u64 as *mut libc::c_void, &mut len, std::ptr::null_mut(), 0) != 0 || total == 0 {
+            return None;
+        }
+        let mut stats: libc::vm_statistics64 = std::mem::zeroed();
+        let mut count = (std::mem::size_of::<libc::vm_statistics64>() / std::mem::size_of::<libc::integer_t>()) as libc::mach_msg_type_number_t;
+        #[allow(deprecated)]
+        let host = libc::mach_host_self();
+        let rc = libc::host_statistics64(host, libc::HOST_VM_INFO64, &mut stats as *mut libc::vm_statistics64 as libc::host_info64_t, &mut count);
+        if rc != 0 {
+            return None;
+        }
+        let page = libc::sysconf(libc::_SC_PAGESIZE).max(4096) as u64;
+        let used = (stats.active_count as u64 + stats.wire_count as u64 + stats.compressor_page_count as u64) * page as u64;
+        Some(((used as f64 / total as f64) * 100.0).round().clamp(0.0, 100.0) as u32)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// With system memory `load`% in use: sleep up to `.1` background tabs idle
+/// at least `.0` ms right now, or `None` while memory is plentiful. Every
+/// awake background tab holds its renderer plus GPU memory, and the GPU
+/// process only gives memory back once the pages using it are closed.
+/// Checked every `PRESSURE_CHECK`. Near the limit macOS compresses and then
+/// swaps memory, and everything stalls, so the closer to it, the sooner
+/// tabs sleep.
+pub fn pressure_sleep_plan(load: u32) -> Option<(i64, usize)> {
+    match load {
+        95.. => Some((10_000, 3)),
+        90..=94 => Some((30_000, 2)),
+        85..=89 => Some((2 * 60_000, 1)),
+        80..=84 => Some((5 * 60_000, 1)),
+        _ => None,
+    }
+}
+
+/// How often memory pressure is checked.
+const PRESSURE_CHECK: Duration = Duration::from_secs(5);
+
+/// Turns omnibox input into a URL: keeps real URLs, adds https:// to
+/// host-like input, searches everything else. `javascript:` is refused.
+pub fn normalize_input(input: &str, search_prefix: &str) -> Option<String> {
+    let t = input.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let lower = t.to_lowercase();
+    if lower.starts_with("javascript:") || lower.starts_with("vbscript:") {
+        return None;
+    }
+    if lower.starts_with("serica://") || lower.starts_with("neutrino://") || lower == "about:blank" {
+        return Some(lower);
+    }
+    for scheme in ["http://", "https://", "file://", "about:", "data:", "view-source:", "mailto:"] {
+        if lower.starts_with(scheme) {
+            return Some(t.to_string());
+        }
+    }
+    // A local path typed or pasted (Finder's "Copy as Pathname"), quoted or
+    // not, or from the home folder.
+    let unquoted = t.trim_matches(|c| c == '"' || c == '\'');
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let path = if let Some(rest) = unquoted.strip_prefix("~/") {
+        home.map(|h| h.join(rest))
+    } else if unquoted.starts_with('/') && !unquoted.starts_with("//") {
+        Some(std::path::PathBuf::from(unquoted))
+    } else {
+        None
+    };
+    if let Some(p) = path {
+        if let Ok(u) = url::Url::from_file_path(&p) {
+            return Some(u.to_string());
+        }
+    }
+    let host_part = t.split(['/', '?', '#']).next().unwrap_or("");
+    let looks_like_host = !t.contains(char::is_whitespace)
+        && (host_part.starts_with("localhost")
+            || host_part.parse::<std::net::IpAddr>().is_ok()
+            || host_part.split(':').next().unwrap_or("").parse::<std::net::Ipv4Addr>().is_ok()
+            || (host_part.contains('.')
+                && !host_part.starts_with('.')
+                && !host_part.ends_with('.')
+                && host_part.rsplit('.').next().map(|tld| tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())).unwrap_or(false)));
+    if looks_like_host {
+        let bare_host = host_part.split(':').next().unwrap_or("");
+        let scheme = if bare_host == "localhost" || bare_host.parse::<std::net::IpAddr>().is_ok() { "http" } else { "https" };
+        return Some(format!("{scheme}://{t}"));
+    }
+    let q: String = url::form_urlencoded::byte_serialize(t.as_bytes()).collect();
+    Some(format!("{search_prefix}{q}"))
+}
+
+impl App {
+    /// Whether PDFs are shown dark: the setting is on and the UI is dark.
+    pub fn pdf_dark_global(&self) -> bool {
+        self.settings().pdf_dark_mode && self.ui_dark.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether this tab's PDF is shown dark (the global state, unless the
+    /// tab was switched back to the PDF's own colors).
+    pub fn pdf_dark_for(&self, tab_id: &str) -> bool {
+        self.pdf_dark_global() && !self.pdf_light_tabs.lock().contains(tab_id)
+    }
+
+    /// Re-applies dark PDFs to open pages when the setting or theme changed.
+    pub fn refresh_pdf_dark(self: &Arc<Self>) {
+        let on = self.pdf_dark_global();
+        if self.pdf_dark.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+            TabHost::apply_pdf_dark(self);
+        }
+    }
+
+    pub fn set_ui_dark(self: &Arc<Self>, dark: bool) {
+        self.ui_dark.store(dark, std::sync::atomic::Ordering::Relaxed);
+        self.refresh_pdf_dark();
+    }
+
+    /// Top-bar toggle on a PDF tab: `false` shows the PDF's own colors.
+    pub fn set_pdf_dark_tab(self: &Arc<Self>, tab_id: &str, dark: bool) {
+        {
+            let mut light = self.pdf_light_tabs.lock();
+            if dark {
+                light.remove(tab_id);
+            } else {
+                light.insert(tab_id.to_string());
+            }
+        }
+        TabHost::apply_pdf_dark(self);
+    }
+
+    pub fn new(handle: AppHandle, data_dir: std::path::PathBuf) -> Shared {
+        let store = Store::load(data_dir.clone());
+        let history = History::load(data_dir.join("history.json"));
+        let shields = Shields::new(data_dir.join("adblock"), store.shield_stats.clone());
+        shields.configure(store.settings.adblock_enabled, &store.settings.shield_whitelist);
+        let vpn = Vpn::new(data_dir.join("vpn.json"));
+        // "Serica", or "Serica Test" for the test copy (its own Keychain item).
+        let app_name = handle.config().product_name.clone().unwrap_or_else(|| "Serica".into());
+        let net = (vpn.needs_proxy(), vpn.webrtc_guard_active());
+        let port = vpn.start_proxy();
+        let (tx, rx) = mpsc::channel();
+        let pdf_dark = std::sync::atomic::AtomicBool::new(store.settings.pdf_dark_mode);
+        let block_3pc = store.settings.block_third_party_cookies;
+        let app = Arc::new(App {
+            handle,
+            store: Mutex::new(store),
+            history: Mutex::new(history),
+            bookmarks: Mutex::new(crate::bookmarks::Bookmarks::load(data_dir.join("bookmarks.json"))),
+            shields,
+            vpn,
+            extensions: Extensions::new(data_dir.join("extensions")),
+            downloads: Downloads::new(data_dir.join("downloads.json")),
+            mcp_http: crate::mcp_http::McpHttp::new(data_dir.join("mcp-token.txt")),
+            focus: crate::focus::Focus::load(data_dir.join("focus.json")),
+            focus_stats: crate::focus_stats::Stats::load(data_dir.join("focus-stats.json")),
+            passwords: crate::passwords::Passwords::new(data_dir.join("passwords"), &app_name),
+            previews: Default::default(),
+            host: Mutex::new(TabHost::new(data_dir.join("webdata"), port, net, block_3pc)),
+            mcp_logs: Mutex::new(VecDeque::new()),
+            blocked_queue: Mutex::new(Vec::new()),
+            tx: Mutex::new(tx),
+            pdf_dark,
+            ui_dark: std::sync::atomic::AtomicBool::new(true),
+            pdf_light_tabs: Mutex::new(Default::default()),
+            cookie_swept: Mutex::new(Default::default()),
+            focused_page: Mutex::new(None),
+            save_lock: Mutex::new(()),
+            written: Mutex::new(Default::default()),
+        });
+        let worker = app.clone();
+        std::thread::Builder::new()
+            .name("serica-sync".into())
+            .spawn(move || worker.sync_loop(rx))
+            .expect("sync thread");
+        app.start_background_jobs();
+        app.shields.spawn_updater(false);
+        app
+    }
+
+    pub fn notify(&self, n: Notice) {
+        let _ = self.tx.lock().send(n);
+    }
+
+    /// Coalesces notices (~60 fps), then broadcasts, reconciles webviews and
+    /// saves with a short debounce.
+    fn sync_loop(self: Arc<Self>, rx: mpsc::Receiver<Notice>) {
+        let mut dirty_since: Option<Instant> = None;
+        // Blocked-request counters reach the UI at most this often. Ad-heavy
+        // pages block hundreds of requests while loading; each used to cost a
+        // full state broadcast, a webview reconcile and a save to disk.
+        const BLOCKED_REFRESH: Duration = Duration::from_millis(1000);
+        let mut blocked_pending = false;
+        let mut last_state_emit = Instant::now() - BLOCKED_REFRESH;
+        loop {
+            let first = match rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(n) => Some(n),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            let (mut state, mut settings, mut history, mut quit) = (false, false, false, false);
+            let mut take = |n: Notice| match n {
+                Notice::State => state = true,
+                Notice::Settings => settings = true,
+                Notice::History => history = true,
+                Notice::Blocked => blocked_pending = true,
+                Notice::Quit => quit = true,
+            };
+            if let Some(n) = first {
+                take(n);
+                std::thread::sleep(Duration::from_millis(16));
+                while let Ok(n) = rx.try_recv() {
+                    take(n);
+                }
+            }
+            if settings {
+                let s = self.store.lock().settings.clone();
+                self.shields.configure(s.adblock_enabled, &s.shield_whitelist);
+                crate::content_rules::set_enabled(&self.handle, s.adblock_enabled);
+                self.refresh_pdf_dark();
+                TabHost::sync_cookie_policy(&self, s.block_third_party_cookies);
+                ui_emit(&self.handle, "serica:settings-updated", s);
+                crate::mcp_http::sync(&self);
+            }
+            if state || settings {
+                // A tab closed or left for one of Serica's pages ends its split.
+                self.store.lock().prune_splits();
+                let snap = self.snapshot();
+                ui_emit(&self.handle, "serica:state-update", snap);
+                crate::detached::sync_titles(&self);
+                last_state_emit = Instant::now();
+                blocked_pending = false;
+                TabHost::reconcile(&self);
+            } else if blocked_pending && last_state_emit.elapsed() >= BLOCKED_REFRESH {
+                // Per-tab blocked counts and totals live in the snapshot.
+                ui_emit(&self.handle, "serica:state-update", self.snapshot());
+                last_state_emit = Instant::now();
+                blocked_pending = false;
+            }
+            let blocked: Vec<BlockedTrackerItem> = std::mem::take(&mut *self.blocked_queue.lock());
+            if !blocked.is_empty() {
+                // One message per cycle (each emit is a script call on the UI thread).
+                let latest: Vec<BlockedTrackerItem> = blocked.into_iter().rev().take(30).rev().collect();
+                ui_emit(&self.handle, "serica:trackers-blocked", latest);
+            }
+            if history {
+                // A ping, not the list: only an open History panel needs the
+                // entries, and it fetches them (keeps page loads light).
+                ui_emit(&self.handle, "serica:history-updated", serde_json::Value::Null);
+            }
+            if state || settings || history {
+                dirty_since.get_or_insert_with(Instant::now);
+            }
+            if quit || dirty_since.map(|t| t.elapsed() > Duration::from_millis(400)).unwrap_or(false) {
+                self.save_now();
+                dirty_since = None;
+            }
+            if quit {
+                break;
+            }
+        }
+    }
+
+    /// Saves state, settings and history. Only serializing happens under the
+    /// locks: the page event handlers on the UI thread take the same locks, so
+    /// holding them through disk writes (and antivirus scans of those writes)
+    /// stalled page events and input. Unchanged files are not rewritten.
+    pub fn save_now(&self) {
+        let stats = self.shields.stats();
+        let files = {
+            let mut s = self.store.lock();
+            s.shield_stats = stats;
+            s.serialized()
+        };
+        let history = self.history.lock().take_serialized();
+        let _guard = self.save_lock.lock();
+        crate::store::write_files(&self.written, files, true);
+        if let Some((path, bytes)) = history {
+            crate::store::write_files(&self.written, vec![(path, bytes)], false);
+        }
+    }
+
+    pub fn snapshot(&self) -> BrowserAppState {
+        let mut snap = self.store.lock().snapshot();
+        snap.shield_stats = self.shields.stats();
+        for t in &mut snap.tabs {
+            t.blocked_count = self.shields.tab_count(&t.id);
+        }
+        snap
+    }
+
+    pub fn settings(&self) -> BrowserSettings {
+        self.store.lock().settings.clone()
+    }
+
+    /// True the first time it is asked for `profile` this session.
+    pub fn claim_cookie_sweep(&self, profile: &str) -> bool {
+        self.cookie_swept.lock().insert(profile.to_string())
+    }
+
+    /// A page took keyboard focus. In a split view that makes its pane the
+    /// active tab. Called on the main thread: only notifies, never waits.
+    pub fn page_focused(&self, tab_id: &str) {
+        *self.focused_page.lock() = Some(tab_id.to_string());
+        let changed = {
+            let mut s = self.store.lock();
+            let partner_of_active = s.active_tab_id.as_deref().and_then(|a| s.split_partner(a));
+            partner_of_active.as_deref() == Some(tab_id) && s.activate_tab(tab_id)
+        };
+        if changed {
+            self.notify(Notice::State);
+        }
+    }
+
+    /// A page lost keyboard focus (to the UI, another page, or another app).
+    pub fn page_blurred(&self, tab_id: &str) {
+        let mut f = self.focused_page.lock();
+        if f.as_deref() == Some(tab_id) {
+            *f = None;
+        }
+    }
+
+    /// Mutates the store and schedules a broadcast. Keep `f` free of webview calls.
+    pub fn mutate<T>(&self, f: impl FnOnce(&mut Store) -> T) -> T {
+        let out = f(&mut self.store.lock());
+        self.notify(Notice::State);
+        out
+    }
+
+    fn start_background_jobs(self: &Arc<Self>) {
+        crate::mcp_http::sync(self);
+        // Focus Mode: count time down every second; check the clock against
+        // the network at start and every half hour.
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            let mut n: u64 = 0;
+            let mut last = std::time::Instant::now();
+            loop {
+                tick.tick().await;
+                n += 1;
+                let before = app.focus.snapshot();
+                if app.focus.tick() {
+                    crate::focus::after_change(&app, before);
+                } else if n % 15 == 0 && app.focus.is_active() {
+                    app.focus.save(false);
+                }
+                // Statistics: focus time, finished sessions, time on sites.
+                // A long gap (the PC slept) counts as two seconds, not hours.
+                let dt = (last.elapsed().as_millis() as i64).min(2000);
+                last = std::time::Instant::now();
+                let finished = app.focus.take_finished();
+                for _ in &finished {
+                    app.focus_stats.session_ended(true);
+                }
+                let browsing = crate::focus_stats::sample_browsing(&app);
+                app.focus_stats.tick(dt, &app.focus.active_lists(), browsing);
+                if n % 60 == 0 || !finished.is_empty() {
+                    app.focus_stats.save(false);
+                }
+            }
+        });
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                if let Some(t) = crate::focus::network_time_ms().await {
+                    let before = app.focus.snapshot();
+                    app.focus.apply_network_time(t);
+                    crate::focus::after_change(&app, before);
+                    tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+                } else {
+                    // Offline: try again soon (a locked session waits for it
+                    // before counting the time Serica was closed).
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+            }
+        });
+        // Low on RAM: sleep the least recently used background tabs that
+        // still hold a page, a few at a time, before the idle timer would.
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(PRESSURE_CHECK);
+            loop {
+                tick.tick().await;
+                let Some((min_idle_ms, limit)) = memory_load_percent().and_then(pressure_sleep_plan) else { continue };
+                // Only tabs with a page loaded free anything (host first: never
+                // take the host lock while holding the store lock).
+                let live: std::collections::HashSet<String> = app.host.lock().views.keys().cloned().collect();
+                let slept = {
+                    let mut s = app.store.lock();
+                    if s.settings.zen_sleep_enabled {
+                        s.sleep_least_recent(min_idle_ms, limit, &live)
+                    } else {
+                        0
+                    }
+                };
+                if slept > 0 {
+                    tracing::info!("memory pressure: slept {slept} background tab(s)");
+                    app.notify(Notice::State);
+                }
+            }
+        });
+        // Zen auto-sleep and Today-tab archiving, twice a minute.
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                let (slept, archived) = {
+                    let mut s = app.store.lock();
+                    let mut slept = 0;
+                    if s.settings.zen_sleep_enabled {
+                        let idle_ms = i64::from(s.settings.tab_sleep_minutes) * 60_000;
+                        slept += s.sleep_inactive(idle_ms);
+                    }
+                    (slept, s.archive_sweep())
+                };
+                if slept + archived > 0 {
+                    app.notify(Notice::State);
+                }
+                if archived > 0 {
+                    let list = app.store.lock().archive_list();
+                    ui_emit(&app.handle, "serica:archive-updated", list);
+                }
+            }
+        });
+        // Refresh adblock lists every 6 hours (they refresh when older than 4 days).
+        let app = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(6 * 3600));
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                app.shields.spawn_updater(false);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------- tab events
+
+    pub fn tab_event(&self, tab_id: &str, ev: TabEvent) {
+        let mut history_changed = false;
+        let mut settings_changed = false;
+        // Zoom to apply to the page after the locks are released (a new site).
+        let mut apply_zoom: Option<f64> = None;
+        {
+            let mut s = self.store.lock();
+            let space = s.tab(tab_id).map(|t| t.space_id.clone());
+            let Some(tab) = s.tab_mut(tab_id) else { return };
+            match ev {
+                TabEvent::NavigationStarting(url) => {
+                    tab.is_loading = true;
+                    if !url.is_empty() && !url.starts_with("about:") {
+                        let host = |u: &str| url::Url::parse(u).ok().and_then(|u| u.host_str().map(str::to_string));
+                        if host(&url) != host(&tab.url) {
+                            // The old site's icon must not stick to a new site.
+                            tab.favicon = None;
+                        }
+                        tab.url = url;
+                    }
+                    self.shields.reset_tab(tab_id);
+                }
+                TabEvent::UrlChanged(url) => {
+                    if !url.is_empty() && url != "about:blank" {
+                        tab.url = url;
+                        // Zoom is per site: a page on another site takes that
+                        // site's zoom (or the default).
+                        if crate::settings::zoom_site(&tab.url).is_some() {
+                            let want = s.settings.zoom_for(&s.tab(tab_id).map(|t| t.url.clone()).unwrap_or_default());
+                            if let Some(tab) = s.tab_mut(tab_id) {
+                                if tab.zoom_factor.map(|z| (z - want).abs() >= 0.005).unwrap_or(true) {
+                                    tab.zoom_factor = Some(want);
+                                    apply_zoom = Some(want);
+                                }
+                            }
+                        }
+                    }
+                }
+                TabEvent::History { back, forward } => {
+                    tab.can_go_back = back;
+                    tab.can_go_forward = forward;
+                }
+                TabEvent::Loaded { url, success } => {
+                    tab.is_loading = false;
+                    if success && !url.is_empty() && !url.starts_with("about:") {
+                        tab.url = url.clone();
+                        // Private tabs leave no history.
+                        if !tab.private {
+                            let title = tab.title.clone();
+                            drop(s);
+                            self.history.lock().record_visit(&url, if title == url { "" } else { &title }, space.as_deref());
+                            history_changed = true;
+                            s = self.store.lock();
+                        }
+                    }
+                }
+                TabEvent::Title(title) => {
+                    if !title.trim().is_empty() {
+                        tab.title = title.chars().take(300).collect();
+                        let (url, t) = (tab.url.clone(), tab.title.clone());
+                        drop(s);
+                        self.history.lock().update_meta(&url, Some(&t), None);
+                        history_changed = true;
+                        s = self.store.lock();
+                    }
+                }
+                TabEvent::Favicon(uri) => {
+                    if uri.starts_with("http") || uri.starts_with("data:") {
+                        tab.favicon = Some(uri.clone());
+                        let url = tab.url.clone();
+                        drop(s);
+                        self.history.lock().update_meta(&url, None, Some(&uri));
+                        s = self.store.lock();
+                    }
+                }
+                TabEvent::Audio(playing) => {
+                    tab.has_active_media = playing;
+                }
+                TabEvent::Zoom(z) => {
+                    let z = (z * 100.0).round() / 100.0;
+                    tab.zoom_factor = Some(z);
+                    let url = tab.url.clone();
+                    ui_emit(&self.handle, "serica:zoom-updated", serde_json::json!({ "tabId": tab_id, "zoomFactor": z }));
+                    settings_changed = s.settings.remember_zoom(&url, z);
+                }
+            }
+            drop(s);
+        }
+        if let Some(z) = apply_zoom {
+            let wv = self.host.lock().views.get(tab_id).map(|v| v.webview.clone());
+            if let Some(wv) = wv {
+                crate::webview_mac::set_zoom(&wv, z);
+            }
+        }
+        if settings_changed {
+            self.notify(Notice::Settings);
+        }
+        self.notify(Notice::State);
+        if history_changed {
+            self.notify(Notice::History);
+        }
+    }
+
+    pub fn on_blocked(&self, item: BlockedTrackerItem) {
+        let mut q = self.blocked_queue.lock();
+        q.push(item);
+        if q.len() > 200 {
+            q.drain(0..100);
+        }
+        drop(q);
+        self.notify(Notice::Blocked);
+    }
+
+    /// Handles a browser shortcut pressed inside a web page.
+    pub fn shortcut(self: &Arc<Self>, sc: Shortcut) {
+        let h = &self.handle;
+        match sc {
+            Shortcut::NewTab => ui_emit(h, "serica:open-command-bar", serde_json::json!({ "newTab": true })),
+            Shortcut::NewPrivateTab => {
+                self.mutate(|s| s.create_private_tab(None));
+            }
+            Shortcut::OpenFile => crate::files::pick_and_open(self),
+            Shortcut::OpenCommandBar => ui_emit(h, "serica:open-command-bar", serde_json::json!({})),
+            Shortcut::ToggleSidebar => ui_emit(h, "serica:toggle-tabs", ()),
+            Shortcut::Find => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "open-find", "source": "shortcut" })),
+            Shortcut::Home => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "home", "source": "shortcut" })),
+            Shortcut::History => ui_emit(h, "serica:open-history", ()),
+            Shortcut::Downloads => ui_emit(h, "serica:open-downloads", ()),
+            Shortcut::Settings => ui_emit(h, "serica:open-settings", serde_json::Value::Null),
+            Shortcut::Escape => ui_emit(h, "serica:escape-pressed", ()),
+            Shortcut::CloseTab => {
+                self.mutate(|s| {
+                    if let Some(id) = s.active_tab_id.clone() {
+                        s.close_tab(&id);
+                    }
+                });
+            }
+            Shortcut::ReopenTab => {
+                self.mutate(|s| s.reopen_closed_tab());
+            }
+            Shortcut::CycleTab(d) => {
+                self.mutate(|s| s.cycle_tab(d));
+            }
+            Shortcut::Reload => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "reload", "source": "shortcut" })),
+            Shortcut::HardReload => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "hard-reload", "source": "shortcut" })),
+            Shortcut::Stop => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "stop", "source": "shortcut" })),
+            Shortcut::Back => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "back", "source": "shortcut" })),
+            Shortcut::Forward => ui_emit(h, "serica:site-action", serde_json::json!({ "action": "forward", "source": "shortcut" })),
+            Shortcut::About => ui_emit(h, "serica:open-settings", "about"),
+            Shortcut::Print => {
+                if let Some(wv) = TabHost::active_webview(self) {
+                    crate::webview_mac::print(&wv);
+                }
+            }
+            Shortcut::ZoomIn | Shortcut::ZoomOut | Shortcut::ZoomReset => self.zoom_step(sc),
+            Shortcut::DevTools => {
+                if let Some(wv) = TabHost::active_webview(self) {
+                    wv.open_devtools();
+                }
+            }
+            Shortcut::FindNext | Shortcut::FindPrevious => {
+                if let Some(wv) = TabHost::active_webview(self) {
+                    let id = self.store.lock().active_tab_id.clone().unwrap_or_default();
+                    crate::webview_mac::find(self, &wv, &id, None, matches!(sc, Shortcut::FindNext), true);
+                }
+            }
+            Shortcut::SpaceIndex(n) => {
+                let switched = self.mutate(|s| {
+                    let order = s.switcher_order();
+                    let target = order.get(n.wrapping_sub(1)).cloned()?;
+                    if target == s.active_space_id {
+                        return None;
+                    }
+                    s.activate_space(&target);
+                    s.space(&target).map(|sp| (sp.id.clone(), sp.name.clone()))
+                });
+                if let Some((id, name)) = switched {
+                    ui_emit(h, "serica:space-switched", serde_json::json!({ "spaceId": id, "spaceName": name }));
+                }
+            }
+        }
+    }
+
+    /// Command-plus / minus / zero in a page: the same steps as the address
+    /// bar's zoom buttons (tenths, between 30% and 300%, back to the text size).
+    fn zoom_step(self: &Arc<Self>, sc: Shortcut) {
+        let (id, current, default) = {
+            let s = self.store.lock();
+            let Some(t) = s.active_tab() else { return };
+            (t.id.clone(), t.zoom_factor.unwrap_or(s.settings.text_scale), s.settings.text_scale)
+        };
+        let next = match sc {
+            Shortcut::ZoomIn => (current + 0.1).min(3.0),
+            Shortcut::ZoomOut => (current - 0.1).max(0.3),
+            _ => default,
+        };
+        let next = (next * 10.0).round() / 10.0;
+        if let Some(wv) = TabHost::webview(self, &id) {
+            crate::webview_mac::set_zoom(&wv, next);
+        }
+        self.tab_event(&id, TabEvent::Zoom(next));
+    }
+
+    pub fn log_mcp(&self, entry: Value) {
+        let mut l = self.mcp_logs.lock();
+        l.push_back(entry);
+        while l.len() > 100 {
+            l.pop_front();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{memory_load_percent, normalize_input, pressure_sleep_plan};
+    const G: &str = "https://www.google.com/search?q=";
+
+    #[test]
+    fn memory_pressure_plan() {
+        assert_eq!(pressure_sleep_plan(50), None);
+        assert_eq!(pressure_sleep_plan(79), None);
+        assert_eq!(pressure_sleep_plan(80), Some((5 * 60_000, 1)));
+        assert_eq!(pressure_sleep_plan(87), Some((2 * 60_000, 1)));
+        assert_eq!(pressure_sleep_plan(92), Some((30_000, 2)));
+        assert_eq!(pressure_sleep_plan(99), Some((10_000, 3)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn memory_load_is_read() {
+        assert!(memory_load_percent().is_some_and(|p| p <= 100));
+    }
+
+    #[test]
+    fn omnibox_input() {
+        assert_eq!(normalize_input("example.com", G).unwrap(), "https://example.com");
+        assert_eq!(normalize_input("localhost:3000/x", G).unwrap(), "http://localhost:3000/x");
+        assert_eq!(normalize_input("https://a.b/c", G).unwrap(), "https://a.b/c");
+        assert_eq!(normalize_input("/Users/me/Docs/My File.pdf", G).unwrap(), "file:///Users/me/Docs/My%20File.pdf");
+        assert_eq!(normalize_input(r#""/Volumes/USB/a b.pdf""#, G).unwrap(), "file:///Volumes/USB/a%20b.pdf");
+        assert_eq!(normalize_input("~/Downloads/x.pdf", G).unwrap(), format!("{}", url::Url::from_file_path(format!("{}/Downloads/x.pdf", std::env::var("HOME").unwrap())).unwrap()));
+        assert_eq!(normalize_input("rust lang", G).unwrap(), format!("{G}rust+lang"));
+        assert_eq!(normalize_input("what is 3.5", G).unwrap(), format!("{G}what+is+3.5"));
+        assert_eq!(normalize_input("node.js", G).unwrap(), "https://node.js");
+        assert_eq!(normalize_input("v1.2", G).unwrap(), format!("{G}v1.2"));
+        assert!(normalize_input("javascript:alert(1)", G).is_none());
+        assert_eq!(normalize_input("192.168.1.1", G).unwrap(), "http://192.168.1.1");
+        assert_eq!(normalize_input("SERICA://settings", G).unwrap(), "serica://settings");
+    }
+}

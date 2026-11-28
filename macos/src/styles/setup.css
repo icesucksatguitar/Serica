@@ -1,0 +1,437 @@
+/* ==========================================================================
+   Setup (Setup.tsx), the tour's step count (GuideTour.tsx) and the Focus
+   pill in the top bar (FocusButton.tsx).
+   ========================================================================== */
+
+.setup-overlay {
+  z-index: 12500;
+  background: color-mix(in srgb, var(--ui-bg) 72%, rgba(0, 0, 0, 0.5)) !important;
+}
+
+.setup-card {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 48px));
+  height: min(600px, calc(100vh - 64px));
+  border-radius: 20px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  box-shadow: var(--shadow-sheet);
+  overflow: hidden;
+}
+
+.setup-stage {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 44px 48px 20px;
+  animation: setup-in-fwd var(--dur-slow) var(--spring-snap) both;
+}
+
+.setup-stage.dir-back {
+  animation-name: setup-in-back;
+}
+
+@keyframes setup-in-fwd {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes setup-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+
+.setup-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setup-page.centered {
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  text-align: center;
+  gap: 16px;
+}
+
+.setup-title {
+  margin: 10px 0 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-34);
+  font-weight: 600;
+  letter-spacing: var(--tr-34);
+}
+
+.setup-lede {
+  margin: 0;
+  max-width: 440px;
+  color: var(--ui-fg-muted);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.setup-reassure {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--ui-fg-muted);
+  font-size: var(--fs-12);
+}
+
+.setup-heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-26);
+  font-weight: 600;
+  letter-spacing: var(--tr-26);
+}
+
+.setup-sub {
+  margin: 0 0 6px;
+  max-width: 500px;
+  color: var(--ui-fg-muted);
+  font-size: var(--fs-14);
+  line-height: 1.55;
+}
+
+.setup-label {
+  margin-top: 10px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-fg-faint);
+}
+
+.setup-hint {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--ui-fg-faint);
+}
+
+.setup-ways {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.setup-way {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--ui-fg-muted);
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--spring-snap);
+}
+
+.setup-way:hover {
+  transform: translateY(-2px);
+}
+
+.setup-way.on {
+  color: var(--ui-fg);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ui-fg) 50%, transparent);
+}
+
+.setup-way-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.setup-way-art {
+  display: flex;
+  flex-direction: column;
+  height: 116px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--ui-bg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.setup-way-art i {
+  display: block;
+  border-radius: 3px;
+  background: var(--ui-fg);
+  opacity: 0.12;
+}
+
+.setup-way-art i.on {
+  opacity: 0.3;
+}
+
+.setup-way-art .w-bar {
+  display: flex;
+  gap: 4px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.setup-way-art .w-bar i {
+  width: 10px;
+  height: 4px;
+}
+
+.setup-way-art .w-strip {
+  display: flex;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.setup-way-art .w-strip i {
+  width: 34px;
+  height: 8px;
+}
+
+.setup-way-art .w-body {
+  flex: 1;
+  display: flex;
+}
+
+.setup-way-art .w-side {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 30%;
+  padding: 8px;
+  border-right: 1px solid var(--hairline);
+}
+
+.setup-way-art .w-side i {
+  height: 8px;
+}
+
+.setup-way-art .w-page {
+  flex: 1;
+  background: linear-gradient(160deg, var(--theme-backdrop-c1), transparent 70%);
+  opacity: 0.6;
+}
+
+.setup-mode {
+  align-self: flex-start;
+}
+
+.setup-palettes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.setup-palette,
+.setup-bg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-fg-muted);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.setup-palette > span,
+.setup-bg > span {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: transform var(--dur-base) var(--spring-snap), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.setup-palette:hover > span,
+.setup-bg:hover > span {
+  transform: translateY(-2px);
+}
+
+.setup-palette.on,
+.setup-bg.on {
+  color: var(--ui-fg);
+}
+
+.setup-palette.on > span,
+.setup-bg.on > span {
+  box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-fg);
+}
+
+.setup-bgs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.setup-default {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.setup-big {
+  height: 38px;
+  padding: 0 18px;
+  font-size: var(--fs-14);
+}
+
+.setup-keys {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.setup-key {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 14px;
+  font-size: var(--fs-13);
+  color: var(--ui-fg-muted);
+}
+
+.setup-key + .setup-key {
+  border-top: 1px solid var(--hairline);
+}
+
+.setup-key kbd {
+  flex: none;
+  min-width: 64px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--ui-fg);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+
+.setup-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 16px 24px;
+  border-top: 1px solid var(--hairline);
+}
+
+.setup-spacer {
+  flex: 1;
+}
+
+.setup-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.setup-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hairline-strong);
+  transition: width var(--dur-slow) var(--spring-snap), background-color var(--dur-fast) var(--ease-out);
+}
+
+.setup-dots span.done {
+  background: color-mix(in srgb, var(--ui-fg) 40%, transparent);
+}
+
+.setup-dots span.on {
+  width: 18px;
+  background: var(--ui-fg);
+}
+
+.setup-next {
+  min-width: 112px;
+}
+
+.presence .setup-card {
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--panel-enter);
+}
+
+@starting-style {
+  .presence .setup-card {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+.presence[data-state='closed'] .setup-card {
+  opacity: 0;
+  transform: scale(0.985);
+  transition: opacity var(--panel-exit), transform var(--panel-exit);
+}
+
+/* ---- Tour: step count beside the progress bar ---------------------------- */
+
+.guide-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.guide-count {
+  font-size: var(--fs-11);
+  color: var(--ui-fg-faint);
+}
+
+.guide-card {
+  animation: guide-card-in var(--dur-slow) var(--spring-snap) both;
+}
+
+@keyframes guide-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+.guide-spotlight {
+  transition: left var(--dur-slow) var(--spring-snap), top var(--dur-slow) var(--spring-snap), width var(--dur-slow) var(--spring-snap), height var(--dur-slow) var(--spring-snap);
+}
+
+/* ---- Focus pill (top bar) -------------------------------------------------- */
+
+.focus-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.focus-top.on {
+  color: var(--ui-fg);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-fg) 10%, transparent);
+}
+
+.focus-top.locked {
+  background: color-mix(in srgb, var(--ui-warning) 22%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-stage,
+  .guide-card {
+    animation: none;
+  }
+}

@@ -1,0 +1,438 @@
+// Pointer-driven drag and drop for the sidebar (R17).
+//
+// Pointer events (not HTML5 drag and drop) keep the drag alive while the
+// optimistic preview re-parents the dragged row between sections, and let
+// Escape cancel the drag. While dragging, the sidebar renders
+// `move(snapshot, op)` (an optimistic layout); the drop sends one `moveTab`
+// and keeps that layout until the next `state-update`. Escape, a release
+// outside any target, or a failed `moveTab` restore the original layout.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type React from 'react';
+import type { ProfilesFile } from '../shared/profileTypes';
+import {
+  cancelDragSession,
+  insertionIndex,
+  isFailedMoveResult,
+  passedThreshold,
+  retargetDragSession,
+  startDragSession,
+  withLayout,
+  type DragSession,
+  type DropTarget,
+  type Rect,
+} from '../utils/sidebarDrag';
+import { toProfilesFile, type SidebarItemKind, type SidebarItemRef, type SidebarSource } from '../utils/sidebarModel';
+import type { MoveOp, TabState } from '../types';
+import { acquireViewportOverlay } from './useViewportOverlay';
+import { setSplitDropHint, type SplitDropHint } from './splitDrop';
+
+/** A page that can sit in a split pane (not one of Serica's own pages). */
+function isWebTab(t: TabState | undefined): boolean {
+  return !!t && !!t.url && t.url !== 'about:blank' && !t.url.startsWith('serica://') && !t.url.startsWith('neutrino://');
+}
+
+/**
+ * Over the page area with a tab: the half it would land in, to show it
+ * beside the page's tab (split view). Null elsewhere, or when there is
+ * nothing to split with (the dragged tab is the one on screen, or the page
+ * is one of Serica's own).
+ */
+function pageDropAt(x: number, y: number, item: SidebarItemRef, root: HTMLElement | null, src: SidebarSource): SplitDropHint | null {
+  const area = document.querySelector<HTMLElement>('.native-page-area')?.getBoundingClientRect();
+  if (!area || x < area.left || x > area.right || y < area.top || y > area.bottom) return null;
+  const side = root?.getBoundingClientRect();
+  if (side && x <= side.right) return null;
+  const active = src.tabs.find((t) => t.id === src.activeTabId);
+  const dragged = item.tab ?? src.tabs.find((t) => t.id === item.id);
+  if (!active || !isWebTab(active) || !dragged || dragged.id === active.id || !(isWebTab(dragged) || dragged.unloaded)) return null;
+  return { left: x < area.left + area.width / 2, title: dragged.title || dragged.url, favicon: dragged.favicon };
+}
+
+/**
+ * Out past the edge of Serica's window with a tab: the tab that would move
+ * into a window of its own. Null inside the window, or for an item with no
+ * web page (a favorite that is not open, a new tab page).
+ */
+function outsideDrop(e: PointerEvent, item: SidebarItemRef, src: SidebarSource): string | null {
+  const m = 6;
+  const out = e.clientX < -m || e.clientY < -m || e.clientX > window.innerWidth + m || e.clientY > window.innerHeight + m;
+  if (!out) return null;
+  const id = item.tab?.id ?? (item.kind === 'favorite' ? undefined : item.id);
+  const tab = id ? src.tabs.find((t) => t.id === id) : undefined;
+  return tab && isWebTab(tab) ? tab.id : null;
+}
+
+/** How long an optimistic layout waits for a `state-update` after a successful commit. */
+const COMMIT_SETTLE_MS = 2000;
+
+/** Same shape as Sidebar's `ExtraProps`. */
+type DragItemProps = Omit<React.HTMLAttributes<HTMLElement>, 'draggable'> & {
+  draggable?: boolean;
+  [data: `data-${string}`]: unknown;
+};
+
+interface Press {
+  item: SidebarItemRef;
+  x: number;
+  y: number;
+  root: HTMLElement | null;
+  /** The pressed row: it captures the pointer once the drag starts, so the
+   *  drag goes on over the page (a separate native window). */
+  el: HTMLElement;
+  pointerId: number;
+}
+
+interface Committed {
+  file: ProfilesFile;
+  /** `state` when the drop happened; a different `state` means main has answered. */
+  base: SidebarSource;
+  settled: boolean;
+  gen: number;
+}
+
+export interface SidebarDragGhost {
+  item: SidebarItemRef;
+  x: number;
+  y: number;
+}
+
+export interface SidebarDrag {
+  /** State to render: the optimistic layout while dragging or committing, else `state`. */
+  displayState: SidebarSource;
+  dragging: boolean;
+  draggedId: string | null;
+  target: DropTarget | null;
+  /** Initial ghost position; later moves update `ghostRef` directly. */
+  ghost: SidebarDragGhost | null;
+  ghostRef: React.RefObject<HTMLDivElement>;
+  itemProps: (item: SidebarItemRef) => DragItemProps;
+  spaceProps: (spaceId: string) => DragItemProps;
+  /** The pinned folder the dragged item would land in (highlighted while dragging). */
+  dropFolderId: string | null;
+}
+
+/** Drop target under the pointer; `undefined` keeps the previous target (pointer between targets). */
+function targetAt(x: number, y: number, draggedId: string, root: HTMLElement | null): DropTarget | null | undefined {
+  const el = document.elementFromPoint(x, y);
+  if (!el || !root || !root.contains(el)) return null;
+  const spaceEl = el.closest<HTMLElement>('[data-space-id]');
+  if (spaceEl && root.contains(spaceEl)) {
+    const spaceId = spaceEl.getAttribute('data-space-id');
+    return spaceId ? { type: 'space', spaceId } : undefined;
+  }
+  const sectionEl = el.closest<HTMLElement>('[data-sidebar-section]');
+  if (!sectionEl) return undefined;
+  const section = sectionEl.getAttribute('data-sidebar-section') as SidebarItemKind | null;
+  if (section !== 'favorite' && section !== 'pinned' && section !== 'today') return undefined;
+  const rows = Array.from(sectionEl.querySelectorAll<HTMLElement>('[data-sidebar-item]')).filter(
+    (n) => n.getAttribute('data-sidebar-id') !== draggedId,
+  );
+  if (section !== 'pinned') {
+    const rects: Rect[] = rows.map((n) => n.getBoundingClientRect());
+    return { type: 'section', section, index: insertionIndex(rects, x, y, section === 'favorite' ? 'grid' : 'list') };
+  }
+  return pinnedTarget(el, rows, x, y);
+}
+
+/**
+ * Pinned tabs show in folders first, then at the root, so screen order is not
+ * section order. The drop goes into the group under the pointer (a folder, its
+ * header included, or the root), at the pointer's place among that group's
+ * rows; the result is mapped back to an index in section order.
+ */
+function pinnedTarget(el: Element, rows: HTMLElement[], x: number, y: number): DropTarget {
+  const folderEl = el.closest<HTMLElement>('[data-folder-id]');
+  const folderId = folderEl?.getAttribute('data-folder-id') ?? null;
+  const inGroup = (n: HTMLElement) =>
+    folderEl ? folderEl.contains(n) : n.closest('[data-folder-id]') === null;
+  const group = rows.filter(inGroup);
+  // The other pinned rows in section order (the preview keeps their relative order).
+  const order = [...rows]
+    .sort((a, b) => Number(a.getAttribute('data-sidebar-index')) - Number(b.getAttribute('data-sidebar-index')))
+    .map((n) => n.getAttribute('data-sidebar-id'));
+  const k = insertionIndex(group.map((n) => n.getBoundingClientRect()), x, y, 'list');
+  let index = order.length;
+  if (k < group.length) index = order.indexOf(group[k].getAttribute('data-sidebar-id'));
+  else if (group.length > 0) index = order.indexOf(group[group.length - 1].getAttribute('data-sidebar-id')) + 1;
+  return { type: 'section', section: 'pinned', index: Math.max(0, index), folderId };
+}
+
+export function useSidebarDrag(state: SidebarSource, moveTab: (op: MoveOp) => unknown): SidebarDrag {
+  const [session, setSession] = useState<DragSession | null>(null);
+  const [committed, setCommitted] = useState<Committed | null>(null);
+  const [ghost, setGhost] = useState<SidebarDragGhost | null>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const committedRef = useRef(committed);
+  committedRef.current = committed;
+  const sessionRef = useRef<DragSession | null>(null);
+  const pressRef = useRef<Press | null>(null);
+  const suppressClickRef = useRef(false);
+  const genRef = useRef(0);
+  const detachRef = useRef<(() => void) | null>(null);
+  const moveTabRef = useRef(moveTab);
+  moveTabRef.current = moveTab;
+  // Over the page: the split view drop, and the freeze that lets the UI see
+  // the pointer and draw the drop zones there.
+  const pageHintRef = useRef<SplitDropHint | null>(null);
+  // Out past the window's edge: the tab that would get a window of its own,
+  // and where (screen, physical px).
+  const outsideRef = useRef<{ tabId: string; x: number; y: number } | null>(null);
+  const pageCoverRef = useRef<(() => void) | null>(null);
+  const setPageHint = (h: SplitDropHint | null) => {
+    pageHintRef.current = h;
+    setSplitDropHint(h);
+    if (h && !pageCoverRef.current) pageCoverRef.current = acquireViewportOverlay();
+    if (!h && pageCoverRef.current) {
+      pageCoverRef.current();
+      pageCoverRef.current = null;
+    }
+  };
+
+  const setSessionBoth = (s: DragSession | null) => {
+    sessionRef.current = s;
+    setSession(s);
+  };
+
+  const finish = useCallback(() => {
+    detachRef.current?.();
+    detachRef.current = null;
+    const press = pressRef.current;
+    if (press?.el.hasPointerCapture?.(press.pointerId)) press.el.releasePointerCapture(press.pointerId);
+    setPageHint(null);
+    outsideRef.current = null;
+    document.body.classList.remove('tab-drag-outside');
+    pressRef.current = null;
+    setSessionBoth(null);
+    setGhost(null);
+  }, []);
+
+  /** Escape, blur or release outside a target: nothing moves (R17.7). */
+  const cancel = useCallback(() => {
+    const s = sessionRef.current;
+    if (s) cancelDragSession(s); // the snapshot layout is what `state` already shows
+    finish();
+  }, [finish]);
+
+  const commit = useCallback(() => {
+    const s = sessionRef.current;
+    finish();
+    if (!s || !s.op) return;
+    const gen = ++genRef.current;
+    setCommitted({ file: s.preview, base: stateRef.current, settled: false, gen });
+    const revert = () => setCommitted((c) => (c && c.gen === gen ? null : c));
+    let result: unknown;
+    try {
+      result = moveTabRef.current(s.op);
+    } catch {
+      revert();
+      return;
+    }
+    Promise.resolve(result).then(
+      (res) => {
+        if (isFailedMoveResult(res)) {
+          revert();
+          return;
+        }
+        setCommitted((c) => {
+          if (!c || c.gen !== gen) return c;
+          return stateRef.current !== c.base ? null : { ...c, settled: true };
+        });
+        window.setTimeout(revert, COMMIT_SETTLE_MS);
+      },
+      revert,
+    );
+  }, [finish]);
+
+  // A settled commit gives way to the next state-update from main.
+  useEffect(() => {
+    if (committed?.settled && state !== committed.base) setCommitted(null);
+  }, [state, committed]);
+
+  useEffect(() => () => detachRef.current?.(), []);
+
+  const onPointerMove = useCallback(
+    (e: PointerEvent) => {
+      const press = pressRef.current;
+      if (!press) return;
+      if (e.buttons === 0) {
+        // The release happened somewhere we did not see (for example over the page).
+        cancel();
+        return;
+      }
+      let s = sessionRef.current;
+      if (!s) {
+        if (!passedThreshold(e.clientX - press.x, e.clientY - press.y)) return;
+        const shown = committedRef.current ? withLayout(stateRef.current, committedRef.current.file) : stateRef.current;
+        s = startDragSession(
+          toProfilesFile(shown),
+          {
+            kind: press.item.kind,
+            id: press.item.id,
+            index: press.item.index,
+            ...(press.item.folderId ? { folderId: press.item.folderId } : {}),
+          },
+          stateRef.current.activeSpaceId,
+        );
+        setGhost({ item: press.item, x: e.clientX, y: e.clientY });
+        try {
+          press.el.setPointerCapture(press.pointerId);
+        } catch {}
+      }
+      // The focus hand-over above can drop the pointer capture; without it
+      // the drag stops being seen once the pointer leaves the window.
+      if (!press.el.hasPointerCapture?.(press.pointerId)) {
+        try {
+          press.el.setPointerCapture(press.pointerId);
+        } catch {}
+      }
+      const outside = outsideDrop(e, press.item, stateRef.current);
+      const dpr = window.devicePixelRatio || 1;
+      outsideRef.current = outside ? { tabId: outside, x: e.screenX * dpr, y: e.screenY * dpr } : null;
+      document.body.classList.toggle('tab-drag-outside', !!outside);
+      const zone = outside ? null : pageDropAt(e.clientX, e.clientY, press.item, press.root, stateRef.current);
+      if (zone?.left !== pageHintRef.current?.left || !zone !== !pageHintRef.current) setPageHint(zone);
+      const t = zone || outside ? null : targetAt(e.clientX, e.clientY, press.item.id, press.root);
+      const next = t === undefined ? s : retargetDragSession(s, t);
+      if (next !== sessionRef.current) setSessionBoth(next);
+      if (ghostRef.current) {
+        ghostRef.current.style.transform = `translate3d(${e.clientX + 12}px, ${e.clientY + 8}px, 0)`;
+      }
+    },
+    [cancel],
+  );
+
+  const onPointerUp = useCallback(() => {
+    if (!sessionRef.current) {
+      finish();
+      return;
+    }
+    // The click that follows this pointerup must not activate the item.
+    suppressClickRef.current = true;
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+    // Dropped outside the window: the tab moves into a window of its own.
+    const outside = outsideRef.current;
+    if (outside) {
+      cancel();
+      void window.serica?.detachTab?.(outside.tabId, outside.x, outside.y);
+      return;
+    }
+    // Dropped on the page: show the tab beside the page's tab (split view).
+    const zone = pageHintRef.current;
+    const press = pressRef.current;
+    if (zone && press) {
+      const src = stateRef.current;
+      const dragged = press.item.tab?.id ?? press.item.id;
+      const target = src.activeTabId;
+      cancel();
+      if (target) void window.serica?.splitTabs?.(dragged, target, zone.left);
+      return;
+    }
+    commit();
+  }, [cancel, commit, finish]);
+
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !sessionRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      cancel();
+    },
+    [cancel],
+  );
+
+  const attach = useCallback(() => {
+    detachRef.current?.();
+    const lost = () => cancel();
+    // Over the page the native page is swapped for a picture of it, and
+    // keyboard focus is handed back to the UI: the UI blurs for a moment and
+    // gets focus back. Only a blur that lasts (switching to another app)
+    // ends the drag; ending it at once dropped tabs dragged onto the page.
+    let blurTimer = 0;
+    const blur = () => {
+      window.clearTimeout(blurTimer);
+      blurTimer = window.setTimeout(() => {
+        if (!document.hasFocus()) cancel();
+      }, 250);
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', lost);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('blur', blur);
+    detachRef.current = () => {
+      window.clearTimeout(blurTimer);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', lost);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('blur', blur);
+    };
+  }, [cancel, onKeyDown, onPointerMove, onPointerUp]);
+
+  const draggedId = session?.source.id ?? null;
+  const target = session?.target ?? null;
+
+  const itemProps = useCallback(
+    (item: SidebarItemRef): DragItemProps => {
+      const isDragged = draggedId === item.id;
+      const indicator = isDragged && target?.type === 'section';
+      return {
+        onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+          if (e.button !== 0 || e.pointerType === 'touch') return;
+          const fromControl = (e.target as HTMLElement).closest('button, input, a');
+          if (fromControl && e.currentTarget.contains(fromControl)) return;
+          pressRef.current = {
+            item,
+            x: e.clientX,
+            y: e.clientY,
+            root: e.currentTarget.closest<HTMLElement>('aside') ?? e.currentTarget.parentElement,
+            el: e.currentTarget,
+            pointerId: e.pointerId,
+          };
+          attach();
+        },
+        onClick: (e: React.MouseEvent) => {
+          if (suppressClickRef.current) e.preventDefault();
+        },
+        // Native image/link drags would steal the pointer stream.
+        onDragStart: (e: React.DragEvent) => e.preventDefault(),
+        draggable: false,
+        className: [isDragged ? 'nsb-dragging-item' : '', indicator ? 'nsb-drop-indicator' : '']
+          .filter(Boolean)
+          .join(' ') || undefined,
+        ...(indicator ? { 'data-drop-indicator': 'true' } : {}),
+      };
+    },
+    [attach, draggedId, target],
+  );
+
+  const spaceProps = useCallback(
+    (spaceId: string): DragItemProps => {
+      const over = target?.type === 'space' && target.spaceId === spaceId;
+      return over ? { className: 'nsb-drop-space', 'data-drop-target': 'true' } : {};
+    },
+    [target],
+  );
+
+  const preview = session ? session.preview : committed?.file ?? null;
+  const displayState = useMemo(() => (preview ? withLayout(state, preview) : state), [state, preview]);
+
+  return {
+    displayState,
+    dragging: session !== null,
+    draggedId,
+    dropFolderId:
+      session && target?.type === 'section' && target.section === 'pinned' ? (target.folderId ?? null) : null,
+    target,
+    ghost,
+    ghostRef,
+    itemProps,
+    spaceProps,
+  };
+}

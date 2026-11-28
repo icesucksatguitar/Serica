@@ -1,0 +1,48 @@
+/* ==========================================================================
+   Serica for macOS: the window's native chrome. Loads last.
+
+   - The traffic lights (close, minimize, full screen) sit at the top left,
+     in the top bar's row. The bar's left controls start clear of them:
+     App.tsx sets --traffic-lights-inset from where macOS draws the buttons
+     (none in full screen, where they live in the menu bar).
+   - The Windows minimize / maximize / close buttons are not drawn.
+   ========================================================================== */
+
+.floating-top-chrome-capsule .macos-window-controls-cluster {
+  margin-left: var(--traffic-lights-inset, 0px);
+}
+
+.wctl,
+.window-controls-divider {
+  display: none !important;
+}
+
+/* ---- Extensions: how WebKit runs each one ------------------------------ */
+
+.extension-runtime {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.extension-runtime.webkit {
+  color: var(--success, #3fb950);
+}
+
+.extension-runtime.unsupported {
+  color: var(--warning, #d29922);
+}
+
+/* ---- Save / update password prompt --------------------------------------
+   Serica asks itself (WebKit has no password manager): the card sits at the
+   top right of the page, which is cut away under it. Fixed, so its box is
+   measured against the window. */
+
+.password-prompt {
+  position: fixed;
+  top: calc(var(--app-content-top, 35px) + 10px);
+}

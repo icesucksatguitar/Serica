@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Serica",
+  "version": "0.5.3",
+  "identifier": "com.serica.browser",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Serica",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "visible": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 19.5 },
+        "transparent": false,
+        "shadow": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#141416"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "publisher": "Serica",
+    "category": "Productivity",
+    "copyright": "Copyright © 2026 Serica contributors. MIT License.",
+    "shortDescription": "Serica, an open-source Arc-style browser for the Mac",
+    "longDescription": "Spaces, a vertical sidebar with pinned and Today tabs, a command palette, Focus Mode, built-in ad and tracker blocking and a local MCP endpoint, on Apple's WebKit.",
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "dmg": {
+        "windowSize": { "width": 640, "height": 400 },
+        "appPosition": { "x": 180, "y": 190 },
+        "applicationFolderPosition": { "x": 460, "y": 190 }
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJFRDEzOTIzNjAxNjQ1RDkKUldUWlJSWmdJem5STGpvemdtU0U3eURYSStMMnVtTzA4UFBmWk1LWXNHNXV4dm1Zam1xLzg4VUkK",
+      "endpoints": [
+        "https://github.com/icesucksatguitar/Serica/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}
