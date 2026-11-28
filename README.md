@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
-<img src="docs/screenshots/new-tab.jpg" alt="Serica's new tab: glass widgets and the clock over a Serica Special oil-pastel painting" width="900">
+<img src="docs/screenshots/new-tab-dark.png" alt="Serica's new tab on a black background: a contribution graph, Claude and Notion widgets, the clock and the website dock" width="900">
 
 ### [⬇ Download Serica for Windows (.msi)](https://github.com/icesucksatguitar/Serica/releases/latest/download/Serica-Setup-x64.msi)
 
@@ -46,8 +46,6 @@ You can bring things over again at any time from Settings → General, into the 
 - Prefer a classic layout? Switch to **top tabs** in Settings → Appearance.
 
 ### The new tab
-<img src="docs/screenshots/new-tab-dark.png" alt="New tab on a black background with a contribution graph, Claude and Notion widgets, and the website dock" width="820">
-
 Only your widgets and the clock (with an optional greeting in **Customize**): press and hold a widget to move it anywhere on the grid (the others make room), resize it, or set it up; widgets are liquid glass that takes on the colours behind it. The background can be your space's colours, a solid colour, a gradient, your own picture, or **Serica Special**: three oil-pastel paintings after French Revolution-era art, crossfading slowly.
 
 ### Focus Mode
